@@ -1,0 +1,24 @@
+{
+  "name": "@private/p2pgate",
+  "version": "1.4.0",
+  "private": true,
+  "description": "Minimal Zero-Trust P2P Gateway for Termux",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "bin": {
+    "p2pgate": "./src/cli.js"
+  },
+  "scripts": {
+    "setup": "node src/cli.js setup",
+    "keygen": "node src/cli.js keygen",
+    "server": "node src/cli.js server",
+    "client": "node src/cli.js client",
+    "test": "npm run check && npm run self-test",
+    "self-test": "node src/self-test.js",
+    "check": "node --check src/cli.js && node --check src/config-loader.js && node --check src/crypto-utils.js && node --check src/auth.js && node --check src/auth-guard.js && node --check src/device-registry.js && node --check src/control.js && node --check src/doctor.js && node --check src/keygen.js && node --check src/setup-wizard.js && node --check src/server.js && node --check src/client.js && node --check src/self-test.js"
+  },
+  "dependencies": {
+    "hyperdht": "6.36.0"
+  }
+}

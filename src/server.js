@@ -1,0 +1,1128 @@
+'use strict'
+
+const net = require('node:net')
+const crypto = require('node:crypto')
+const HyperDHT = require('hyperdht')
+const {
+  getSlot,
+  deriveSlotKeyPair,
+  deriveServerPublicKeyHex,
+  publicKeyToHex,
+  normalizeClientPublicKeyHex,
+  generateSessionPin,
+  formatSessionPin,
+  deriveScramVerifier,
+  parseScramVerifier,
+  buildAuthMessage,
+  verifyScramProof,
+  computeServerSignature,
+  isHex64
+} = require('./crypto-utils')
+const {
+  AUTH_VERSION,
+  AUTH_TIMEOUT_MS,
+  MAX_CONTROL_BYTES,
+  AUTH_STATUS,
+  encodeControl,
+  decodeControl,
+  readControlLine
+} = require('./auth')
+const { AuthGuard } = require('./auth-guard')
+const {
+  DeviceRegistry,
+  evaluateDevicePolicy,
+  normalizeVerificationMode
+} = require('./device-registry')
+const {
+  defaultControlSocketPath,
+  startControlServer
+} = require('./control')
+
+const ROTATION_CHECK_MS = 60_000
+const ALERT_MIN_INTERVAL_MS = 60_000
+const LOCAL_CONNECT_TIMEOUT_MS = 10_000
+const TELEGRAM_TIMEOUT_MS = 5_000
+const MAX_ALERT_TRACKED_KEYS = 1000
+const PRE_AUTH_TIMEOUT_MS = 120_000
+
+function noop() {}
+
+function nowIso() {
+  return new Date().toISOString()
+}
+
+class AlertRateLimiter {
+  constructor(windowMs = ALERT_MIN_INTERVAL_MS, maxEntries = MAX_ALERT_TRACKED_KEYS) {
+    this.windowMs = windowMs
+    this.maxEntries = maxEntries
+    this.lastSent = new Map()
+  }
+
+  shouldSend(key) {
+    const now = Date.now()
+    const previous = this.lastSent.get(key)
+
+    if (previous !== undefined && now - previous < this.windowMs) {
+      return false
+    }
+
+    this.lastSent.set(key, now)
+    this._prune(now)
+    return true
+  }
+
+  _prune(now) {
+    if (this.lastSent.size <= this.maxEntries) return
+
+    for (const [key, timestamp] of this.lastSent) {
+      if (now - timestamp > this.windowMs * 5) this.lastSent.delete(key)
+    }
+
+    if (this.lastSent.size <= this.maxEntries) return
+
+    const target = Math.floor(this.maxEntries / 2)
+    for (const key of this.lastSent.keys()) {
+      if (this.lastSent.size <= target) break
+      this.lastSent.delete(key)
+    }
+  }
+}
+
+function validateTelegramConfig(value) {
+  if (!value || value.enabled !== true) return null
+
+  const botToken = String(value.botToken || '').trim()
+  const chatId = String(value.chatId || '').trim()
+
+  if (!botToken || !chatId) {
+    const err = new Error('telegramAlert.enabled requires botToken and chatId')
+    err.code = 'CONFIG_INVALID'
+    throw err
+  }
+
+  return { botToken, chatId }
+}
+
+async function sendTelegramMessage(telegram, text) {
+  if (!telegram) return false
+
+  const url = `https://api.telegram.org/bot${telegram.botToken}/sendMessage`
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: telegram.chatId,
+        text,
+        disable_web_page_preview: true
+      }),
+      signal: AbortSignal.timeout(TELEGRAM_TIMEOUT_MS)
+    })
+
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
+function normalizeAllowedKeys(value) {
+  if (!Array.isArray(value)) {
+    const err = new Error('allowedClientKeys must be an array of 64-character hex public keys')
+    err.code = 'CONFIG_INVALID'
+    throw err
+  }
+
+  const set = new Set()
+
+  for (let i = 0; i < value.length; i++) {
+    try {
+      set.add(normalizeClientPublicKeyHex(value[i]))
+    } catch (err) {
+      const wrapped = new Error(`allowedClientKeys[${i}] is invalid: ${err.message}`)
+      wrapped.code = 'CONFIG_INVALID'
+      throw wrapped
+    }
+  }
+
+  return set
+}
+
+function validateTargetPort(value) {
+  if (!Number.isInteger(value) || value < 1 || value > 65535) {
+    const err = new Error('targetPort must be an integer between 1 and 65535')
+    err.code = 'CONFIG_INVALID'
+    throw err
+  }
+  return value
+}
+
+function writeAuthMessage(stream, message) {
+  try {
+    stream.write(encodeControl(message))
+    return true
+  } catch {
+    return false
+  }
+}
+
+function endAuthStream(stream, graceMs = 3000) {
+  try {
+    stream.end()
+  } catch {
+    // Ignore.
+  }
+
+  const timer = setTimeout(() => {
+    if (!stream.destroyed) stream.destroy()
+  }, graceMs)
+
+  if (typeof timer.unref === 'function') timer.unref()
+}
+
+/**
+ * Starts the hardened P2P gateway server.
+ */
+async function startServer(config, options = {}) {
+  if (!config || typeof config !== 'object') {
+    throw new Error('server configuration is required')
+  }
+
+  if (typeof config.masterSecret !== 'string') {
+    const err = new Error('masterSecret is required')
+    err.code = 'MASTER_SECRET_INVALID'
+    throw err
+  }
+
+  const allowedSet = normalizeAllowedKeys(config.allowedClientKeys)
+  const verificationMode = normalizeVerificationMode(config.verificationMode)
+  const sessionAuthEnabled = verificationMode !== 'key-only'
+
+  const targetHost = config.targetHost === undefined ? '127.0.0.1' : String(config.targetHost)
+  if (targetHost !== '127.0.0.1') {
+    const err = new Error('targetHost must be 127.0.0.1')
+    err.code = 'CONFIG_INVALID'
+    throw err
+  }
+
+  const targetPort = validateTargetPort(config.targetPort === undefined ? 8022 : config.targetPort)
+  const telegram = validateTelegramConfig(config.telegramAlert)
+
+  if (config.authPin && config.authPin.unattendedPasswordHash !== undefined) {
+    const err = new Error(
+      'v1.1 authPin format detected; run p2pgate setup to migrate the credential'
+    )
+    err.code = 'AUTH_CONFIG_UPGRADE_REQUIRED'
+    throw err
+  }
+
+  const authPin = config.authPin || { enabled: true, unattended: null }
+  const unattendedVerifier = authPin.unattended
+    ? parseScramVerifier(authPin.unattended)
+    : null
+  const hasFallback = unattendedVerifier !== null
+  const interactive = options.interactive !== undefined
+    ? options.interactive === true
+    : Boolean(process.stdout.isTTY)
+
+  const authTimeoutMs = Number.isInteger(options.authTimeoutMs)
+    ? options.authTimeoutMs
+    : AUTH_TIMEOUT_MS
+  const preAuthTimeoutMs = Number.isInteger(options.preAuthTimeoutMs)
+    ? options.preAuthTimeoutMs
+    : PRE_AUTH_TIMEOUT_MS
+
+  const startedAt = Date.now()
+  const log = typeof options.log === 'function'
+    ? options.log
+    : (line) => console.log(line)
+
+  const rotationCheckMs = Number.isInteger(options.rotationCheckMs)
+    ? options.rotationCheckMs
+    : ROTATION_CHECK_MS
+  const localConnectTimeoutMs = Number.isInteger(options.localConnectTimeoutMs)
+    ? options.localConnectTimeoutMs
+    : LOCAL_CONNECT_TIMEOUT_MS
+  const nowMs = typeof options.now === 'function' ? options.now : Date.now
+
+  const dhtOptions = {}
+  if (Array.isArray(config.customBootstrap) && config.customBootstrap.length > 0) {
+    dhtOptions.bootstrap = [...config.customBootstrap]
+  }
+  if (options.dhtOptions && typeof options.dhtOptions === 'object') {
+    Object.assign(dhtOptions, options.dhtOptions)
+  }
+
+  function writeLog(message) {
+    log(`[${nowIso()}] ${message}`)
+  }
+
+  const authGuard = new AuthGuard({
+    statePath: options.lockoutStatePath,
+    now: options.lockoutNow,
+    failDelayMs: options.failDelayMs,
+    maxConcurrent: options.authMaxConcurrent,
+    log: writeLog
+  })
+  await authGuard.init()
+
+  const registry = new DeviceRegistry({
+    configKeys: [...allowedSet],
+    filePath: config.trustedDevicesFile,
+    verificationMode,
+    now: typeof options.registryNow === 'function' ? options.registryNow : Date.now,
+    log: writeLog,
+    posixCheck: options.posixCheck
+  })
+  await registry.init()
+
+  if (registry.isEmpty()) {
+    const err = new Error(
+      'No client devices are registered in allowedClientKeys or trusted_devices'
+    )
+    err.code = 'ALLOWED_KEYS_EMPTY'
+    throw err
+  }
+
+  let activePin = null
+
+  function displaySessionPin(generation, reason) {
+    if (!activePin || options.showSessionPin === false) return
+
+    if (!process.stdout.isTTY) {
+      writeLog(
+        `SESSION PIN generation=${generation} is available only on an interactive terminal; use an unattended password for headless access`
+      )
+      return
+    }
+
+    const formatted = formatSessionPin(activePin.pin)
+    const width = 36
+    const content = `  SESSION PIN: ${formatted}`
+    const top = `+${'-'.repeat(width)}+`
+    const middle = `|${content.padEnd(width)}|`
+    const bottom = `+${'-'.repeat(width)}+`
+
+    process.stdout.write(`\n${top}\n${middle}\n${bottom}\n`)
+    if (reason === 'startup') {
+      process.stdout.write('PIN นี้ใช้สำหรับการเชื่อมต่อรอบนี้ และเก็บไว้ในหน่วยความจำเท่านั้น\n')
+    } else {
+      process.stdout.write(`Session PIN ถูกเปลี่ยนใหม่ (รอบที่ ${generation})\n`)
+    }
+    process.stdout.write('ห้ามแชร์ PIN นี้ ระบบจะไม่เขียน PIN ลง config หรือ log\n\n')
+  }
+
+  async function createSessionPin(generation, reason) {
+    const pin = generateSessionPin()
+    const salt = crypto.randomBytes(16)
+    const verifier = await deriveScramVerifier(pin, salt)
+
+    activePin = {
+      pin,
+      generation,
+      saltHex: verifier.saltHex,
+      storedKey: verifier.storedKey,
+      serverKey: verifier.serverKey
+    }
+
+    displaySessionPin(generation, reason)
+    return activePin
+  }
+
+  async function refreshSessionPin(reason, expectedGeneration) {
+    try {
+      const result = await authGuard.refreshPin(async (generation) => {
+        await createSessionPin(generation, reason)
+      }, expectedGeneration)
+
+      if (!result.refreshed) {
+        writeLog(`PIN refresh skipped (already refreshed at generation ${result.generation})`)
+      }
+
+      return result.refreshed
+    } catch (err) {
+      writeLog(`failed to refresh session PIN: ${err.message}`)
+      return false
+    }
+  }
+
+  if (sessionAuthEnabled) {
+    await createSessionPin(0, 'startup')
+  }
+
+  const dht = new HyperDHT(dhtOptions)
+  dht.on('error', (err) => {
+    writeLog(`DHT error: ${err.message}`)
+  })
+
+  const listeners = new Map()
+  const activeConnections = new Set()
+  const alertLimiter = new AlertRateLimiter()
+
+  let currentSlot = getSlot(nowMs())
+  let blockedCount = 0
+  let closed = false
+  let rotationTimer = null
+  let control = null
+
+  function sendIntrusionAlert(remotePublicKeyHex) {
+    if (!telegram) return
+    if (!alertLimiter.shouldSend(remotePublicKeyHex)) return
+
+    const text = [
+      '⛔ p2pgate: พบการพยายามเชื่อมต่อที่ไม่ได้รับอนุญาต',
+      `เวลา: ${nowIso()}`,
+      `คีย์ไคลเอนต์: ${remotePublicKeyHex}`,
+      'ระบบได้ตัดการเชื่อมต่อก่อนเปิดพอร์ตภายในแล้ว'
+    ].join('\n')
+
+    sendTelegramMessage(telegram, text).catch(noop)
+  }
+
+  function notifyAuthGuardEvent(remoteHex, failure) {
+    if (!telegram || !failure || !failure.notification) return
+
+    let status
+    if (failure.notification === 'permanent') {
+      status = 'ระงับถาวรจนกว่าจะปลดล็อกด้วย p2pgate unlock'
+    } else {
+      status = `ระงับชั่วคราว ${failure.notification}`
+    }
+
+    const text = [
+      '🚫 p2pgate: พบการยืนยันตัวตนล้มเหลวหลายครั้ง',
+      `คีย์ไคลเอนต์: ${remoteHex}`,
+      `จำนวนครั้งใน 24 ชั่วโมง: ${failure.failures}`,
+      `สถานะ: ${status}`,
+      failure.refreshPin ? 'Session PIN ถูกเปลี่ยนใหม่แล้ว (ดูบนหน้าจอ Server)' : null,
+      `เวลา: ${nowIso()}`
+    ].filter(Boolean).join('\n')
+
+    sendTelegramMessage(telegram, text).catch(noop)
+  }
+
+  function firewall(remotePublicKey) {
+    try {
+      publicKeyToHex(remotePublicKey)
+      // Registry/policy decisions happen after transport so the server can
+      // return an explicit STATUS_DECLINED frame instead of a silent drop.
+      return false
+    } catch {
+      blockedCount++
+      writeLog('BLOCKED connection with malformed remote public key')
+      return true
+    }
+  }
+
+  function sendDeclined(stream, reason, extra = {}) {
+    const response = {
+      v: AUTH_VERSION,
+      status: AUTH_STATUS.DECLINED,
+      reason
+    }
+
+    if (extra.retryAfterMs !== undefined && extra.retryAfterMs !== null) {
+      response.retryAfterMs = extra.retryAfterMs
+    }
+    if (extra.permanent === true) response.permanent = true
+
+    writeAuthMessage(stream, response)
+    endAuthStream(stream, 150)
+    return { ok: false }
+  }
+
+  async function decideDevice(remoteHex) {
+    const device = await registry.evaluate(remoteHex)
+
+    try {
+      await authGuard.refreshStateIfChanged()
+    } catch (err) {
+      writeLog(`failed to refresh lockout state: ${err.message}`)
+    }
+
+    if (authGuard.isSuspended(remoteHex)) {
+      const status = authGuard.getStatus(remoteHex)
+      return {
+        action: 'decline',
+        reason: 'locked',
+        retryAfterMs: status.remainingMs,
+        permanent: status.permanent
+      }
+    }
+
+    return evaluateDevicePolicy(device, {
+      verificationMode,
+      interactive,
+      hasFallback
+    })
+  }
+
+  function handleIncomingStream(stream, slot) {
+    let remoteHex = 'unknown'
+    try {
+      remoteHex = publicKeyToHex(stream.remotePublicKey)
+    } catch {
+      // The firewall already validated the handshake.
+    }
+
+    // Safety net: a stream error must never become an unhandled 'error' event,
+    // especially while auth is in progress and no pipe is attached.
+    stream.on('error', noop)
+
+    const entry = { stream, socket: null, remoteKey: remoteHex }
+    activeConnections.add(entry)
+
+    authenticateStream(stream, remoteHex)
+      .then((result) => {
+        if (!result.ok) {
+          activeConnections.delete(entry)
+          return
+        }
+
+        if (closed) {
+          activeConnections.delete(entry)
+          if (!stream.destroyed) stream.destroy()
+          return
+        }
+
+        forwardToTarget(stream, entry, remoteHex, slot, result.leftover)
+      })
+      .catch((err) => {
+        writeLog(`AUTH ERROR client=${remoteHex}: ${err.message}`)
+        activeConnections.delete(entry)
+        if (!stream.destroyed) stream.destroy()
+      })
+  }
+
+  async function handleAuthFailure(stream, remoteHex, mode, pinGenerationAtStart) {
+    if (closed) return { ok: false }
+
+    let failure = null
+
+    try {
+      failure = await authGuard.recordFailure(remoteHex)
+    } catch (err) {
+      writeLog(`could not persist auth failure for client=${remoteHex}: ${err.message}`)
+    }
+
+    if (failure && failure.refreshPin) {
+      await refreshSessionPin(`failures-${failure.failures}`, pinGenerationAtStart)
+    }
+
+    if (failure && failure.newlySuspended) {
+      notifyAuthGuardEvent(remoteHex, failure)
+    }
+
+    await authGuard.delayFailure()
+
+    let error = 'AUTH_FAILED'
+    if (failure && failure.locked) {
+      error = 'LOCKED_OUT'
+    } else if (mode === 'pin') {
+      error = 'PIN_ROTATED_OR_INVALID'
+    }
+
+    const response = { v: AUTH_VERSION, ok: false, error }
+    if (failure && failure.locked && failure.retryAfterMs !== null) {
+      response.retryAfterMs = failure.retryAfterMs
+    }
+
+    writeAuthMessage(stream, response)
+    endAuthStream(stream)
+
+    writeLog(
+      `AUTH FAILED client=${remoteHex} mode=${mode} attempts=${failure ? failure.failures : 0}` +
+      `${failure && failure.locked ? ` status=${failure.permanent ? 'permanent' : failure.notification}` : ''}`
+    )
+
+    return { ok: false }
+  }
+
+  async function authenticateStream(stream, remoteHex) {
+    const decision = await decideDevice(remoteHex)
+
+    if (decision.action === 'decline') {
+      blockedCount++
+
+      if (decision.reason === 'unlisted') {
+        writeLog(`DECLINED unlisted client=${remoteHex}`)
+        sendIntrusionAlert(remoteHex)
+      } else {
+        writeLog(`DECLINED client=${remoteHex} reason=${decision.reason}`)
+      }
+
+      return sendDeclined(stream, decision.reason, decision)
+    }
+
+    if (decision.action === 'fastpath') {
+      writeAuthMessage(stream, {
+        v: AUTH_VERSION,
+        status: AUTH_STATUS.FASTPATH_READY
+      })
+      writeLog(`FASTPATH client=${remoteHex}`)
+      return { ok: true, leftover: Buffer.alloc(0) }
+    }
+
+    writeAuthMessage(stream, {
+      v: AUTH_VERSION,
+      status: AUTH_STATUS.CHALLENGE_REQUIRED
+    })
+
+    return authenticateChallenge(stream, remoteHex)
+  }
+
+  async function authenticateChallenge(stream, remoteHex) {
+    let readyRead
+
+    try {
+      readyRead = await readControlLine(stream, {
+        timeoutMs: preAuthTimeoutMs,
+        maxBytes: MAX_CONTROL_BYTES
+      })
+    } catch {
+      return { ok: false }
+    }
+
+    let ready = null
+    try {
+      ready = decodeControl(readyRead.line)
+    } catch {
+      ready = null
+    }
+
+    if (
+      !ready ||
+      ready.v !== AUTH_VERSION ||
+      ready.status !== AUTH_STATUS.READY
+    ) {
+      writeLog(`AUTH REJECTED client=${remoteHex} reason=bad-ready`)
+      return sendDeclined(stream, 'bad_ready')
+    }
+
+    if (closed) return { ok: false }
+
+    const decision = await decideDevice(remoteHex)
+
+    if (decision.action === 'decline') {
+      blockedCount++
+
+      if (decision.reason === 'unlisted') {
+        writeLog(`DECLINED unlisted client=${remoteHex} (post-ready)`)
+        sendIntrusionAlert(remoteHex)
+      } else {
+        writeLog(`DECLINED client=${remoteHex} reason=${decision.reason} (post-ready)`)
+      }
+
+      return sendDeclined(stream, decision.reason, decision)
+    }
+
+    const gate = await authGuard.acquire(remoteHex)
+
+    if (!gate.ok) {
+      if (gate.busy) {
+        writeLog(`AUTH REJECTED client=${remoteHex} reason=busy`)
+        return sendDeclined(stream, 'busy')
+      }
+
+      writeLog(`AUTH REJECTED client=${remoteHex} reason=locked`)
+      return sendDeclined(stream, 'locked', {
+        retryAfterMs: gate.retryAfterMs,
+        permanent: gate.permanent
+      })
+    }
+
+    try {
+      const pinSnapshot = activePin
+
+      if (!pinSnapshot) {
+        writeLog(`internal error: session PIN is not initialized (client=${remoteHex})`)
+        writeAuthMessage(stream, { v: AUTH_VERSION, ok: false, error: 'AUTH_FAILED' })
+        endAuthStream(stream)
+        return { ok: false }
+      }
+
+      const pinGenerationAtStart = authGuard.pinGeneration
+      const serverNonce = crypto.randomBytes(32)
+      const serverNonceHex = serverNonce.toString('hex')
+
+      if (!writeAuthMessage(stream, {
+        v: AUTH_VERSION,
+        nonce: serverNonceHex,
+        pinSalt: pinSnapshot.saltHex,
+        pwdSalt: unattendedVerifier ? unattendedVerifier.saltHex : null
+      })) {
+        return { ok: false }
+      }
+
+      let read
+      try {
+        read = await readControlLine(stream, {
+          timeoutMs: authTimeoutMs,
+          maxBytes: MAX_CONTROL_BYTES
+        })
+      } catch {
+        if (closed) return { ok: false }
+        return handleAuthFailure(stream, remoteHex, 'unknown', pinGenerationAtStart)
+      }
+
+      let response = null
+      try {
+        response = decodeControl(read.line)
+      } catch {
+        response = null
+      }
+
+      let mode = response && (response.mode === 'pin' || response.mode === 'pwd')
+        ? response.mode
+        : 'unknown'
+
+      const clientNonceHex = response && typeof response.clientNonce === 'string'
+        ? response.clientNonce.toLowerCase()
+        : ''
+      const proofHex = response && typeof response.proof === 'string'
+        ? response.proof.toLowerCase()
+        : ''
+
+      if (
+        !response ||
+        response.v !== AUTH_VERSION ||
+        !/^[0-9a-f]{64}$/.test(clientNonceHex) ||
+        !/^[0-9a-f]{64}$/.test(proofHex)
+      ) {
+        return handleAuthFailure(stream, remoteHex, mode, pinGenerationAtStart)
+      }
+
+      let verifier = null
+
+      if (mode === 'pin') {
+        verifier = {
+          storedKey: pinSnapshot.storedKey,
+          serverKey: pinSnapshot.serverKey
+        }
+      } else if (mode === 'pwd' && unattendedVerifier) {
+        verifier = {
+          storedKey: unattendedVerifier.storedKey,
+          serverKey: unattendedVerifier.serverKey
+        }
+      }
+
+      if (!verifier) {
+        return handleAuthFailure(stream, remoteHex, mode, pinGenerationAtStart)
+      }
+
+      const authMessage = buildAuthMessage(serverNonceHex, clientNonceHex, remoteHex)
+
+      if (!verifyScramProof(Buffer.from(proofHex, 'hex'), verifier.storedKey, authMessage)) {
+        return handleAuthFailure(stream, remoteHex, mode, pinGenerationAtStart)
+      }
+
+      try {
+        await authGuard.recordSuccess(remoteHex)
+      } catch (err) {
+        writeLog(`could not clear auth failures for client=${remoteHex}: ${err.message}`)
+      }
+
+      const serverSig = computeServerSignature(verifier.serverKey, authMessage).toString('hex')
+      writeAuthMessage(stream, { v: AUTH_VERSION, ok: true, serverSig })
+      writeLog(`AUTH OK client=${remoteHex} method=${mode}`)
+
+      return {
+        ok: true,
+        leftover: Buffer.concat([readyRead.leftover, read.leftover])
+      }
+    } finally {
+      gate.release()
+    }
+  }
+
+  function forwardToTarget(stream, entry, remoteHex, slot, leftover) {
+    const socket = net.createConnection({ host: '127.0.0.1', port: targetPort })
+    entry.socket = socket
+    socket.setKeepAlive(true, 30_000)
+    socket.setNoDelay(true)
+
+    let finished = false
+    let connectTimer = null
+
+    const finish = () => {
+      if (finished) return
+      finished = true
+
+      if (connectTimer !== null) {
+        clearTimeout(connectTimer)
+        connectTimer = null
+      }
+
+      activeConnections.delete(entry)
+
+      if (!stream.destroyed) stream.destroy()
+      if (!socket.destroyed) socket.destroy()
+    }
+
+    connectTimer = setTimeout(() => {
+      writeLog(`local target connect timed out for client=${remoteHex} (slot=${slot})`)
+      finish()
+    }, localConnectTimeoutMs)
+
+    socket.once('connect', () => {
+      if (finished) return
+
+      if (connectTimer !== null) {
+        clearTimeout(connectTimer)
+        connectTimer = null
+      }
+
+      socket.setKeepAlive(true, 30_000)
+      writeLog(`FORWARD client=${remoteHex} slot=${slot} -> 127.0.0.1:${targetPort}`)
+
+      if (leftover && leftover.length > 0) {
+        try {
+          socket.write(leftover)
+        } catch {
+          finish()
+          return
+        }
+      }
+
+      stream.pipe(socket)
+      socket.pipe(stream)
+    })
+
+    stream.on('error', (err) => {
+      if (!finished) writeLog(`p2p stream error for client=${remoteHex}: ${err.message}`)
+      finish()
+    })
+
+    socket.on('error', (err) => {
+      if (!finished) writeLog(`local socket error for client=${remoteHex}: ${err.message}`)
+      finish()
+    })
+
+    stream.on('end', () => {
+      if (!socket.destroyed) socket.end()
+    })
+
+    socket.on('end', () => {
+      if (!stream.destroyed) stream.end()
+    })
+
+    stream.on('close', finish)
+    socket.on('close', finish)
+  }
+
+  async function startSlotListener(slot) {
+    if (closed) throw new Error('server is shutting down')
+    if (listeners.has(slot)) return listeners.get(slot)
+
+    const keyPair = deriveSlotKeyPair(config.masterSecret, slot)
+    const publicKeyHex = Buffer.from(keyPair.publicKey).toString('hex')
+
+    const hyperServer = dht.createServer(
+      { firewall },
+      (stream) => handleIncomingStream(stream, slot)
+    )
+
+    hyperServer.on('error', (err) => {
+      writeLog(`listener error slot=${slot}: ${err.message}`)
+    })
+
+    await hyperServer.listen(keyPair)
+
+    if (closed) {
+      try {
+        await hyperServer.close()
+      } catch {
+        // Ignore shutdown races.
+      }
+      throw new Error('server is shutting down')
+    }
+
+    const entry = { slot, server: hyperServer, publicKeyHex }
+    listeners.set(slot, entry)
+    writeLog(`LISTENING slot=${slot} serverPublicKey=${publicKeyHex}`)
+
+    return entry
+  }
+
+  async function stopSlotListener(slot, entry) {
+    try {
+      await entry.server.close()
+      writeLog(`STOPPED accepting new connections for expired slot=${slot} (active sessions kept)`)
+    } catch (err) {
+      writeLog(`failed to close listener slot=${slot}: ${err.message}`)
+    }
+  }
+
+  async function rotateSlots() {
+    if (closed) return
+
+    const slot = getSlot(nowMs())
+    if (slot === currentSlot) return
+
+    writeLog(`hour slot changed ${currentSlot} -> ${slot}`)
+    currentSlot = slot
+
+    for (const candidate of [slot, slot - 1]) {
+      if (closed) break
+      try {
+        await startSlotListener(candidate)
+      } catch (err) {
+        writeLog(`failed to start listener for slot=${candidate}: ${err.message}`)
+      }
+    }
+
+    for (const [listenerSlot, entry] of [...listeners.entries()]) {
+      if (listenerSlot < currentSlot - 1) {
+        listeners.delete(listenerSlot)
+        stopSlotListener(listenerSlot, entry).catch(noop)
+      }
+    }
+  }
+
+  async function close() {
+    if (closed) return
+    closed = true
+
+    if (rotationTimer !== null) {
+      clearInterval(rotationTimer)
+      rotationTimer = null
+    }
+
+    for (const entry of listeners.values()) {
+      try {
+        await entry.server.close()
+      } catch {
+        // Best effort during shutdown.
+      }
+    }
+    listeners.clear()
+
+    if (control !== null) {
+      const activeControl = control
+      control = null
+      try {
+        await activeControl.close()
+      } catch {
+        // Best effort during shutdown.
+      }
+    }
+
+    for (const entry of activeConnections) {
+      try {
+        if (entry.stream) entry.stream.destroy()
+      } catch {
+        // Ignore.
+      }
+      try {
+        if (entry.socket) entry.socket.destroy()
+      } catch {
+        // Ignore.
+      }
+    }
+    activeConnections.clear()
+
+    try {
+      await dht.destroy()
+    } catch {
+      // Ignore.
+    }
+
+    try {
+      await authGuard.close()
+    } catch {
+      // Ignore.
+    }
+
+    writeLog('server stopped')
+  }
+
+  try {
+    await startSlotListener(currentSlot)
+  } catch (err) {
+    await close()
+    throw err
+  }
+
+  try {
+    await startSlotListener(currentSlot - 1)
+  } catch (err) {
+    writeLog(`warning: could not listen on previous slot ${currentSlot - 1}: ${err.message}`)
+  }
+
+  rotationTimer = setInterval(() => {
+    rotateSlots().catch((err) => {
+      writeLog(`rotation error: ${err.message}`)
+    })
+  }, rotationCheckMs)
+
+  const controlSocketPath = options.controlSocketPath || defaultControlSocketPath()
+
+  async function controlHandler(request) {
+    if (!request || typeof request !== 'object') {
+      return { ok: false, error: 'INVALID_REQUEST', message: 'invalid control request' }
+    }
+
+    if (request.cmd === 'status') {
+      const activeKeys = new Set()
+      for (const entry of activeConnections) {
+        if (entry.remoteKey) activeKeys.add(entry.remoteKey)
+      }
+
+      return {
+        ok: true,
+        mode: 'server',
+        verificationMode,
+        currentSlot,
+        listeningSlots: [...listeners.keys()].sort((a, b) => a - b),
+        sessionGeneration: authGuard.pinGeneration,
+        sessionPinAvailable: Boolean(activePin),
+        interactive,
+        registrySize: registry.size,
+        blockedCount,
+        activeConnections: activeConnections.size,
+        activeKeys: [...activeKeys],
+        uptimeMs: Date.now() - startedAt,
+        trustedDevicesFile: registry.filePath,
+        controlSocketPath
+      }
+    }
+
+    if (request.cmd === 'pin') {
+      if (!sessionAuthEnabled || !activePin) {
+        return {
+          ok: false,
+          error: 'NO_SESSION_PIN',
+          message: 'key-only mode does not use a Session PIN'
+        }
+      }
+
+      return {
+        ok: true,
+        pin: activePin.pin,
+        formatted: formatSessionPin(activePin.pin),
+        generation: activePin.generation
+      }
+    }
+
+    if (request.cmd === 'revoke') {
+      if (!isHex64(request.key)) {
+        return {
+          ok: false,
+          error: 'INVALID_KEY',
+          message: 'key must be 64 hexadecimal characters'
+        }
+      }
+
+      const key = request.key.toLowerCase()
+      const status = await authGuard.revoke(key, 'manual')
+      let closed = 0
+
+      for (const entry of [...activeConnections]) {
+        if (entry.remoteKey !== key) continue
+        closed += 1
+        try {
+          if (entry.stream) entry.stream.destroy()
+        } catch {
+          // Ignore.
+        }
+        try {
+          if (entry.socket) entry.socket.destroy()
+        } catch {
+          // Ignore.
+        }
+      }
+
+      writeLog(`CONTROL revoke client=${key} closed=${closed}`)
+      return { ok: true, key, closed, status }
+    }
+
+    return {
+      ok: false,
+      error: 'UNKNOWN_COMMAND',
+      message: 'unknown control command'
+    }
+  }
+
+  if (options.controlSocket !== false) {
+    try {
+      control = await startControlServer({
+        socketPath: controlSocketPath,
+        handler: controlHandler,
+        log: writeLog
+      })
+    } catch (err) {
+      await close()
+      throw err
+    }
+  }
+
+  if (telegram && options.sendStartupAlert !== false) {
+    const text = [
+      '✅ p2pgate server เริ่มทำงานแล้ว',
+      `เวลา: ${nowIso()}`,
+      `พอร์ตปลายทาง: 127.0.0.1:${targetPort}`,
+      `โหมดยืนยันตัวตน: ${verificationMode}`,
+      `อุปกรณ์ที่ลงทะเบียน: ${registry.size}`
+    ].join('\n')
+
+    sendTelegramMessage(telegram, text).catch(noop)
+  }
+
+  return {
+    dht,
+    get currentSlot() {
+      return currentSlot
+    },
+    get blockedCount() {
+      return blockedCount
+    },
+    get activeConnections() {
+      return activeConnections.size
+    },
+    get listeningSlots() {
+      return [...listeners.keys()].sort((a, b) => a - b)
+    },
+    get sessionPin() {
+      return activePin ? activePin.pin : null
+    },
+    get pinGeneration() {
+      return authGuard.pinGeneration
+    },
+    get verificationMode() {
+      return verificationMode
+    },
+    get authEnabled() {
+      return sessionAuthEnabled
+    },
+    get registrySize() {
+      return registry.size
+    },
+    get controlSocketPath() {
+      return control ? control.socketPath : null
+    },
+    get controlEnabled() {
+      return control !== null
+    },
+    listDevices() {
+      return registry.listDevices()
+    },
+    isAuthSuspended(keyHex) {
+      return authGuard.isSuspended(keyHex)
+    },
+    getAuthState(keyHex) {
+      return authGuard.getStatus(keyHex)
+    },
+    currentPublicKeyHex() {
+      return deriveServerPublicKeyHex(config.masterSecret, currentSlot)
+    },
+    publicKeyHexForSlot(slot) {
+      return deriveServerPublicKeyHex(config.masterSecret, slot)
+    },
+    close
+  }
+}
+
+module.exports = {
+  startServer,
+  AlertRateLimiter
+}

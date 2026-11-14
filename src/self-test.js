@@ -1,0 +1,1221 @@
+'use strict'
+
+const assert = require('node:assert/strict')
+const crypto = require('node:crypto')
+const dgram = require('node:dgram')
+const fs = require('node:fs/promises')
+const net = require('node:net')
+const os = require('node:os')
+const path = require('node:path')
+const HyperDHT = require('hyperdht')
+
+const {
+  getSlot,
+  deriveSlotSeed,
+  deriveSlotKeyPair,
+  deriveServerPublicKey,
+  deriveServerPublicKeyHex,
+  formatSessionPin,
+  deriveScramVerifier,
+  serializeScramVerifier
+} = require('./crypto-utils')
+const { generateClientKey, loadClientKey } = require('./keygen')
+const { startServer, AlertRateLimiter } = require('./server')
+const { startClient } = require('./client')
+const { AuthGuard } = require('./auth-guard')
+const {
+  DeviceRegistry,
+  evaluateDevicePolicy,
+  validateDeviceAddOptions
+} = require('./device-registry')
+const {
+  CONTROL_VERSION,
+  startControlServer,
+  sendControlCommand
+} = require('./control')
+const { runDoctor } = require('./doctor')
+const { readControlLine, decodeControl, AUTH_STATUS } = require('./auth')
+
+const noop = () => {}
+const quiet = () => {}
+
+function getFreeUdpPort() {
+  return new Promise((resolve, reject) => {
+    const socket = dgram.createSocket('udp4')
+
+    socket.once('error', reject)
+    socket.bind(0, '127.0.0.1', () => {
+      const { port } = socket.address()
+      socket.close(() => resolve(port))
+    })
+  })
+}
+
+async function waitFor(predicate, timeoutMs, description) {
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+
+  throw new Error(`timed out waiting for ${description || 'condition'}`)
+}
+
+async function connectLocal(port, timeoutMs = 10_000) {
+  const socket = net.createConnection({ host: '127.0.0.1', port })
+  socket.on('error', noop)
+
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('local connect timed out')), timeoutMs)
+    socket.once('connect', () => {
+      clearTimeout(timer)
+      resolve()
+    })
+    socket.once('error', (err) => {
+      clearTimeout(timer)
+      reject(err)
+    })
+  })
+
+  return socket
+}
+
+async function sendAndExpectNoEcho(port, payload, timeoutMs = 8_000) {
+  const socket = await connectLocal(port, timeoutMs)
+
+  let received = 0
+  socket.on('data', (chunk) => {
+    received += chunk.length
+  })
+
+  socket.write(payload)
+
+  const closed = await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), timeoutMs)
+    socket.once('close', () => {
+      clearTimeout(timer)
+      resolve(true)
+    })
+  })
+
+  socket.destroy()
+  return { closed, received }
+}
+
+function readExactly(socket, length, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    let total = 0
+
+    const cleanup = () => {
+      clearTimeout(timer)
+      socket.removeListener('data', onData)
+      socket.removeListener('error', onError)
+      socket.removeListener('close', onClose)
+    }
+
+    const onData = (chunk) => {
+      chunks.push(chunk)
+      total += chunk.length
+
+      if (total >= length) {
+        cleanup()
+        resolve(Buffer.concat(chunks).subarray(0, length))
+      }
+    }
+
+    const onError = (err) => {
+      cleanup()
+      reject(err)
+    }
+
+    const onClose = () => {
+      cleanup()
+      reject(new Error(`local socket closed after ${total}/${length} bytes`))
+    }
+
+    const timer = setTimeout(() => {
+      cleanup()
+      reject(new Error(`timed out reading ${length} bytes (got ${total})`))
+    }, timeoutMs)
+
+    socket.on('data', onData)
+    socket.once('error', onError)
+    socket.once('close', onClose)
+  })
+}
+
+function wrongPin(currentPin) {
+  return currentPin === '2222222222' ? '3333333333' : '2222222222'
+}
+
+async function main() {
+  const checks = []
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'p2pgate-self-test-'))
+
+  let bootstrapper = null
+  let echoServer = null
+  let gateway = null
+  let probeDht = null
+  let targetConnections = 0
+  const clients = []
+  const extraServers = []
+  let originalSocket = null
+  let originalClient = null
+
+  try {
+    // ---------------------------------------------------------------------
+    // 1. Deterministic HKDF slot derivation
+    // ---------------------------------------------------------------------
+    const masterSecret = crypto.randomBytes(32).toString('hex')
+    let serverNow = Date.now()
+    let lockoutNow = Date.now()
+    const slot = getSlot(serverNow)
+
+    const seedA = deriveSlotSeed(masterSecret, slot)
+    const seedB = deriveSlotSeed(masterSecret, slot)
+
+    assert.ok(Buffer.isBuffer(seedA), 'derived seed must be a Buffer')
+    assert.equal(seedA.length, 32, 'derived seed must be 32 bytes')
+    assert.deepEqual(seedA, seedB, 'same secret + slot must derive the same seed')
+    assert.notDeepEqual(
+      deriveSlotSeed(masterSecret, slot + 1),
+      seedA,
+      'different slots must derive different seeds'
+    )
+
+    const derivedKeyPair = deriveSlotKeyPair(masterSecret, slot)
+    assert.equal(
+      Buffer.from(derivedKeyPair.publicKey).toString('hex'),
+      deriveServerPublicKeyHex(masterSecret, slot),
+      'keypair public key must match derived public key'
+    )
+    assert.equal(
+      deriveServerPublicKey(masterSecret, slot).toString('hex'),
+      deriveServerPublicKeyHex(masterSecret, slot)
+    )
+
+    checks.push('HKDF slot derivation is deterministic and slot-specific')
+
+    // ---------------------------------------------------------------------
+    // 2. Unauthorized-key alert rate limiting
+    // ---------------------------------------------------------------------
+    const limiter = new AlertRateLimiter(1000)
+    assert.equal(limiter.shouldSend('key-a'), true)
+    assert.equal(limiter.shouldSend('key-a'), false)
+    assert.equal(limiter.shouldSend('key-b'), true)
+    checks.push('intrusion alert rate limiting works')
+
+    // ---------------------------------------------------------------------
+    // 3. AuthGuard concurrency limits
+    // ---------------------------------------------------------------------
+    const unitGuard = new AuthGuard({
+      statePath: path.join(tempDir, 'guard-unit.json'),
+      now: () => 1000,
+      failDelayMs: [1, 2]
+    })
+    await unitGuard.init()
+
+    const key1 = '1'.repeat(64)
+    const key2 = '2'.repeat(64)
+    const key3 = '3'.repeat(64)
+    const key4 = '4'.repeat(64)
+
+    const acquire1 = await unitGuard.acquire(key1)
+    assert.equal(acquire1.ok, true)
+    const acquire1Again = await unitGuard.acquire(key1)
+    assert.equal(acquire1Again.ok, false, 'only one verification per key')
+    const acquire2 = await unitGuard.acquire(key2)
+    const acquire3 = await unitGuard.acquire(key3)
+    assert.equal(acquire2.ok, true)
+    assert.equal(acquire3.ok, true)
+    const acquire4 = await unitGuard.acquire(key4)
+    assert.equal(acquire4.ok, false, 'only three verifications total')
+    acquire1.release()
+    acquire2.release()
+    acquire3.release()
+    await unitGuard.close()
+    checks.push('AuthGuard limits one verification per key and three total')
+
+    // ---------------------------------------------------------------------
+    // 4. Device registry, dual-source precedence, expiration, and policies
+    // ---------------------------------------------------------------------
+    const registryNow = Date.parse('2026-06-01T00:00:00Z')
+    const keyTrusted = 'a'.repeat(64)
+    const keyScram = 'b'.repeat(64)
+    const keyLegacy = 'c'.repeat(64)
+    const keyBoth = 'd'.repeat(64)
+    const keyExpired = 'e'.repeat(64)
+    const keyConfig = 'f'.repeat(64)
+    const keyUnlisted = '1'.repeat(64)
+
+    const registryFile = path.join(tempDir, 'registry-unit-devices')
+    await fs.writeFile(
+      registryFile,
+      [
+        '# managed by the p2pgate self-test',
+        `trusted ${keyTrusted} trusted-device`,
+        `scram ${keyScram} scram-device`,
+        `${keyLegacy} legacy-device`,
+        `trusted,expires=2028-01-01T00:00:00Z ${keyBoth} both-device`,
+        `trusted,expires=2020-01-01T00:00:00Z ${keyExpired} expired-device`,
+        ''
+      ].join('\n'),
+      { mode: 0o600 }
+    )
+    try {
+      await fs.chmod(registryFile, 0o600)
+    } catch {
+      // Windows and some filesystems do not enforce POSIX modes.
+    }
+
+    const registry = new DeviceRegistry({
+      configKeys: [keyConfig, keyBoth, keyExpired],
+      filePath: registryFile,
+      verificationMode: 'hybrid',
+      now: () => registryNow,
+      posixCheck: async () => ({ ok: true })
+    })
+    await registry.init()
+
+    const trusted = await registry.evaluate(keyTrusted)
+    assert.equal(trusted.listed, true)
+    assert.equal(trusted.source, 'trusted_devices')
+    assert.equal(trusted.profile, 'trusted')
+    assert.equal(trusted.fastpathAllowed, true)
+    assert.equal(trusted.label, 'trusted-device')
+
+    const scramDevice = await registry.evaluate(keyScram)
+    assert.equal(scramDevice.profile, 'scram')
+    assert.equal(scramDevice.fastpathAllowed, false)
+
+    const legacy = await registry.evaluate(keyLegacy)
+    assert.equal(legacy.profile, 'scram')
+
+    const configOnly = await registry.evaluate(keyConfig)
+    assert.equal(configOnly.source, 'config')
+    assert.equal(configOnly.profile, 'scram')
+
+    const both = await registry.evaluate(keyBoth)
+    assert.equal(both.source, 'trusted_devices', 'file must override config')
+    assert.equal(both.profile, 'trusted')
+    assert.equal(both.active, true)
+
+    const expired = await registry.evaluate(keyExpired)
+    assert.equal(expired.source, 'trusted_devices')
+    assert.equal(expired.active, false, 'expired file entry must override config')
+    assert.equal((await registry.evaluate(keyUnlisted)).listed, false)
+
+    assert.deepEqual(
+      evaluateDevicePolicy(trusted, {
+        verificationMode: 'hybrid',
+        interactive: true,
+        hasFallback: false
+      }),
+      { action: 'fastpath' }
+    )
+    assert.deepEqual(
+      evaluateDevicePolicy(scramDevice, {
+        verificationMode: 'hybrid',
+        interactive: true,
+        hasFallback: false
+      }),
+      { action: 'challenge' }
+    )
+    assert.deepEqual(
+      evaluateDevicePolicy(scramDevice, {
+        verificationMode: 'hybrid',
+        interactive: false,
+        hasFallback: false
+      }),
+      { action: 'decline', reason: 'interactive_unavailable' }
+    )
+    assert.deepEqual(
+      evaluateDevicePolicy(trusted, {
+        verificationMode: 'hybrid',
+        interactive: false,
+        hasFallback: false
+      }),
+      { action: 'fastpath' }
+    )
+    assert.deepEqual(
+      evaluateDevicePolicy(trusted, {
+        verificationMode: 'key-only',
+        interactive: false,
+        hasFallback: false
+      }),
+      { action: 'fastpath' }
+    )
+    assert.deepEqual(
+      evaluateDevicePolicy(scramDevice, {
+        verificationMode: 'key-only',
+        interactive: false,
+        hasFallback: false
+      }),
+      { action: 'fastpath' }
+    )
+    assert.deepEqual(
+      evaluateDevicePolicy(trusted, {
+        verificationMode: 'two-step',
+        interactive: true,
+        hasFallback: false
+      }),
+      { action: 'challenge' }
+    )
+    assert.deepEqual(
+      evaluateDevicePolicy(expired, {
+        verificationMode: 'hybrid',
+        interactive: true,
+        hasFallback: false
+      }),
+      { action: 'decline', reason: 'expired' }
+    )
+    checks.push('device registry merges config/trusted_devices with correct precedence')
+    checks.push('hybrid/key-only/two-step policies and expiration are enforced')
+
+    const insecureRegistry = new DeviceRegistry({
+      configKeys: [keyConfig],
+      filePath: registryFile,
+      verificationMode: 'hybrid',
+      now: () => registryNow,
+      posixCheck: async () => ({ ok: false, reason: 'permissions' })
+    })
+    await insecureRegistry.init()
+    const insecureTrusted = await insecureRegistry.evaluate(keyTrusted)
+    assert.equal(insecureTrusted.permissionsOk, false)
+    assert.equal(insecureTrusted.fastpathAllowed, false)
+    assert.deepEqual(
+      evaluateDevicePolicy(insecureTrusted, {
+        verificationMode: 'key-only',
+        interactive: true,
+        hasFallback: false
+      }),
+      { action: 'decline', reason: 'insecure_registry' }
+    )
+    assert.deepEqual(
+      evaluateDevicePolicy(insecureTrusted, {
+        verificationMode: 'hybrid',
+        interactive: true,
+        hasFallback: false
+      }),
+      { action: 'challenge' }
+    )
+    checks.push('POSIX permission failures disable fast-path entries')
+
+    const reloadFile = path.join(tempDir, 'registry-reload-devices')
+    await fs.writeFile(reloadFile, `trusted ${keyTrusted} reload\n`, { mode: 0o600 })
+    const reloadRegistry = new DeviceRegistry({
+      filePath: reloadFile,
+      verificationMode: 'hybrid',
+      now: () => registryNow,
+      posixCheck: async () => ({ ok: true })
+    })
+    await reloadRegistry.init()
+    assert.equal((await reloadRegistry.evaluate(keyTrusted)).fastpathAllowed, true)
+
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    await fs.writeFile(reloadFile, `scram ${keyTrusted} reload\n`, { mode: 0o600 })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const reloaded = await reloadRegistry.evaluate(keyTrusted)
+    assert.equal(reloaded.profile, 'scram')
+    assert.equal(reloaded.fastpathAllowed, false)
+    checks.push('trusted_devices reloads on mtime change without restart')
+
+    // ---------------------------------------------------------------------
+    // 5. Session PIN format and initial server state
+    // ---------------------------------------------------------------------
+    const authorizedKeyPath = path.join(tempDir, 'authorized-key.json')
+    const secondKeyPath = path.join(tempDir, 'second-key.json')
+    const lockoutKeyPath = path.join(tempDir, 'lockout-key.json')
+    const invalidKeyPath = path.join(tempDir, 'invalid-key.json')
+    const unauthorizedKeyPath = path.join(tempDir, 'unauthorized-key.json')
+    const fastKeyPath = path.join(tempDir, 'fast-key.json')
+    const expiredKeyPath = path.join(tempDir, 'expired-key.json')
+    const revokeKeyPath = path.join(tempDir, 'revoke-key.json')
+
+    const authorized = await generateClientKey(authorizedKeyPath)
+    const second = await generateClientKey(secondKeyPath)
+    const lockoutKey = await generateClientKey(lockoutKeyPath)
+    const invalidKey = await generateClientKey(invalidKeyPath)
+    const unauthorized = await generateClientKey(unauthorizedKeyPath)
+    const fastKey = await generateClientKey(fastKeyPath)
+    const expiredKey = await generateClientKey(expiredKeyPath)
+    const revokeKey = await generateClientKey(revokeKeyPath)
+
+    let controlSocketSeq = 0
+    const controlPathFor = (name) => process.platform === 'win32'
+      ? `\\\\.\\pipe\\p2pgate-test-${process.pid}-${name}-${controlSocketSeq++}`
+      : path.join(tempDir, `control-${name}.sock`)
+    const mainControlPath = controlPathFor('main')
+
+    const trustedDevicesPath = path.join(tempDir, 'trusted_devices')
+    await fs.writeFile(
+      trustedDevicesPath,
+      [
+        `trusted ${fastKey.publicKey} fast-workstation`,
+        `trusted,expires=2020-01-01T00:00:00Z ${expiredKey.publicKey} expired-laptop`,
+        ''
+      ].join('\n'),
+      { mode: 0o600 }
+    )
+    try {
+      await fs.chmod(trustedDevicesPath, 0o600)
+    } catch {
+      // Windows and some filesystems do not enforce POSIX modes.
+    }
+
+    const unattendedPassword = 'CorrectHorseBatteryStaple-42'
+    const unattendedVerifier = serializeScramVerifier(
+      await deriveScramVerifier(unattendedPassword)
+    )
+
+    const echoBanner = Buffer.from('P2PGATE-ECHO-BANNER\n')
+
+    echoServer = net.createServer((socket) => {
+      targetConnections += 1
+      socket.on('error', noop)
+      socket.write(echoBanner)
+      socket.pipe(socket)
+    })
+
+    await new Promise((resolve, reject) => {
+      echoServer.once('error', reject)
+      echoServer.listen(0, '127.0.0.1', resolve)
+    })
+
+    const echoPort = echoServer.address().port
+    const bootstrapPort = await getFreeUdpPort()
+
+    bootstrapper = HyperDHT.bootstrapper(bootstrapPort, '127.0.0.1')
+    await bootstrapper.fullyBootstrapped()
+
+    const bootstrap = [`127.0.0.1:${bootstrapPort}`]
+    const lockoutStatePath = path.join(tempDir, 'lockout-state.json')
+
+    const serverConfig = {
+      mode: 'server',
+      masterSecret,
+      targetHost: '127.0.0.1',
+      targetPort: echoPort,
+      localPort: 8022,
+      clientKeyPath: authorizedKeyPath,
+      allowedClientKeys: [
+        authorized.publicKey,
+        second.publicKey,
+        lockoutKey.publicKey,
+        invalidKey.publicKey,
+        expiredKey.publicKey,
+        revokeKey.publicKey
+      ],
+      verificationMode: 'hybrid',
+      trustedDevicesFile: trustedDevicesPath,
+      customBootstrap: bootstrap,
+      authPin: {
+        enabled: true,
+        unattended: unattendedVerifier
+      },
+      telegramAlert: { enabled: false, botToken: '', chatId: '' }
+    }
+
+    gateway = await startServer(serverConfig, {
+      log: quiet,
+      rotationCheckMs: 150,
+      sendStartupAlert: false,
+      showSessionPin: false,
+      authTimeoutMs: 4_000,
+      failDelayMs: [10, 20],
+      lockoutStatePath,
+      lockoutNow: () => lockoutNow,
+      now: () => serverNow,
+      controlSocketPath: mainControlPath
+    })
+
+    assert.deepEqual(
+      gateway.listeningSlots,
+      [slot - 1, slot],
+      'server must listen on the current and previous slot'
+    )
+    assert.equal(gateway.authEnabled, true)
+    assert.equal(typeof gateway.sessionPin, 'string')
+    assert.equal(gateway.sessionPin.length, 10, 'session PIN must be 10 characters')
+    assert.match(gateway.sessionPin, /^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{10}$/)
+    assert.match(formatSessionPin(gateway.sessionPin), /^[0-9A-Z]{5}-[0-9A-Z]{5}$/)
+    assert.equal(gateway.pinGeneration, 0)
+    checks.push('10-character Session PIN uses the unambiguous Base32 alphabet')
+
+    // ---------------------------------------------------------------------
+    // 5. Unauthorized client is rejected by the firewall
+    // ---------------------------------------------------------------------
+    probeDht = new HyperDHT({ bootstrap })
+    const unauthorizedKey = await loadClientKey(unauthorizedKeyPath)
+    const currentServerPublicKey = deriveServerPublicKey(masterSecret, slot)
+
+    let unauthorizedOpened = false
+    const probeStream = probeDht.connect(currentServerPublicKey, {
+      keyPair: unauthorizedKey.keyPair
+    })
+
+    probeStream.on('open', () => {
+      unauthorizedOpened = true
+    })
+    probeStream.on('error', noop)
+
+    const targetBeforeProbe = targetConnections
+    const probeStatusRead = await readControlLine(probeStream, {
+      timeoutMs: 15_000,
+      maxBytes: 4096
+    })
+    const probeStatus = decodeControl(probeStatusRead.line)
+
+    assert.equal(unauthorizedOpened, true)
+    assert.equal(probeStatus.status, AUTH_STATUS.DECLINED)
+    assert.equal(probeStatus.reason, 'unlisted')
+    assert.equal(targetConnections, targetBeforeProbe)
+    assert.ok(gateway.blockedCount >= 1)
+
+    probeStream.destroy()
+    await probeDht.destroy()
+    probeDht = null
+    checks.push('unlisted client key receives STATUS_DECLINED without reaching the target')
+
+    // ---------------------------------------------------------------------
+    // Shared client setup helpers
+    // ---------------------------------------------------------------------
+    const clientBase = {
+      mode: 'client',
+      masterSecret,
+      targetHost: '127.0.0.1',
+      targetPort: echoPort,
+      localPort: 0,
+      allowedClientKeys: [],
+      customBootstrap: bootstrap,
+      authPin: { enabled: true, unattended: null },
+      telegramAlert: { enabled: false, botToken: '', chatId: '' }
+    }
+
+    const startTestClient = async (keyPath, credential, options = {}) => {
+      const base = options.base || clientBase
+      const client = await startClient(
+        { ...base, clientKeyPath: keyPath },
+        {
+          log: options.log || quiet,
+          connectTimeoutMs: 7_000,
+          authTimeoutMs: 4_000,
+          now: options.now || (() => serverNow),
+          credential
+        }
+      )
+      clients.push(client)
+      return client
+    }
+
+    const echoThrough = async (client, payload) => {
+      const socket = await connectLocal(client.address().port)
+      const banner = await readExactly(socket, echoBanner.length, 15_000)
+      assert.deepEqual(banner, echoBanner)
+      socket.write(payload)
+      const echoed = await readExactly(socket, payload.length, 15_000)
+      socket.destroy()
+      return echoed
+    }
+
+    const initialPin = gateway.sessionPin
+
+    // ---------------------------------------------------------------------
+    // 6. Valid Session PIN: lowercase/no hyphen and uppercase/with hyphen
+    // ---------------------------------------------------------------------
+    originalClient = await startTestClient(
+      authorizedKeyPath,
+      initialPin.toLowerCase(),
+      { now: () => serverNow - 3_600_000 }
+    )
+
+    originalSocket = await connectLocal(originalClient.address().port)
+    const originalBanner = await readExactly(originalSocket, echoBanner.length, 15_000)
+    assert.deepEqual(originalBanner, echoBanner)
+
+    const originalPayload = crypto.randomBytes(256)
+    originalSocket.write(originalPayload)
+    assert.deepEqual(
+      await readExactly(originalSocket, originalPayload.length, 15_000),
+      originalPayload
+    )
+    checks.push('lowercase 10-character Session PIN works')
+
+    const hyphenClient = await startTestClient(
+      authorizedKeyPath,
+      formatSessionPin(initialPin)
+    )
+    const hyphenPayload = crypto.randomBytes(128)
+    assert.deepEqual(await echoThrough(hyphenClient, hyphenPayload), hyphenPayload)
+    checks.push('uppercase hyphenated Session PIN works')
+    await hyphenClient.close()
+
+    // ---------------------------------------------------------------------
+    // 7. Unattended password (case-sensitive, >= 12 chars)
+    // ---------------------------------------------------------------------
+    const passwordClient = await startTestClient(secondKeyPath, unattendedPassword)
+    const passwordPayload = crypto.randomBytes(128)
+    assert.deepEqual(await echoThrough(passwordClient, passwordPayload), passwordPayload)
+    checks.push('case-sensitive unattended password authenticates')
+    await passwordClient.close()
+
+    // ---------------------------------------------------------------------
+    // 7a. Local control plane: status, pin, revoke, unlock, shutdown
+    // ---------------------------------------------------------------------
+    const statusResponse = await sendControlCommand(
+      mainControlPath,
+      { v: CONTROL_VERSION, cmd: 'status' }
+    )
+    assert.equal(statusResponse.ok, true)
+    assert.equal(statusResponse.verificationMode, 'hybrid')
+    assert.equal(statusResponse.registrySize, gateway.registrySize)
+    assert.deepEqual(statusResponse.listeningSlots, gateway.listeningSlots)
+    assert.equal(statusResponse.sessionPinAvailable, true)
+    assert.equal(statusResponse.interactive, false)
+    assert.ok(statusResponse.blockedCount >= 1)
+
+    const pinResponse = await sendControlCommand(
+      mainControlPath,
+      { v: CONTROL_VERSION, cmd: 'pin' }
+    )
+    assert.equal(pinResponse.ok, true)
+    assert.equal(pinResponse.pin, gateway.sessionPin)
+    assert.equal(pinResponse.formatted, formatSessionPin(gateway.sessionPin))
+    checks.push('control status and pin are served over the local socket')
+
+    const revokeClient = await startTestClient(revokeKeyPath, unattendedPassword)
+    const revokeSocket = await connectLocal(revokeClient.address().port)
+    const revokeBanner = await readExactly(revokeSocket, echoBanner.length, 15_000)
+    assert.deepEqual(revokeBanner, echoBanner)
+
+    let revokeSocketClosed = false
+    revokeSocket.once('close', () => {
+      revokeSocketClosed = true
+    })
+    revokeSocket.on('error', noop)
+
+    const revokeResponse = await sendControlCommand(
+      mainControlPath,
+      { v: CONTROL_VERSION, cmd: 'revoke', key: revokeKey.publicKey }
+    )
+    assert.equal(revokeResponse.ok, true)
+    assert.equal(revokeResponse.key, revokeKey.publicKey)
+    assert.ok(revokeResponse.closed >= 1)
+
+    await waitFor(
+      () => revokeSocketClosed,
+      10_000,
+      'the revoked tunnel socket to close'
+    )
+
+    const revokedState = gateway.getAuthState(revokeKey.publicKey)
+    assert.equal(revokedState.revoked, true)
+    assert.equal(revokedState.reason, 'manual')
+    assert.equal(revokedState.permanent, true)
+
+    const targetBeforeRevokedReconnect = targetConnections
+    const revokedReconnect = await sendAndExpectNoEcho(
+      revokeClient.address().port,
+      Buffer.from('revoked-device')
+    )
+    assert.equal(revokedReconnect.closed, true)
+    assert.equal(revokedReconnect.received, 0)
+    assert.equal(targetConnections, targetBeforeRevokedReconnect)
+
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    const unlockGuard = new AuthGuard({ statePath: lockoutStatePath })
+    await unlockGuard.init()
+    await unlockGuard.unlock(revokeKey.publicKey)
+    await unlockGuard.close()
+
+    const restoredClient = await startTestClient(revokeKeyPath, unattendedPassword)
+    const restoredPayload = crypto.randomBytes(64)
+    assert.deepEqual(
+      await echoThrough(restoredClient, restoredPayload),
+      restoredPayload
+    )
+    checks.push('control revoke closes active tunnels, blocks reconnects, and unlock restores access')
+    await restoredClient.close()
+    await revokeClient.close()
+
+    // ---------------------------------------------------------------------
+    // 7b. Fast-path, expiration, and live trusted_devices reload
+    // ---------------------------------------------------------------------
+    const fastClient = await startTestClient(fastKeyPath, undefined)
+    const fastPayload = crypto.randomBytes(128)
+    assert.deepEqual(await echoThrough(fastClient, fastPayload), fastPayload)
+    checks.push('hybrid trusted device uses fast-path without a credential prompt')
+    await fastClient.close()
+
+    const expiredClient = await startTestClient(expiredKeyPath, undefined)
+    const targetBeforeExpired = targetConnections
+    const expiredResult = await sendAndExpectNoEcho(
+      expiredClient.address().port,
+      Buffer.from('expired-device')
+    )
+    assert.equal(expiredResult.closed, true)
+    assert.equal(expiredResult.received, 0)
+    assert.equal(targetConnections, targetBeforeExpired)
+    checks.push('expired trusted_devices entry overrides config and is declined')
+    await expiredClient.close()
+
+    // Make the fast-path key expired and prove the running server reloads it.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    await fs.writeFile(
+      trustedDevicesPath,
+      `trusted,expires=2020-01-01T00:00:00Z ${fastKey.publicKey} expired-fast\n`,
+      { mode: 0o600 }
+    )
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    const reloadedFastClient = await startTestClient(fastKeyPath, undefined)
+    const targetBeforeReload = targetConnections
+    const reloadedFastResult = await sendAndExpectNoEcho(
+      reloadedFastClient.address().port,
+      Buffer.from('reloaded-device')
+    )
+    assert.equal(reloadedFastResult.closed, true)
+    assert.equal(reloadedFastResult.received, 0)
+    assert.equal(targetConnections, targetBeforeReload)
+    checks.push('trusted_devices live reload changes fast-path eligibility')
+    await reloadedFastClient.close()
+
+    // ---------------------------------------------------------------------
+    // 8. Invalid PIN delay and no local target connection
+    // ---------------------------------------------------------------------
+    const invalidClient = await startTestClient(
+      invalidKeyPath,
+      wrongPin(gateway.sessionPin)
+    )
+
+    const targetBeforeInvalid = targetConnections
+    const invalidStartedAt = Date.now()
+    const invalidResult = await sendAndExpectNoEcho(
+      invalidClient.address().port,
+      Buffer.from('invalid-pin')
+    )
+    const invalidElapsed = Date.now() - invalidStartedAt
+
+    assert.equal(invalidResult.closed, true)
+    assert.equal(invalidResult.received, 0)
+    assert.ok(invalidElapsed >= 10, `expected a failure delay, got ${invalidElapsed}ms`)
+    assert.equal(targetConnections, targetBeforeInvalid, 'invalid PIN must not open targetPort')
+    assert.equal(gateway.getAuthState(invalidKey.publicKey).failures, 1)
+    checks.push('invalid PIN is delayed and never opens the local target')
+    await invalidClient.close()
+
+    // ---------------------------------------------------------------------
+    // 9. Three failures -> 15-minute suspension + Session PIN refresh
+    // ---------------------------------------------------------------------
+    const oldPin = gateway.sessionPin
+    const badClient = await startTestClient(authorizedKeyPath, wrongPin(oldPin))
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const targetBefore = targetConnections
+      const result = await sendAndExpectNoEcho(
+        badClient.address().port,
+        Buffer.from(`bad-pin-${attempt}`)
+      )
+      assert.equal(result.closed, true)
+      assert.equal(result.received, 0)
+      assert.equal(targetConnections, targetBefore)
+    }
+
+    assert.equal(gateway.isAuthSuspended(authorized.publicKey), true)
+    assert.equal(gateway.getAuthState(authorized.publicKey).failures, 3)
+    assert.equal(gateway.getAuthState(authorized.publicKey).level, 3)
+    assert.ok(
+      gateway.getAuthState(authorized.publicKey).remainingMs > 14 * 60 * 1000,
+      '3 failures must suspend for roughly 15 minutes'
+    )
+    assert.notEqual(gateway.sessionPin, oldPin)
+    assert.equal(gateway.pinGeneration, 1)
+    const newPin = gateway.sessionPin
+    checks.push('3 failures suspend the key and refresh the Session PIN')
+    await badClient.close()
+
+    // Old PIN is invalid; the new PIN works for another authorized client.
+    const oldPinClient = await startTestClient(secondKeyPath, formatSessionPin(oldPin))
+    const targetBeforeOldPin = targetConnections
+    const oldPinResult = await sendAndExpectNoEcho(
+      oldPinClient.address().port,
+      Buffer.from('old-pin')
+    )
+    assert.equal(oldPinResult.closed, true)
+    assert.equal(oldPinResult.received, 0)
+    assert.equal(targetConnections, targetBeforeOldPin)
+    assert.equal(gateway.getAuthState(second.publicKey).failures, 1)
+    await oldPinClient.close()
+
+    const newPinClient = await startTestClient(
+      secondKeyPath,
+      formatSessionPin(newPin).toLowerCase()
+    )
+    const newPinPayload = crypto.randomBytes(128)
+    assert.deepEqual(await echoThrough(newPinClient, newPinPayload), newPinPayload)
+    assert.equal(gateway.getAuthState(second.publicKey).failures, 0)
+    checks.push('old PIN is rejected after refresh and the new PIN works')
+    await newPinClient.close()
+
+    // ---------------------------------------------------------------------
+    // 10. Ten failures -> persistent suspension, reload, live unlock
+    // ---------------------------------------------------------------------
+    const badLockoutClient = await startTestClient(
+      lockoutKeyPath,
+      wrongPin(gateway.sessionPin)
+    )
+
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      const targetBefore = targetConnections
+      const result = await sendAndExpectNoEcho(
+        badLockoutClient.address().port,
+        Buffer.from(`bad-lockout-${attempt}`)
+      )
+      assert.equal(result.closed, true)
+      assert.equal(result.received, 0)
+      assert.equal(targetConnections, targetBefore)
+
+      if (attempt === 3) {
+        assert.equal(gateway.isAuthSuspended(lockoutKey.publicKey), true)
+        assert.equal(gateway.getAuthState(lockoutKey.publicKey).level, 3)
+        assert.ok(
+          gateway.getAuthState(lockoutKey.publicKey).remainingMs > 14 * 60 * 1000,
+          'third failure must use the 15-minute suspension'
+        )
+        lockoutNow += 15 * 60 * 1000 + 1000
+      } else if (attempt === 6) {
+        assert.equal(gateway.getAuthState(lockoutKey.publicKey).level, 6)
+        assert.ok(
+          gateway.getAuthState(lockoutKey.publicKey).remainingMs > 5 * 60 * 60 * 1000,
+          'sixth failure must use the 6-hour suspension'
+        )
+        lockoutNow += 6 * 60 * 60 * 1000 + 1000
+      }
+    }
+
+    assert.equal(gateway.getAuthState(lockoutKey.publicKey).failures, 10)
+    assert.equal(gateway.getAuthState(lockoutKey.publicKey).permanent, true)
+    assert.equal(gateway.isAuthSuspended(lockoutKey.publicKey), true)
+    assert.equal(gateway.pinGeneration, 3)
+    checks.push('10 failures create a persistent suspension')
+    await badLockoutClient.close()
+
+    const reloadedGuard = new AuthGuard({
+      statePath: lockoutStatePath,
+      now: () => lockoutNow
+    })
+    await reloadedGuard.init()
+
+    const persisted = reloadedGuard.getStatus(lockoutKey.publicKey)
+    assert.equal(persisted.permanent, true)
+    assert.equal(persisted.failures, 10)
+    checks.push('suspension persists across AuthGuard reloads')
+
+    // Simulate `p2pgate unlock` from another Termux session.
+    await reloadedGuard.unlock(lockoutKey.publicKey)
+    await reloadedGuard.close()
+
+    // Let the state file's mtime change so the running server reloads it.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    const recoveredLockoutClient = await startTestClient(
+      lockoutKeyPath,
+      formatSessionPin(gateway.sessionPin)
+    )
+    const recoveredPayload = crypto.randomBytes(128)
+    assert.deepEqual(
+      await echoThrough(recoveredLockoutClient, recoveredPayload),
+      recoveredPayload,
+      'live unlock must restore access without restarting the server'
+    )
+    checks.push('live unlock restores access without restarting the server')
+    await recoveredLockoutClient.close()
+
+    // ---------------------------------------------------------------------
+    // 10b. key-only mode: no session PIN, no prompt, fast-path by public key
+    // ---------------------------------------------------------------------
+    const keyOnlySecret = crypto.randomBytes(32).toString('hex')
+    const keyOnlyKeyPath = path.join(tempDir, 'keyonly-key.json')
+    const keyOnlyKey = await generateClientKey(keyOnlyKeyPath)
+    const keyOnlyControlPath = controlPathFor('keyonly')
+
+    const keyOnlyServer = await startServer({
+      mode: 'server',
+      masterSecret: keyOnlySecret,
+      targetHost: '127.0.0.1',
+      targetPort: echoPort,
+      localPort: 8022,
+      clientKeyPath: keyOnlyKeyPath,
+      allowedClientKeys: [keyOnlyKey.publicKey],
+      verificationMode: 'key-only',
+      trustedDevicesFile: path.join(tempDir, 'keyonly-devices'),
+      customBootstrap: bootstrap,
+      authPin: { enabled: false, unattended: null },
+      telegramAlert: { enabled: false, botToken: '', chatId: '' }
+    }, {
+      log: quiet,
+      showSessionPin: false,
+      sendStartupAlert: false,
+      failDelayMs: [10, 20],
+      lockoutStatePath: path.join(tempDir, 'keyonly-lockout.json'),
+      authTimeoutMs: 4_000,
+      controlSocketPath: keyOnlyControlPath
+    })
+    extraServers.push(keyOnlyServer)
+
+    assert.equal(keyOnlyServer.verificationMode, 'key-only')
+    assert.equal(keyOnlyServer.sessionPin, null)
+
+    const keyOnlyClientBase = { ...clientBase, masterSecret: keyOnlySecret }
+    const keyOnlyClient = await startTestClient(keyOnlyKeyPath, undefined, {
+      base: keyOnlyClientBase,
+      now: () => Date.now()
+    })
+    const keyOnlyPayload = crypto.randomBytes(128)
+    assert.deepEqual(await echoThrough(keyOnlyClient, keyOnlyPayload), keyOnlyPayload)
+    checks.push('key-only mode uses fast-path with no session PIN or prompt')
+
+    const keyOnlyStatus = await sendControlCommand(
+      keyOnlyControlPath,
+      { v: CONTROL_VERSION, cmd: 'status' }
+    )
+    assert.equal(keyOnlyStatus.ok, true)
+    assert.equal(keyOnlyStatus.verificationMode, 'key-only')
+    assert.equal(keyOnlyStatus.sessionPinAvailable, false)
+
+    const keyOnlyPin = await sendControlCommand(
+      keyOnlyControlPath,
+      { v: CONTROL_VERSION, cmd: 'pin' }
+    )
+    assert.equal(keyOnlyPin.ok, false)
+    assert.equal(keyOnlyPin.error, 'NO_SESSION_PIN')
+
+    await keyOnlyClient.close()
+    await keyOnlyServer.close()
+
+    await assert.rejects(
+      sendControlCommand(keyOnlyControlPath, { v: CONTROL_VERSION, cmd: 'status' }),
+      (err) => err && err.code === 'CONTROL_UNAVAILABLE'
+    )
+    checks.push('control pin returns NO_SESSION_PIN in key-only mode and the socket is removed on close')
+
+    // ---------------------------------------------------------------------
+    // 10c. two-step mode: trusted devices still require SCRAM
+    // ---------------------------------------------------------------------
+    const twoStepSecret = crypto.randomBytes(32).toString('hex')
+    const twoStepKeyPath = path.join(tempDir, 'twostep-key.json')
+    const twoStepKey = await generateClientKey(twoStepKeyPath)
+    const twoStepDevicesPath = path.join(tempDir, 'twostep_devices')
+    const twoStepControlPath = controlPathFor('twostep')
+
+    await fs.writeFile(
+      twoStepDevicesPath,
+      `trusted ${twoStepKey.publicKey} two-step-trusted\n`,
+      { mode: 0o600 }
+    )
+    try {
+      await fs.chmod(twoStepDevicesPath, 0o600)
+    } catch {
+      // Windows and some filesystems do not enforce POSIX modes.
+    }
+
+    const twoStepServer = await startServer({
+      mode: 'server',
+      masterSecret: twoStepSecret,
+      targetHost: '127.0.0.1',
+      targetPort: echoPort,
+      localPort: 8022,
+      clientKeyPath: twoStepKeyPath,
+      allowedClientKeys: [],
+      verificationMode: 'two-step',
+      trustedDevicesFile: twoStepDevicesPath,
+      customBootstrap: bootstrap,
+      authPin: { enabled: true, unattended: null },
+      telegramAlert: { enabled: false, botToken: '', chatId: '' }
+    }, {
+      log: quiet,
+      showSessionPin: false,
+      sendStartupAlert: false,
+      failDelayMs: [10, 20],
+      lockoutStatePath: path.join(tempDir, 'twostep-lockout.json'),
+      authTimeoutMs: 4_000,
+      interactive: true,
+      controlSocketPath: twoStepControlPath
+    })
+    extraServers.push(twoStepServer)
+
+    assert.equal(twoStepServer.verificationMode, 'two-step')
+    assert.equal(twoStepServer.sessionPin.length, 10)
+
+    const twoStepClientBase = { ...clientBase, masterSecret: twoStepSecret }
+    const noCredentialClient = await startTestClient(twoStepKeyPath, undefined, {
+      base: twoStepClientBase,
+      now: () => Date.now()
+    })
+    const targetBeforeNoCredential = targetConnections
+    const noCredentialResult = await sendAndExpectNoEcho(
+      noCredentialClient.address().port,
+      Buffer.from('no-credential')
+    )
+    assert.equal(noCredentialResult.closed, true)
+    assert.equal(noCredentialResult.received, 0)
+    assert.equal(targetConnections, targetBeforeNoCredential)
+    await noCredentialClient.close()
+
+    const twoStepClient = await startTestClient(
+      twoStepKeyPath,
+      formatSessionPin(twoStepServer.sessionPin),
+      { base: twoStepClientBase, now: () => Date.now() }
+    )
+    const twoStepPayload = crypto.randomBytes(128)
+    assert.deepEqual(await echoThrough(twoStepClient, twoStepPayload), twoStepPayload)
+    checks.push('two-step mode challenges trusted devices and ignores fast-path')
+    await twoStepClient.close()
+    await twoStepServer.close()
+
+    // ---------------------------------------------------------------------
+    // 10d. Doctor and trusted-device expiry enforcement
+    // ---------------------------------------------------------------------
+    const doctorConfigPath = path.join(tempDir, 'doctor-server.json')
+    await fs.writeFile(
+      doctorConfigPath,
+      JSON.stringify(serverConfig, null, 2),
+      { mode: 0o600 }
+    )
+    try {
+      await fs.chmod(doctorConfigPath, 0o600)
+    } catch {
+      // Windows and some filesystems do not enforce POSIX modes.
+    }
+
+    let doctorText = ''
+    const doctorResult = await runDoctor({
+      configPath: doctorConfigPath,
+      output: {
+        write(chunk) {
+          doctorText += String(chunk)
+          return true
+        }
+      }
+    })
+
+    assert.ok(Array.isArray(doctorResult.lines))
+    assert.equal(typeof doctorResult.exitCode, 'number')
+    assert.ok(doctorResult.lines.length > 0)
+    assert.ok(doctorText.includes('p2pgate doctor'))
+    assert.ok(doctorResult.lines.some((line) => line.startsWith('✅')))
+    assert.ok(!doctorText.includes(masterSecret), 'doctor must never print the master secret')
+    checks.push('doctor produces structured checks without crashing or printing secrets')
+
+    assert.equal(validateDeviceAddOptions({ profile: 'trusted' }).ok, false)
+    assert.equal(
+      validateDeviceAddOptions({
+        profile: 'trusted',
+        expires: '2027-01-01T00:00:00Z'
+      }).ok,
+      true
+    )
+    assert.equal(validateDeviceAddOptions({ profile: 'trusted', permanent: true }).ok, true)
+    assert.equal(validateDeviceAddOptions({ profile: 'scram', permanent: true }).ok, false)
+    assert.equal(
+      validateDeviceAddOptions({
+        profile: 'trusted',
+        expires: '2027-01-01T00:00:00Z',
+        permanent: true
+      }).ok,
+      false
+    )
+    checks.push('trusted device add requires --expires or --permanent')
+
+    // ---------------------------------------------------------------------
+    // 11. Zero-drop hourly rotation
+    // ---------------------------------------------------------------------
+    serverNow += 3_600_000
+
+    await waitFor(
+      () => {
+        const slots = gateway.listeningSlots
+        return slots.length === 2 && slots[0] === slot && slots[1] === slot + 1
+      },
+      15_000,
+      'the server to rotate to the new hourly slot'
+    )
+
+    assert.equal(gateway.listeningSlots.includes(slot - 1), false)
+    await new Promise((resolve) => setTimeout(resolve, 300))
+
+    const rotationPayload = crypto.randomBytes(512)
+    originalSocket.write(rotationPayload)
+    assert.deepEqual(
+      await readExactly(originalSocket, rotationPayload.length, 15_000),
+      rotationPayload,
+      'existing session must survive listener rotation'
+    )
+    checks.push('hourly rotation closes the expired listener without dropping the live session')
+  } finally {
+    if (originalSocket) {
+      try {
+        originalSocket.destroy()
+      } catch {
+        // Ignore.
+      }
+    }
+
+    for (const activeClient of clients) {
+      try {
+        await activeClient.close()
+      } catch {
+        // Ignore cleanup errors.
+      }
+    }
+
+    for (const extraServer of extraServers) {
+      try {
+        await extraServer.close()
+      } catch {
+        // Ignore cleanup errors.
+      }
+    }
+
+    if (probeDht) {
+      try {
+        await probeDht.destroy()
+      } catch {
+        // Ignore cleanup errors.
+      }
+    }
+
+    if (gateway) {
+      try {
+        await gateway.close()
+      } catch {
+        // Ignore cleanup errors.
+      }
+    }
+
+    if (bootstrapper) {
+      try {
+        await bootstrapper.destroy()
+      } catch {
+        // Ignore cleanup errors.
+      }
+    }
+
+    if (echoServer) {
+      await new Promise((resolve) => echoServer.close(resolve))
+    }
+
+    await fs.rm(tempDir, { recursive: true, force: true })
+  }
+
+  process.stdout.write('\nSelf-test results:\n')
+  for (const check of checks) process.stdout.write(`  ✅ ${check}\n`)
+  process.stdout.write('\nSELF-TEST PASSED\n')
+}
+
+main().catch((err) => {
+  process.stderr.write(`\nSELF-TEST FAILED\n${err && err.stack ? err.stack : err}\n`)
+  process.exitCode = 1
+})

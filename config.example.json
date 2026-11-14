@@ -1,0 +1,23 @@
+{
+  "mode": "server",
+  "masterSecret": "REPLACE_WITH_64_HEX_CHARS_GENERATED_BY_SETUP",
+  "targetHost": "127.0.0.1",
+  "targetPort": 8022,
+  "localPort": 8022,
+  "clientKeyPath": "~/.p2pgate/client-key.json",
+  "allowedClientKeys": [
+    "REPLACE_WITH_64_HEX_CLIENT_PUBLIC_KEY"
+  ],
+  "verificationMode": "hybrid",
+  "trustedDevicesFile": "~/.p2pgate/trusted_devices",
+  "customBootstrap": [],
+  "authPin": {
+    "enabled": true,
+    "unattended": null
+  },
+  "telegramAlert": {
+    "enabled": false,
+    "botToken": "",
+    "chatId": ""
+  }
+}

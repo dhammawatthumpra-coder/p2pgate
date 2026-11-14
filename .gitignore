@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Runtime secrets and state
+config.json
+client-key.json
+trusted_devices
+lockout-state.json
+lockout-state.json.lock
+control.sock
+*.sock
+.p2pgate/
+*.key
+*.secret
+keys/
+logs/
+*.log
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Test and build artifacts
+coverage/
+.nyc_output/
+*.tmp
+*.tgz
+*.zip
+
+# Editor / OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# npm
+npm-debug.log*
