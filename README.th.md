@@ -869,10 +869,10 @@ p2pgate/
 - ประวัติเวอร์ชัน: [`CHANGELOG.md`](CHANGELOG.md)
 - แนวทางมีส่วนร่วม: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - นโยบายความปลอดภัย: [`SECURITY.md`](SECURITY.md)
-- GitHub Actions รัน `npm ci --ignore-scripts`, `npm run check`
-  และ `npm run self-test` บน Ubuntu (Node 20/22/24), Windows (24)
-  และ macOS (24)
-- คำสั่งรวมสำหรับตรวจก่อน commit:
+- มี workflow ใน `.github/workflows/ci.yml`
+  (Ubuntu Node 20/22/24, Windows 24, macOS 24)
+  สำหรับ private repo อาจต้องเปิด GitHub Actions/billing ของบัญชีก่อน
+- ระหว่างนี้ให้รัน `npm test` ในเครื่องก่อน push
 
 ```sh
 npm test

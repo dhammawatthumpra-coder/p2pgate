@@ -20,6 +20,7 @@
 - `AuthGuard.revoke()` สำหรับเพิกถอนคีย์ถาวรและตัด active tunnel
 - บังคับ `--expires` หรือ `--permanent` เมื่อเพิ่ม trusted device ผ่าน CLI
 - `TESTING.md` คู่มือ manual acceptance test
+- English README (`README.md`) และ Thai translation (`README.th.md`)
 - Self-test เพิ่ม coverage สำหรับ control plane, revoke/unlock, doctor
   และ trusted expiry
 
