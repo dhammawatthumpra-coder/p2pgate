@@ -523,6 +523,7 @@ async function main() {
       rotationCheckMs: 150,
       sendStartupAlert: false,
       showSessionPin: false,
+      interactive: false,
       authTimeoutMs: 4_000,
       failDelayMs: [10, 20],
       lockoutStatePath,
@@ -603,6 +604,8 @@ async function main() {
           connectTimeoutMs: 7_000,
           authTimeoutMs: 4_000,
           now: options.now || (() => serverNow),
+          input: options.input,
+          output: options.output,
           credential
         }
       )
@@ -1052,7 +1055,8 @@ async function main() {
     const twoStepClientBase = { ...clientBase, masterSecret: twoStepSecret }
     const noCredentialClient = await startTestClient(twoStepKeyPath, undefined, {
       base: twoStepClientBase,
-      now: () => Date.now()
+      now: () => Date.now(),
+      input: { isTTY: false }
     })
     const targetBeforeNoCredential = targetConnections
     const noCredentialResult = await sendAndExpectNoEcho(

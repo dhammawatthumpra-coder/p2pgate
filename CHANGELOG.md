@@ -6,6 +6,7 @@
 ## [Unreleased]
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
+- แก้ self-test ให้ทำงานได้ทั้ง terminal แบบ interactive และ non-interactive
 
 ## [1.4.0] - 2026-11-14
 
