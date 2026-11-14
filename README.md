@@ -1,193 +1,203 @@
 # p2pgate (v1.4)
 
-อุโมงค์ TCP แบบ P2P ขนาดเล็ก สำหรับเข้าถึง SSH บนมือถือที่อยู่หลัง CGNAT/ไฟร์วอลล์
-โดยไม่ต้องเปิดพอร์ตออกสู่อินเทอร์เน็ต พร้อม **Mutual SCRAM**, **Verification Policy Modes**,
-**Dual-Source Device Registry** และ **Local Control Plane**
+**English** | [ไทย](README.th.md)
 
-ออกแบบสำหรับ **Redmi 14C (Android 14, Termux)** แต่ใช้ได้กับ Windows, macOS, Linux
-และ Android เครื่องอื่นที่มี Node.js 20 ขึ้นไป
+A small peer-to-peer TCP tunnel for reaching SSH on a device behind CGNAT or a
+firewall without exposing an inbound port. It combines **mutual SCRAM**,
+**verification policy modes**, a **dual-source device registry**, and a
+**local control plane**.
 
-> เวอร์ชัน 1.4 เพิ่ม local control socket (`status`, `pin`, `revoke`),
-> คำสั่ง `doctor` และบังคับวันหมดอายุสำหรับ trusted devices
-> **ต้องอัปเดตทั้ง Server และ Client เป็น v1.4** เพื่อใช้คำสั่งใหม่ครบชุด
-> (โปรโตคอล tunnel/auth ยังเข้ากันได้กับ v1.3)
+Designed for **Redmi 14C (Android 14, Termux)**, but works on Windows, macOS,
+Linux, and other Android devices with Node.js 20 or newer.
+
+> Version 1.4 adds a local control socket (`status`, `pin`, `revoke`),
+> the `doctor` command, and mandatory expiry (or explicit `--permanent`)
+> for trusted devices.
+> **Update both Server and Client to v1.4** to use the full command set.
+> The tunnel/auth protocol remains compatible with v1.3.
 >
-> คู่มือทดสอบก่อนใช้งานจริง: [`TESTING.md`](TESTING.md)
+> Manual testing guide (Thai): [`TESTING.md`](TESTING.md)
 
 ---
 
-## p2pgate ทำอะไร
+## What p2pgate does
 
 ```text
-[PC / Mac / มือถือ]
+[PC / Mac / phone]
 ssh -p 8022 localhost
         │
         ▼
-  p2pgate client  ──── HyperDHT (UDP + เข้ารหัส + hole punching) ────►  p2pgate server
-  (ผูก 127.0.0.1 เท่านั้น)                                              (Termux บนมือถือ)
+  p2pgate client  ──── HyperDHT (UDP + encrypted + hole punching) ────►  p2pgate server
+  (binds 127.0.0.1 only)                                                (Termux on phone)
                                                                               │
                                                                               │ 1) registry/policy
-                                                                              │ 2) fast-path หรือ SCRAM
-                                                                              │ 3) ตรวจ serverSig
+                                                                              │ 2) fast-path or SCRAM
+                                                                              │ 3) verify serverSig
                                                                               ▼
                                                                        127.0.0.1:8022
                                                                            sshd
 ```
 
-- ไม่เปิดพอร์ต SSH สู่อินเทอร์เน็ต
-- Client เปิดเฉพาะ `127.0.0.1`
-- Server ตรวจ Public Key จาก **สองแหล่ง**: `config.json` และ `trusted_devices`
-- **hybrid:** อุปกรณ์ `trusted` ใช้ fast-path, อุปกรณ์อื่นใช้ two-step
-- **key-only:** ใช้ Public Key เท่านั้น ไม่ถาม PIN
-- **two-step:** ถาม PIN/รหัสผ่านทุกครั้ง แม้อุปกรณ์จะถูกทำเครื่องหมาย trusted
-- Client เชื่อมต่อก่อน แล้วจึงถาม PIN เฉพาะเมื่อ Server ต้องใช้ two-step
-- Control socket ภายในเครื่องสำหรับ `status`, `pin`, `revoke` โดยไม่ต้องรีสตาร์ต
-- `p2pgate doctor` ตรวจสุขภาพการติดตั้งและแนะนำวิธีแก้เป็นภาษาไทย
-- trusted devices ต้องมีวันหมดอายุหรือระบุ `--permanent` อย่างชัดเจน
-- Lockout แบบก้าวหน้า 3/15 นาที, 6/6 ชั่วโมง, 10/ถาวร
-- ปลดล็อกได้ทันทีด้วย `p2pgate unlock`
-- ใช้ dependency ภายนอกเพียงตัวเดียว: `hyperdht`
+- No inbound SSH port exposed to the internet
+- Client listens only on `127.0.0.1`
+- Server checks public keys from **two sources**: `config.json` and
+  `trusted_devices`
+- **hybrid:** `trusted` devices use the fast path; others use two-step
+- **key-only:** public key only; no PIN prompt
+- **two-step:** PIN/password required every time, even for trusted devices
+- Client connects first and asks for a PIN only when the Server requires
+  two-step
+- Local control socket for `status`, `pin`, and `revoke` without restarting
+- `p2pgate doctor` checks the installation and prints actionable diagnostics
+- Trusted devices must have an expiry or an explicit `--permanent`
+- Progressive lockout: 3 attempts/15 minutes, 6/6 hours, 10/permanent
+- `p2pgate unlock` restores access immediately
+- Exactly one external dependency: `hyperdht`
 
 ---
 
-## 1) Verification Modes
+## 1) Verification modes
 
-ตั้งค่าใน `config.json`:
+Configure in `config.json`:
 
 ```json
 "verificationMode": "hybrid"
 ```
 
-| โหมด | ค่าเริ่มต้น | พฤติกรรม |
+| Mode | Default | Behavior |
 |---|---|---|
-| `hybrid` | ใช่ | อุปกรณ์ `trusted` ใช้ fast-path; อุปกรณ์ `scram` ใช้ two-step |
-| `key-only` | ไม่ | ตรวจเฉพาะ Public Key; ไม่มี Session PIN และไม่ถาม PIN |
-| `two-step` | ไม่ | ต้องยืนยันทั้ง Public Key และ PIN/รหัสผ่านทุกครั้ง |
+| `hybrid` | Yes | `trusted` devices use the fast path; `scram` devices use two-step |
+| `key-only` | No | Public key only; no Session PIN and no PIN prompt |
+| `two-step` | No | Public key plus PIN/password on every connection |
 
 ### hybrid
 
-- อุปกรณ์ที่ลงทะเบียนใน `trusted_devices` ด้วย `trusted` และยังไม่หมดอายุ
-  จะเริ่ม session ได้ทันทีหลังตรวจ Public Key
-- อุปกรณ์ที่มาจาก `config.json` หรือโปรไฟล์ `scram` ต้องยืนยันแบบ two-step
-- ถ้า Server รันแบบไม่มี terminal และไม่มี Unattended Password
-  อุปกรณ์ที่ต้อง two-step จะถูกปฏิเสธ
-  แต่ trusted devices ยังใช้ fast-path ได้
+- A device registered as `trusted` in `trusted_devices` and not expired starts
+  a session immediately after the public-key check
+- Devices from `config.json`, or devices with the `scram` profile, require
+  two-step verification
+- If the Server runs without a terminal and has no Unattended Password,
+  two-step devices are declined, but trusted devices can still use the fast path
 
 ### key-only
 
-- เหมาะกับ automated workflow หรือ Server ที่รันเบื้องหลัง
-- ทุกคีย์ที่ลงทะเบียนและยังไม่หมดอายุใช้ fast-path
-- **ไม่สร้าง Session PIN** และไม่ถาม PIN
-- ต้องป้องกันไฟล์กุญแจ Client เป็นพิเศษ เพราะไม่มี PIN เป็นด่านที่สอง
+- Suitable for automation or a Server running in the background
+- Every registered, non-expired key uses the fast path
+- **No Session PIN is created** and no PIN is requested
+- Protect the client key file carefully because there is no second factor
 
 ### two-step
 
-- ต้องยืนยันทั้ง Public Key และ PIN/รหัสผ่านทุกครั้ง
-- โปรไฟล์ `trusted` ใน `trusted_devices` จะไม่ถูกใช้เป็น fast-path
-- เหมาะกับเครื่องที่ต้องการความเข้มงวดสูงสุด
+- Requires both the public key and PIN/password on every connection
+- The `trusted` profile in `trusted_devices` is not used as a fast path
+- Best for environments that need the strictest policy
 
-> ค่าเริ่มต้นของ config v1.2 ที่ไม่มี `verificationMode` คือ `hybrid`
-> ถ้า config เดิมมี `authPin.enabled: false` จะถูกตีความเป็น `key-only`
+> A v1.2 config without `verificationMode` is treated as `hybrid`.
+> A legacy config with `authPin.enabled: false` is treated as `key-only`.
 
 ---
 
-## 2) Dual-Source Device Registry
+## 2) Dual-source device registry
 
-Server รวมรายการอุปกรณ์จาก:
+The Server merges devices from:
 
-1. `allowedClientKeys` ใน `config.json` (โปรไฟล์ `scram` โดยปริยาย)
-2. ไฟล์ `trusted_devices` (ค่าเริ่มต้น `~/.p2pgate/trusted_devices`)
+1. `allowedClientKeys` in `config.json` (implicit `scram` profile)
+2. The `trusted_devices` file (default `~/.p2pgate/trusted_devices`)
 
-กำหนด path ได้ใน `config.json`:
+Set the path in `config.json`:
 
 ```json
 "trustedDevicesFile": "~/.p2pgate/trusted_devices"
 ```
 
-### รูปแบบไฟล์
+### File format
 
 ```text
-# บรรทัดว่างและบรรทัดที่เริ่มด้วย # จะถูกข้าม
+# Blank lines and lines starting with # are ignored
 trusted <64-char-hex-public-key> primary-workstation
 trusted,expires=2026-12-31T23:59:59Z <64-char-hex-public-key> contractor-laptop
 scram <64-char-hex-public-key> shared-terminal
 <64-char-hex-public-key> legacy-default-two-step-client
 ```
 
-- บรรทัดที่ไม่มี option = โปรไฟล์ `scram`
-- `trusted` = fast-path ภายใต้ `hybrid` (และทุกคีย์ภายใต้ `key-only`)
-- `scram` = two-step
-- `expires=` ต้องเป็น ISO-8601 และมี timezone เช่น `...Z`
-- ป้ายชื่อ (label) เป็นข้อความที่เหลือบนบรรทัด
+- A line without options uses the `scram` profile
+- `trusted` means fast path under `hybrid` (and every key under `key-only`)
+- `scram` means two-step
+- `expires=` must be ISO-8601 with a timezone, for example `...Z`
+- The label is the remaining text on the line
 
 ### Precedence
 
-- คีย์ที่มีเฉพาะใน `config.json` → โปรไฟล์ `scram`
-- คีย์ที่มีเฉพาะใน `trusted_devices` → ใช้โปรไฟล์/วันหมดอายุที่ระบุ
-- คีย์ที่มีทั้งสองที่และรายการในไฟล์ยัง active → `trusted_devices` ชนะ
-- คีย์ที่มีในไฟล์แต่ **หมดอายุ** → ถูกปฏิเสธ แม้จะยังอยู่ใน `config.json`
+- Key only in `config.json` → `scram` profile
+- Key only in `trusted_devices` → use the file's profile and expiry
+- Key in both and the file entry is active → `trusted_devices` wins
+- Key in the file but **expired** → declined, even if it is still in
+  `config.json`
 
-### สิทธิ์ไฟล์ (POSIX)
+### File permissions (POSIX)
 
-ก่อนใช้ fast-path ระบบตรวจว่าไฟล์ `trusted_devices`:
+Before using the fast path, the Server verifies that `trusted_devices`:
 
-- เป็นไฟล์ปกติ ไม่ใช่ symlink
-- เจ้าของคือผู้ใช้ปัจจุบัน
-- ไม่มีสิทธิ์สำหรับ group/other (`chmod 600` หรือเข้มกว่า)
+- Is a regular file, not a symlink
+- Is owned by the current user
+- Has no group/other permissions (`chmod 600` or stricter)
 
-ถ้าสิทธิ์ไม่ปลอดภัย:
+If permissions are insecure:
 
-- `hybrid`: รายการ `trusted` จะไม่ใช้ fast-path (ต้อง two-step)
-- `key-only`: รายการที่มาจากไฟล์จะถูกปฏิเสธ
-- `two-step`: ยังต้อง two-step ตามปกติ
+- `hybrid`: `trusted` entries cannot use the fast path (two-step required)
+- `key-only`: entries from the file are declined
+- `two-step`: two-step is still required as usual
 
-### Live Reload
+### Live reload
 
-Server ติดตาม `mtimeMs` ของ `trusted_devices`
-และโหลดใหม่เมื่อไฟล์เปลี่ยน โดยไม่ต้องรีสตาร์ต
-แนะนำให้แก้ผ่าน `p2pgate devices add/remove` ซึ่งเขียนแบบ atomic
+The Server watches the `mtimeMs` of `trusted_devices` and reloads it when the
+file changes, without a restart. Prefer editing it through
+`p2pgate devices add/remove`, which writes atomically.
 
 ---
 
-## 3) การเชื่อมต่อแบบใหม่ (Deferred Input)
+## 3) Deferred client input
 
-Client จะ **เชื่อมต่อก่อน** แล้วรอสถานะจาก Server:
+The Client **connects first** and waits for a status frame from the Server:
 
-| สถานะ | ความหมาย | การทำงานของ Client |
+| Status | Meaning | Client behavior |
 |---|---|---|
-| `FASTPATH_READY` | อุปกรณ์ใช้ fast-path | ไม่ถาม PIN, เริ่มส่งข้อมูลทันที |
-| `CHALLENGE_REQUIRED` | ต้องยืนยัน two-step | อ่าน PIN/รหัสผ่าน แล้วทำ SCRAM |
-| `DECLINED` | ไม่ได้รับอนุญาต/หมดอายุ/ถูกระงับ | แสดงเหตุผลและปิด connection |
+| `FASTPATH_READY` | Device uses the fast path | No PIN prompt; start sending data |
+| `CHALLENGE_REQUIRED` | Two-step required | Read PIN/password, then run SCRAM |
+| `DECLINED` | Unlisted, expired, or suspended | Show the reason and close the connection |
 
-- Client ไม่ถาม PIN ก่อนเชื่อมต่ออีกต่อไป
-- ถ้าเป็น fast-path หรือ key-only จะไม่มีการถาม PIN เลย
-- `--pin-stdin` จะอ่าน stdin **เฉพาะเมื่อถูกถาม** (ไม่บล็อก fast-path)
-- `P2PGATE_PIN` ถูกลบออกจาก process ทันทีหลังอ่านตอนเริ่ม Client
+- The Client no longer asks for a PIN before connecting
+- Fast-path and key-only sessions never prompt for a PIN
+- `--pin-stdin` reads stdin **only when challenged** (it does not block the
+  fast path)
+- `P2PGATE_PIN` is removed from the process environment immediately after the
+  Client reads it at startup
 
-หลังได้สถานะ `CHALLENGE_REQUIRED` Client จะส่ง `READY`
-แล้ว Server จึงส่ง SCRAM challenge และเริ่มจับเวลา 10 วินาที
+After `CHALLENGE_REQUIRED`, the Client sends `READY`. The Server then sends the
+SCRAM challenge and starts the 10-second authentication timeout.
 
 ---
 
-## 4) Session PIN และ Unattended Password
+## 4) Session PIN and Unattended Password
 
 ### Session PIN
 
-- 10 ตัวอักษร Base32: `23456789ABCDEFGHJKLMNPQRSTUVWXYZ`
-- แสดงเป็น `XXXXX-XXXXX` ในกรอบ ASCII บน console แบบ interactive
-- เก็บในหน่วยความจำเท่านั้น ไม่เขียนลง config/log/ไฟล์
-- เปลี่ยนใหม่เมื่อมีผู้ใส่ผิดครบ 3 หรือ 6 ครั้ง (salt ใหม่ทุกครั้ง)
-- **key-only ไม่สร้าง Session PIN**
-- Server ที่รันแบบ headless จะไม่แสดง PIN
-  ให้ใช้ fast-path, key-only หรือ Unattended Password
+- 10 characters from the Base32 alphabet:
+  `23456789ABCDEFGHJKLMNPQRSTUVWXYZ`
+- Displayed as `XXXXX-XXXXX` in an ASCII box on an interactive terminal
+- Kept in memory only; never written to config, logs, or disk
+- Rotated after 3 or 6 failed attempts (with a new salt each time)
+- **key-only does not create a Session PIN**
+- A headless Server does not display the PIN; use the fast path, key-only, or
+  an Unattended Password
 
 ### Unattended Password
 
-- ยาวอย่างน้อย 12 ตัวอักษร
-- ตัวพิมพ์เล็ก-ใหญ่มีความหมาย
-- ใช้ได้ใน `hybrid`/`two-step` แม้ Server ไม่มี terminal
-- เก็บเฉพาะ SCRAM verifier (`saltHex`, `storedKeyHex`, `serverKeyHex`)
-- ตั้งค่าผ่าน `p2pgate setup`
+- At least 12 characters
+- Case-sensitive
+- Works with `hybrid`/`two-step` even when the Server has no terminal
+- Only the SCRAM verifier is stored (`saltHex`, `storedKeyHex`, `serverKeyHex`)
+- Configure it through `p2pgate setup`
 
 ```json
 "authPin": {
@@ -200,25 +210,24 @@ Client จะ **เชื่อมต่อก่อน** แล้วรอส�
 }
 ```
 
-ถ้าไม่มีจะเป็น `"unattended": null`
+If not configured, the value is `"unattended": null`.
 
 ---
 
-## 5) การกรอก Credential ฝั่ง Client
+## 5) Client credential input
 
-ลำดับความสำคัญ:
+Priority order:
 
-1. `--pin-stdin` — อ่านหนึ่งบรรทัดจาก stdin เมื่อ Server ต้องใช้ two-step
-2. `P2PGATE_PIN` — environment variable (ลบออกจาก process ทันที)
-3. Hidden prompt — ค่าเริ่มต้น
+1. `--pin-stdin` — read one line from stdin when the Server requires two-step
+2. `P2PGATE_PIN` — environment variable (removed from the process immediately)
+3. Hidden prompt — default
 
-> v1.3 ไม่มี flag `--pin`
-> เพื่อไม่ให้รหัสผ่านปรากฏใน `ps` หรือ shell history
+> There is no `--pin` flag, so passwords do not appear in `ps` or shell history.
 >
-> หลีกเลี่ยง `P2PGATE_PIN=... p2pgate client` แบบ inline
-> ใช้ hidden prompt หรือ `--pin-stdin` จากไฟล์ที่ปลอดภัย
+> Avoid inline `P2PGATE_PIN=... p2pgate client`; use a hidden prompt or
+> `--pin-stdin` from a protected file.
 
-ตัวอย่างบน Termux/Linux:
+Termux/Linux example:
 
 ```sh
 install -m 600 /dev/null ~/.p2pgate/pin.txt
@@ -226,13 +235,13 @@ nano ~/.p2pgate/pin.txt
 p2pgate client --pin-stdin < ~/.p2pgate/pin.txt
 ```
 
-บน Windows PowerShell:
+Windows PowerShell:
 
 ```powershell
 Get-Content .\pin.txt | p2pgate client --pin-stdin
 ```
 
-ตัวอย่าง environment variable:
+Environment variable example:
 
 ```sh
 export P2PGATE_PIN='...'
@@ -242,21 +251,21 @@ unset P2PGATE_PIN
 
 ---
 
-## 6) Progressive Lockout และ `unlock`
+## 6) Progressive lockout and `unlock`
 
-นับตาม Public Key ภายใน 24 ชั่วโมง:
+Failures are counted per public key within a 24-hour window:
 
-| ผิด | ผล |
+| Failures | Result |
 |---|---|
-| 3 ครั้ง | ระงับ 15 นาที + เปลี่ยน Session PIN |
-| 6 ครั้ง | ระงับ 6 ชั่วโมง + เปลี่ยน Session PIN |
-| 10 ครั้ง | ระงับถาวร |
+| 3 | Suspend for 15 minutes + rotate the Session PIN |
+| 6 | Suspend for 6 hours + rotate the Session PIN |
+| 10 | Permanent suspension |
 
-- invalid response ถูกหน่วง 2.5–3.5 วินาที
-- จำกัด concurrent verification 1 ต่อคีย์ และ 3 ทั้งระบบ
-- สถานะเก็บที่ `~/.p2pgate/lockout-state.json` สิทธิ์ `0600`
-- ใช้ lockfile + atomic rename + mtime reload
-- `p2pgate unlock` มีผลกับ Server ที่รันอยู่ทันที
+- Invalid responses are delayed by 2.5–3.5 seconds
+- Concurrent verification is limited to 1 per key and 3 in total
+- State is stored in `~/.p2pgate/lockout-state.json` with mode `0600`
+- Uses a lockfile, atomic rename, and mtime reload
+- `p2pgate unlock` affects a running Server immediately
 
 ```sh
 p2pgate unlock --list
@@ -266,7 +275,7 @@ p2pgate unlock --all
 
 ---
 
-## 7) CLI สำหรับจัดการอุปกรณ์
+## 7) Device management CLI
 
 ```sh
 p2pgate devices list
@@ -277,50 +286,50 @@ p2pgate devices add <publicKeyHex> --mode scram --comment "shared-terminal"
 p2pgate devices remove <publicKeyHex>
 ```
 
-- `list` แสดงคีย์ทั้งหมดที่ merge แล้ว: แหล่งที่มา, โปรไฟล์, วันหมดอายุ, ป้ายชื่อ
-- `add`/`remove` เขียน `trusted_devices` แบบ atomic
-- `--mode` ค่าเริ่มต้นคือ `scram`; ใช้ `--mode trusted` สำหรับ fast-path
-- `--expires` ต้องเป็น ISO-8601 พร้อม timezone
-- **`--mode trusted` ต้องระบุ `--expires` หรือ `--permanent` เท่านั้น**
-  - ถ้าไม่ระบุ ระบบจะปฏิเสธและอธิบายเป็นภาษาไทย
-  - ถ้าระบุทั้งสองอย่าง ระบบจะปฏิเสธ
-  - `--permanent` ใช้ได้เฉพาะกับ trusted
-- ระบบจะเตือนว่า trusted device ข้ามการถาม PIN
-- `remove` จะเตือนถ้าคีย์นั้นยังอยู่ใน `allowedClientKeys` ของ `config.json`
-- ใช้ `--config <path>` เพื่อระบุ config
+- `list` shows the merged registry: source, profile, expiry, and label
+- `add`/`remove` update `trusted_devices` atomically
+- `--mode` defaults to `scram`; use `--mode trusted` for the fast path
+- `--expires` must be ISO-8601 with a timezone
+- **`--mode trusted` requires either `--expires` or `--permanent`**
+  - If neither is supplied, the command is rejected
+  - If both are supplied, the command is rejected
+  - `--permanent` is valid only for trusted devices
+- The command warns that trusted devices bypass the PIN prompt
+- `remove` warns if the key is still in `config.json` `allowedClientKeys`
+- Use `--config <path>` to select a config file
 
-ตัวอย่างผลลัพธ์ `devices list`:
+> CLI output is currently in Thai. The sample below is translated.
 
 ```text
 - aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-  แหล่งที่มา: config.json (allowedClientKeys)
-  โปรไฟล์: scram
-  หมดอายุ: -
-  ป้ายชื่อ: -
-  สถานะ: ใช้งาน
-  Fast-path: ไม่ใช่
+  Source: config.json (allowedClientKeys)
+  Profile: scram
+  Expires: -
+  Label: -
+  Status: active
+  Fast-path: no
 ```
 
 ---
 
-## 8) Local Control Plane (`status` / `pin` / `revoke`)
+## 8) Local control plane (`status` / `pin` / `revoke`)
 
-Server v1.4 เปิด **local control socket** สำหรับจัดการเซิร์ฟเวอร์ที่กำลังรันอยู่
-โดยไม่ต้องรีสตาร์ตและไม่ต้องเปิดพอร์ต TCP เพิ่ม
+Server v1.4 opens a **local control socket** so the owner can manage a running
+Server without restarting it and without opening another TCP port.
 
-### ตำแหน่ง socket
+### Socket location
 
-| ระบบ | ตำแหน่ง |
+| Platform | Location |
 |---|---|
-| Linux / macOS / Termux | `~/.p2pgate/control.sock` (สิทธิ์ `0600`, โฟลเดอร์ `0700`) |
-| Windows | named pipe `\\.\pipe\p2pgate-control-<hash>` |
+| Linux / macOS / Termux | `~/.p2pgate/control.sock` (mode `0600`, directory `0700`) |
+| Windows | Named pipe `\\.\pipe\p2pgate-control-<hash>` |
 
-- ใช้ได้เฉพาะผู้ใช้เดียวกันบนเครื่องเดียวกัน
-- socket ถูกลบเมื่อเซิร์ฟเวอร์ปิดอย่างถูกต้อง
-- ถ้า socket ค้างจาก process ที่ตายไปแล้ว ระบบจะ probe ก่อนและลบทิ้ง
-- ถ้ามีเซิร์ฟเวอร์อื่นใช้ socket อยู่ จะเริ่มไม่ได้และแจ้ง `CONTROL_IN_USE`
+- Same-user, same-machine access only
+- The socket is removed on graceful shutdown
+- A stale socket from a dead process is probed before removal
+- If another live Server owns the socket, startup fails with `CONTROL_IN_USE`
 
-### คำสั่ง
+### Commands
 
 ```sh
 p2pgate status
@@ -330,92 +339,93 @@ p2pgate revoke <clientPublicKeyHex>
 
 #### `p2pgate status`
 
-แสดงข้อมูลที่ไม่มี secrets:
+Shows non-secret operational state:
 
-- โหมดยืนยันตัวตน
-- สถานะว่ามี Session PIN หรือไม่ (ไม่แสดง PIN)
-- slot ปัจจุบันและ slots ที่เปิดอยู่
-- จำนวนอุปกรณ์ลงทะเบียน
-- จำนวน connection และคีย์ที่เชื่อมต่อ
-- จำนวนที่ถูกบล็อกสะสม
-- uptime, ไฟล์ trusted_devices, control socket path
+- Verification mode
+- Whether a Session PIN is available (never the PIN itself)
+- Current slot and listening slots
+- Registered device count
+- Active connections and connected keys
+- Cumulative blocked count
+- Uptime, trusted-devices file, and control socket path
 
 #### `p2pgate pin`
 
-ขอ Session PIN ปัจจุบันจากหน่วยความจำของเซิร์ฟเวอร์ผ่าน control socket:
+Requests the current Session PIN from Server memory over the control socket:
 
 ```text
-=== Session PIN ปัจจุบัน ===
+=== Current Session PIN ===
    ABCDE-FGHJK
    generation: 1
 ```
 
-- PIN ไม่ถูกเขียนลงดิสก์หรือ log
-- โหมด `key-only` จะตอบ `NO_SESSION_PIN`
-- ถ้าเซิร์ฟเวอร์ไม่ได้รันอยู่ จะแจ้งให้เริ่ม `p2pgate server`
+- The PIN is never written to disk or logs
+- `key-only` returns `NO_SESSION_PIN`
+- If the Server is not running, the command tells you to start
+  `p2pgate server`
 
 #### `p2pgate revoke <key>`
 
-- เพิกถอนคีย์แบบถาวร (`reason: manual`)
-- ตัด connection ที่เปิดอยู่ของคีย์นั้นทันที
-- การเชื่อมต่อครั้งถัดไปจะถูกปฏิเสธ
-- ถ้าเซิร์ฟเวอร์ไม่ได้รันอยู่ คำสั่งจะบันทึกการเพิกถอนลง lockout state โดยตรง
-  และมีผลเมื่อเซิร์ฟเวอร์เริ่มทำงาน/อ่าน state ใหม่
+- Permanently suspends the key (`reason: manual`)
+- Immediately closes active connections for that key
+- Future connections are declined
+- If the Server is not running, the command persists the revocation directly
+  to the lockout state; it takes effect when the Server reads the state
 
-คืนสิทธิ์ด้วย:
+Restore access with:
 
 ```sh
 p2pgate unlock <clientPublicKeyHex>
 ```
 
-> `revoke` เป็นการตัดที่ระดับ p2pgate
-> SSH session ที่ถูก pipe ผ่านอุโมงค์จะถูกปิดตาม stream
-> แต่ควรตรวจสอบฝั่ง sshd เพิ่มเติมหากต้องการตัด session ระดับ OS
+> `revoke` operates at the p2pgate layer. SSH sessions piped through the tunnel
+> are closed with the stream. Check sshd separately if you need an OS-level
+> session kill.
 
 ---
 
 ## 9) `p2pgate doctor`
 
-คำสั่งตรวจสุขภาพแบบอ่านอย่างเดียว (read-only) แสดงผลภาษาไทยด้วย
-`✅` / `⚠️` / `❌`
+A read-only diagnostic command. Output is currently in Thai with
+`✅` / `⚠️` / `❌`.
 
 ```sh
 p2pgate doctor
 p2pgate doctor --config /path/to/config.json
 ```
 
-ตรวจสอบ:
+It checks:
 
-1. เวอร์ชัน Node.js (ต้อง >= 20)
-2. ไฟล์ config อ่านและ validate ได้
-3. `verificationMode` และฟิลด์ที่เกี่ยวข้อง
-4. สิทธิ์ไฟล์ config, client key, trusted_devices, lockout state
-   - บน Windows จะแจ้งว่าไม่ได้ตรวจ POSIX permission
-5. Device registry: จำนวนอุปกรณ์, อุปกรณ์หมดอายุ,
-   trusted ที่ไม่มีวันหมดอายุ, สิทธิ์ไฟล์, registry ว่าง
-6. ปลายทาง: Server ตรวจว่า `127.0.0.1:<targetPort>` มี sshd ฟังอยู่หรือไม่
-   Client ตรวจว่าพอร์ตท้องถิ่นว่างหรือไม่
-7. Control plane: ถ้าเซิร์ฟเวอร์รันอยู่จะ query `status`
-8. Lockout state: จำนวนที่ถูกระงับ/เพิกถอน
-9. คำเตือนเรื่องการมองเห็น Session PIN ในโหมดไม่มี terminal
-10. กุญแจ Client ฝั่ง Client ว่ามีและถูกต้องหรือไม่
+1. Node.js version (must be >= 20)
+2. Config file exists, parses, and validates
+3. `verificationMode` and related fields
+4. Permissions of config, client key, trusted_devices, and lockout state
+   - On Windows it reports that POSIX permission checks are skipped
+5. Device registry: count, expired entries, trusted entries without expiry,
+   file permissions, empty registry
+6. Target: Server checks whether `127.0.0.1:<targetPort>` is listening;
+   Client checks whether the local port is available
+7. Control plane: queries `status` if the Server is running
+8. Lockout state: suspended and revoked counts
+9. Warning when a headless Server cannot expose a Session PIN
+10. Client key presence and validity in Client mode
 
-- exit code `0` เมื่อไม่มี `❌`
-- exit code `1` เมื่อมีปัญหาวิกฤต
-- ไม่พิมพ์ `masterSecret`, seed, verifier หรือ PIN
-
----
-
-## 10) สิ่งที่ต้องมี
-
-- มือถือ Android + Termux + Termux:Boot (F-Droid)
-- Node.js 20 ขึ้นไป
-- OpenSSH ฝั่ง Server และ `ssh` ฝั่ง Client
-- อินเทอร์เน็ตที่อนุญาต UDP ขาออก
+- Exit code `0` when there is no `❌`
+- Exit code `1` when a critical check fails
+- Never prints `masterSecret`, seeds, verifier values, or PINs
 
 ---
 
-## 11) ติดตั้งบน Redmi 14C (Termux)
+## 10) Requirements
+
+- Android phone + Termux + Termux:Boot (F-Droid), optional
+- Node.js 20 or newer
+- OpenSSH on the Server and `ssh` on the Client
+- Internet access that allows outbound UDP
+
+---
+
+## 11) Install on Termux (Redmi 14C)
 
 ```sh
 pkg update && pkg upgrade -y
@@ -423,7 +433,7 @@ pkg install nodejs openssh nano procps -y
 node -v
 ```
 
-คัดลอกโปรเจกต์ไปที่ `~/p2pgate` แล้ว:
+Copy the project to `~/p2pgate`, then:
 
 ```sh
 cd ~/p2pgate
@@ -433,7 +443,7 @@ npm run check
 npm run self-test
 ```
 
-ถ้า native prebuild ใช้ไม่ได้:
+If a native prebuild is unavailable:
 
 ```sh
 pkg install python build-essential -y
@@ -442,20 +452,20 @@ npm install --no-audit --no-fund
 
 ---
 
-## 12) ตั้งค่า SSH ให้ปลอดภัย
+## 12) Harden SSH
 
 ```sh
 passwd
 sshd
 ```
 
-สร้าง SSH key บน Client:
+Create an SSH key on the Client:
 
 ```sh
 ssh-keygen -t ed25519
 ```
 
-นำ `id_ed25519.pub` ไปใส่ใน Termux:
+Add `id_ed25519.pub` to Termux:
 
 ```sh
 mkdir -p ~/.ssh
@@ -464,7 +474,7 @@ chmod 700 ~/.ssh
 chmod 600 ~/.ssh/authorized_keys
 ```
 
-ปิด PasswordAuthentication:
+Disable password authentication:
 
 ```sh
 nano $PREFIX/etc/ssh/sshd_config
@@ -485,45 +495,46 @@ ssh -p 8022 localhost
 
 ---
 
-## 13) ตั้งค่า Server
+## 13) Server setup
 
 ```sh
 cd ~/p2pgate
 p2pgate setup
 ```
 
-เลือก `1) Server` และเลือกโหมด:
+Choose `1) Server` and select a mode:
 
 ```text
-1) hybrid (แนะนำ)
+1) hybrid (recommended)
 2) key-only
 3) two-step
 ```
 
-- `hybrid`: trusted devices ใช้ fast-path, อุปกรณ์อื่น two-step
-- `key-only`: ไม่ถาม PIN (จะไม่ถามรหัสผ่านสำรอง)
-- `two-step`: ถาม PIN/รหัสผ่านทุกครั้ง
+- `hybrid`: trusted devices use the fast path; others use two-step
+- `key-only`: no PIN prompt (and no unattended password prompt)
+- `two-step`: PIN/password on every connection
 
-จากนั้น:
+Then:
 
-1. วาง Public Key ของ Client
-2. ตั้ง Unattended Password (ยกเว้น key-only)
-3. บันทึก config
-4. เพิ่ม trusted devices ถ้าต้องการ:
+1. Paste the Client public key
+2. Configure an Unattended Password (except in key-only mode)
+3. Save the config
+4. Add trusted devices if needed:
    ```sh
    p2pgate devices add <key> --mode trusted --expires 2027-12-31T23:59:59Z --comment "laptop"
    ```
-5. เริ่ม Server:
+5. Start the Server:
    ```sh
    p2pgate server
    ```
 
-ถ้ารันใน terminal และโหมดเป็น hybrid/two-step จะเห็น Session PIN ในกรอบ
-ถ้ารันแบบ headless จะไม่เห็น PIN; ใช้ trusted fast-path หรือ Unattended Password
+In an interactive terminal with hybrid/two-step, the Session PIN is shown in a
+box. In headless mode the PIN is not shown; use trusted fast-path or an
+Unattended Password.
 
 ---
 
-## 14) ตั้งค่า Client
+## 14) Client setup
 
 ```sh
 cd p2pgate
@@ -532,31 +543,31 @@ npm link --ignore-scripts
 p2pgate setup
 ```
 
-เลือก `2) Client` วาง `masterSecret` และกำหนดพอร์ต
+Choose `2) Client`, paste the `masterSecret`, and set the local port.
 
-นำ Public Key ไปเพิ่มที่ Server:
+Add the Client public key on the Server:
 
 ```sh
 p2pgate setup
 ```
 
-หรือเพิ่มเป็น trusted device:
+Or register it as a trusted device:
 
 ```sh
 p2pgate devices add <key> --mode trusted --expires 2027-12-31T23:59:59Z --comment "my-pc"
 ```
 
-เริ่มอุโมงค์:
+Start the tunnel:
 
 ```sh
 p2pgate client
 ```
 
-- ถ้า Server ส่ง `FASTPATH_READY` จะไม่ถาม PIN
-- ถ้า Server ส่ง `CHALLENGE_REQUIRED` จะถาม PIN/รหัสผ่านในหน้าต่าง Client
-- ถ้า Server ส่ง `DECLINED` จะแสดงเหตุผลและปิด
+- `FASTPATH_READY`: no PIN prompt
+- `CHALLENGE_REQUIRED`: prompt for PIN/password in the Client terminal
+- `DECLINED`: show the reason and close
 
-จากนั้นเปิด terminal ใหม่:
+Then open another terminal:
 
 ```sh
 ssh -p 8022 localhost
@@ -564,7 +575,7 @@ ssh -p 8022 localhost
 
 ---
 
-## 15) ใช้งานประจำวัน
+## 15) Daily use
 
 ```sh
 # Server
@@ -577,11 +588,11 @@ p2pgate client
 ssh -p 8022 localhost
 ```
 
-- trusted devices ภายใต้ hybrid ไม่ต้องกรอก PIN
-- อุปกรณ์ scram ต้องกรอก PIN/รหัสผ่าน
-- key-only ไม่ถาม PIN
-- two-step ถามทุกครั้ง
-- ถ้า PIN ถูกเปลี่ยนหรือถูกระงับ Client จะแจ้งเป็นภาษาไทย
+- Trusted devices under hybrid do not need a PIN
+- `scram` devices need a PIN/password
+- `key-only` never asks for a PIN
+- `two-step` asks every time
+- If the PIN rotates or the key is suspended, the Client reports it
 
 ---
 
@@ -593,19 +604,19 @@ cp ~/p2pgate/scripts/termux-boot.sh ~/.termux/boot/start-p2pgate.sh
 chmod +x ~/.termux/boot/start-p2pgate.sh
 ```
 
-- ตั้ง Battery ของ Termux เป็น Unrestricted
-- เปิด Termux:Boot อย่างน้อยหนึ่งครั้ง
-- รีสตาร์ตเครื่อง
+- Set Termux battery usage to Unrestricted
+- Open Termux:Boot at least once
+- Reboot the device
 
-โหมดที่เหมาะกับ headless:
+Modes suitable for headless operation:
 
-- `key-only` — ไม่ต้องใช้ PIN
-- `hybrid` + trusted devices — อุปกรณ์เหล่านั้นใช้ fast-path
-- `hybrid`/`two-step` + Unattended Password — ใช้รหัสผ่านสำรอง
+- `key-only` — no PIN
+- `hybrid` + trusted devices — those devices use the fast path
+- `hybrid`/`two-step` + Unattended Password
 
-Session PIN ไม่ถูกเขียนลงไฟล์หรือ log ในทุกกรณี
+The Session PIN is never written to a file or log.
 
-log:
+Log:
 
 ```sh
 tail -f ~/.p2pgate/server.log
@@ -613,166 +624,168 @@ tail -f ~/.p2pgate/server.log
 
 ---
 
-## 17) Telegram (ไม่บังคับ)
+## 17) Telegram (optional)
 
-1. สร้างบอทกับ `@BotFather`
-2. เอา Bot Token
-3. ส่งข้อความหาบอทหนึ่งครั้ง
-4. เอา Chat ID จาก `getUpdates`
+1. Create a bot with `@BotFather`
+2. Copy the Bot Token
+3. Send one message to the bot
+4. Read the Chat ID from `getUpdates`
 
-ระบบจะแจ้งเมื่อ:
+Notifications are sent when:
 
-- มีคีย์ที่ไม่รู้จักพยายามเชื่อมต่อ (จำกัด 1 ครั้ง/60 วินาที/คีย์)
-- ใส่ผิด 3 ครั้ง → ระงับ 15 นาที + เปลี่ยน PIN
-- ใส่ผิด 6 ครั้ง → ระงับ 6 ชั่วโมง + เปลี่ยน PIN
-- ใส่ผิด 10 ครั้ง → ระงับถาวร
+- An unknown key attempts to connect (rate-limited to once per 60 seconds per
+  key)
+- 3 failed attempts → 15-minute suspension + PIN rotation
+- 6 failed attempts → 6-hour suspension + PIN rotation
+- 10 failed attempts → permanent suspension
 
-ข้อความจะไม่มี PIN หรือรหัสผ่าน
-
----
-
-## 18) ความปลอดภัย
-
-- **`masterSecret`** ใช้สร้างคีย์ Server รายชั่วโมง
-- **`allowedClientKeys` + `trusted_devices`** เป็น registry
-- **`hybrid`** ให้ fast-path เฉพาะ trusted devices
-- **`key-only`** ไม่มี PIN — ต้องปกป้อง Client key และ registry เป็นพิเศษ
-- **`two-step`** เข้มที่สุด
-- **Session PIN** อยู่ใน RAM เท่านั้น
-- **Unattended Password** เก็บเฉพาะ SCRAM verifier
-- **SCRAM mutual** ตรวจทั้ง Client proof และ Server signature
-- **ไม่มี `--pin`** และ `P2PGATE_PIN` ถูกลบออกจาก process
-- **`trusted_devices`** ต้องเป็นเจ้าของโดยผู้ใช้และ `chmod 600`
-  หากสิทธิ์ไม่ปลอดภัย fast-path จะถูกปิด
-- **Progressive lockout** 3/15m, 6/6h, 10/permanent
-- **Control socket** เป็น local-only (`0600` หรือ named pipe ของผู้ใช้)
-  - PIN ถูกอ่านจาก RAM และส่งผ่าน socket เท่านั้น
-  - revoke ตัด connection ที่เปิดอยู่และบันทึกการระงับถาวร
-  - ไม่มี TCP listener สำหรับ control plane
-- **trusted device** ข้าม PIN จึงต้องมีวันหมดอายุหรือ `--permanent` อย่างชัดเจน
-- **พอร์ตภายใน** ผูกกับ `127.0.0.1`
-- **ไฟล์ config/กุญแจ/lockout/trusted_devices** สิทธิ์ `0600`
-- **doctor** ไม่พิมพ์ secrets และไม่แก้ไขไฟล์
-
-> p2pgate ไม่ได้แทนที่ SSH security ทั้งหมด
-> แต่ช่วยให้เข้าถึง SSH ได้โดยไม่ต้องเปิดพอร์ตสู่สาธารณะ
+Messages never contain the PIN or password.
 
 ---
 
-## 19) คำสั่งทั้งหมด
+## 18) Security
 
-| คำสั่ง | ความหมาย |
+- **`masterSecret`** derives the hourly Server keys
+- **`allowedClientKeys` + `trusted_devices`** form the registry
+- **`hybrid`** gives the fast path only to trusted devices
+- **`key-only`** has no PIN — protect the client key and registry carefully
+- **`two-step`** is the strictest mode
+- **Session PIN** lives in RAM only
+- **Unattended Password** stores only a SCRAM verifier
+- **SCRAM mutual authentication** verifies both the Client proof and the Server
+  signature
+- **No `--pin`** and `P2PGATE_PIN` is removed from the process environment
+- **`trusted_devices`** must be owned by the user and `chmod 600`;
+  insecure permissions disable the fast path
+- **Progressive lockout:** 3/15m, 6/6h, 10/permanent
+- **Control socket** is local-only (`0600` or a per-user named pipe)
+  - The PIN is read from RAM and sent only over the socket
+  - `revoke` closes active connections and persists a permanent suspension
+  - There is no TCP listener for the control plane
+- **Trusted devices** bypass the PIN, so they require an expiry or an explicit
+  `--permanent`
+- **Internal ports** bind to `127.0.0.1`
+- **Config, key, lockout, and trusted_devices files** use mode `0600`
+- **doctor** never prints secrets and never modifies files
+
+> p2pgate does not replace all SSH security.
+> It lets you reach SSH without exposing an inbound port to the public internet.
+
+---
+
+## 19) Command reference
+
+| Command | Purpose |
 |---|---|
-| `p2pgate setup` | ตั้งค่าและเลือก verificationMode |
-| `p2pgate keygen` | สร้าง/แสดงกุญแจ Client |
-| `p2pgate server` | เริ่ม Server |
-| `p2pgate client` | เริ่ม Client และขอ credential เฉพาะเมื่อต้อง two-step |
-| `p2pgate client --pin-stdin` | อ่าน credential จาก stdin เมื่อถูกถาม |
-| `p2pgate devices list` | แสดง registry ที่ merge แล้ว |
-| `p2pgate devices add <key> --mode trusted --expires ...` | เพิ่ม trusted device ชั่วคราว |
-| `p2pgate devices add <key> --mode trusted --permanent` | เพิ่ม trusted device ถาวร (ต้องยืนยันเจตนา) |
-| `p2pgate devices add <key> --mode scram` | เพิ่มอุปกรณ์ที่ต้อง two-step |
-| `p2pgate devices remove <key>` | ลบออกจาก trusted_devices |
-| `p2pgate status` | ดูสถานะเซิร์ฟเวอร์ผ่าน control socket |
-| `p2pgate pin` | ขอ Session PIN จากเซิร์ฟเวอร์ที่รันอยู่ |
-| `p2pgate revoke <key>` | เพิกถอนคีย์และตัด connection ที่เปิดอยู่ |
-| `p2pgate doctor` | ตรวจสุขภาพการติดตั้งและแนะนำวิธีแก้ |
-| `p2pgate unlock --list` | ดูสถานะ lockout/revoke |
-| `p2pgate unlock <key>` | ปลดล็อกเฉพาะคีย์ |
-| `p2pgate unlock --all` | ปลดล็อกทั้งหมด |
-| `p2pgate help` | แสดงข้อความช่วยเหลือ |
-| `npm run check` | ตรวจ syntax |
-| `npm run self-test` | ทดสอบทุกโหมด, registry, control, doctor, lockout, rotation |
-| `npm test` | รัน `check` + `self-test` |
+| `p2pgate setup` | Configure and select a verification mode |
+| `p2pgate keygen` | Create/show the Client key |
+| `p2pgate server` | Start the Server |
+| `p2pgate client` | Start the Client; ask for credentials only when required |
+| `p2pgate client --pin-stdin` | Read a credential from stdin when challenged |
+| `p2pgate devices list` | Show the merged registry |
+| `p2pgate devices add <key> --mode trusted --expires ...` | Add a temporary trusted device |
+| `p2pgate devices add <key> --mode trusted --permanent` | Add a permanent trusted device (explicit intent) |
+| `p2pgate devices add <key> --mode scram` | Add a device that requires two-step |
+| `p2pgate devices remove <key>` | Remove a device from trusted_devices |
+| `p2pgate status` | Show Server status over the control socket |
+| `p2pgate pin` | Request the Session PIN from a running Server |
+| `p2pgate revoke <key>` | Revoke a key and close active connections |
+| `p2pgate doctor` | Diagnose the installation and suggest fixes |
+| `p2pgate unlock --list` | Show lockout/revocation state |
+| `p2pgate unlock <key>` | Unlock one key |
+| `p2pgate unlock --all` | Unlock all keys |
+| `p2pgate help` | Show help |
+| `npm run check` | Syntax check |
+| `npm run self-test` | Test modes, registry, control, doctor, lockout, rotation |
+| `npm test` | Run `check` + `self-test` |
 
-ไฟล์เริ่มต้น:
+Default files:
 
-- config: `~/.p2pgate/config.json`
-- กุญแจ Client: `~/.p2pgate/client-key.json`
-- trusted devices: `~/.p2pgate/trusted_devices`
-- lockout state: `~/.p2pgate/lockout-state.json`
-- control socket: `~/.p2pgate/control.sock` (Windows: named pipe)
+- Config: `~/.p2pgate/config.json`
+- Client key: `~/.p2pgate/client-key.json`
+- Trusted devices: `~/.p2pgate/trusted_devices`
+- Lockout state: `~/.p2pgate/lockout-state.json`
+- Control socket: `~/.p2pgate/control.sock` (Windows: named pipe)
 
 ---
 
-## 20) แก้ปัญหา
+## 20) Troubleshooting
 
-### ขึ้น `STATUS_DECLINED`
+### `STATUS_DECLINED`
 
-- `unlisted`: คีย์ไม่อยู่ใน registry -> `p2pgate devices list`
-- `expired`: หมดอายุ -> แก้ `--expires` หรือเพิ่มใหม่
-- `insecure_registry`: ไฟล์ trusted_devices สิทธิ์ไม่ปลอดภัย -> `chmod 600`
-- `interactive_unavailable`: Server headless ไม่มี terminal และไม่มี Unattended Password
-  -> ใช้ trusted fast-path, key-only หรือตั้ง Unattended Password
-- `busy`: มีการยืนยันตัวตนอื่นทำงานอยู่ -> ลองใหม่
+- `unlisted`: key is not in the registry → `p2pgate devices list`
+- `expired`: expired → update `--expires` or add it again
+- `insecure_registry`: trusted_devices permissions are unsafe → `chmod 600`
+- `interactive_unavailable`: headless Server with no terminal and no Unattended
+  Password → use trusted fast-path, key-only, or set an Unattended Password
+- `busy`: another verification is in progress → retry
 
-### `p2pgate status` / `pin` ใช้ไม่ได้
+### `p2pgate status` / `pin` does not work
 
-- ต้องมีเซิร์ฟเวอร์ที่รันอยู่และเป็นผู้ใช้เดียวกัน
-- ตรวจว่า `~/.p2pgate/control.sock` มีอยู่ (Windows ใช้ named pipe)
-- ถ้าเซิร์ฟเวอร์เพิ่ง crash แล้ว socket ค้าง ให้เริ่มเซิร์ฟเวอร์ใหม่
-  ระบบจะ probe และลบ socket ที่ไม่มีเจ้าของให้
-- ถ้าขึ้น `CONTROL_IN_USE` แสดงว่ามีเซิร์ฟเวอร์อื่นใช้ socket อยู่
-  ให้ปิดตัวเก่าก่อน
+- A Server must be running under the same user
+- Check that `~/.p2pgate/control.sock` exists (Windows uses a named pipe)
+- If the Server crashed and left a stale socket, start it again; the Server
+  probes and removes an unowned socket
+- `CONTROL_IN_USE` means another Server owns the socket; stop the old one first
 
-### `revoke` แล้วยังเชื่อมต่อได้
+### `revoke` does not stop a connection
 
-- ตรวจว่าใช้ `p2pgate revoke <key>` กับเซิร์ฟเวอร์ที่กำลังรันอยู่
-- ถ้าเซิร์ฟเวอร์ไม่ได้รัน คำสั่งจะบันทึกเฉพาะ state
-  และมีผลเมื่อเซิร์ฟเวอร์อ่าน state ใหม่
-- ตรวจด้วย `p2pgate unlock --list` ว่าสถานะเป็น
-  "เพิกถอนด้วยคำสั่ง revoke"
-- คืนสิทธิ์ด้วย `p2pgate unlock <key>`
+- Run `p2pgate revoke <key>` against the running Server
+- If the Server is not running, the command only persists state; it applies
+  when the Server reads the state
+- Check `p2pgate unlock --list` for
+  "revoked by revoke command" status
+- Restore with `p2pgate unlock <key>`
 
-### `devices add --mode trusted` ถูกปฏิเสธ
+### `devices add --mode trusted` is rejected
 
-ต้องระบุอย่างใดอย่างหนึ่ง:
+Provide exactly one of:
 
 ```sh
 p2pgate devices add <key> --mode trusted --expires 2027-12-31T23:59:59Z
 p2pgate devices add <key> --mode trusted --permanent
 ```
 
-ถ้าใช้ `--permanent` ควรตรวจสอบรายการเป็นระยะด้วย `p2pgate devices list`
+If you use `--permanent`, review the list periodically with
+`p2pgate devices list`.
 
-### `doctor` ขึ้น ❌
+### `doctor` shows ❌
 
-อ่านคำแนะนำใต้บรรทัดนั้น เช่น สิทธิ์ไฟล์ไม่ปลอดภัย, registry ว่าง,
-ไม่พบกุญแจ Client หรือ config ไม่ถูกต้อง
-แก้แล้วรัน `p2pgate doctor` ซ้ำ
-คำเตือน `⚠️` ไม่ทำให้ exit code เป็น 1
+Read the hint below the line, such as unsafe file permissions, an empty
+registry, a missing Client key, or an invalid config. Fix it and rerun
+`p2pgate doctor`. A `⚠️` warning does not change the exit code to 1.
 
-### trusted device ไม่ใช้ fast-path
+### A trusted device does not use the fast path
 
-- ตรวจ `verificationMode` ว่าเป็น `hybrid` หรือ `key-only`
-- ตรวจว่าไฟล์เป็น `chmod 600` และเจ้าของถูกต้อง
-- ตรวจว่าไฟล์ไม่หมดอายุ
-- ตรวจว่า `config.json` ไม่ได้ override (ไฟล์ควรชนะ)
-- ตรวจว่า Server โหลดไฟล์ใหม่แล้ว (`devices list` / mtime)
+- Check that `verificationMode` is `hybrid` or `key-only`
+- Check that the file is `chmod 600` and owned by the current user
+- Check that the entry is not expired
+- Check that `config.json` is not overriding it (the file should win)
+- Check that the Server reloaded the file (`devices list` / mtime)
 
-### key-only ไม่ถาม PIN
+### key-only does not ask for a PIN
 
-นี่คือพฤติกรรมปกติของ `key-only`
-ถ้าต้องการ PIN ให้ใช้ `hybrid` หรือ `two-step`
+This is expected for `key-only`. Use `hybrid` or `two-step` if you want a PIN.
 
-### two-step ถาม PIN ทุกครั้ง
+### two-step asks for a PIN every time
 
-นี่คือพฤติกรรมปกติ
-แม้อุปกรณ์จะอยู่ใน `trusted_devices` ก็จะไม่ใช้ fast-path ในโหมดนี้
+This is expected. Even devices in `trusted_devices` do not use the fast path in
+this mode.
 
-### Client ไม่ถาม PIN
+### Client does not ask for a PIN
 
-- ถ้า Server ส่ง `FASTPATH_READY` หรือเป็น `key-only` จะไม่ถาม
-- ถ้าต้องการให้ถาม ใช้ `hybrid` + โปรไฟล์ `scram` หรือ `two-step`
+- No prompt is expected after `FASTPATH_READY` or in `key-only`
+- To require a prompt, use `hybrid` with the `scram` profile, or `two-step`
 
 ### `PIN_REQUIRED`
 
-Client ต้อง two-step แต่ไม่มี terminal / ไม่มี `--pin-stdin` / ไม่มี `P2PGATE_PIN`
+The Client needs two-step but has no terminal, no `--pin-stdin`, and no
+`P2PGATE_PIN`.
 
 ### `PIN_ROTATED_OR_INVALID`
 
-- PIN อาจถูกเปลี่ยนเพราะมีผู้ใส่ผิด 3/6 ครั้ง หรือ Server รีสตาร์ต
-- ดู PIN ล่าสุดบนหน้าจอ Server หรือใช้ Unattended Password
+- The PIN may have rotated after 3/6 failures or a Server restart
+- Check the latest PIN on the Server console or use the Unattended Password
 
 ### `LOCKED_OUT`
 
@@ -784,24 +797,24 @@ p2pgate unlock --all
 
 ### `AUTH_CONFIG_UPGRADE_REQUIRED`
 
-พบ config รูปแบบ v1.1 กรุณารัน:
+A v1.1 config was found. Run:
 
 ```sh
 p2pgate setup
 ```
 
-### v1.2 config ยังใช้งานได้ไหม
+### Is a v1.2 config still supported?
 
-ได้ — ถ้าไม่มี `verificationMode` จะถือเป็น `hybrid`
-และถ้า `authPin.enabled: false` จะถือเป็น `key-only`
+Yes. Without `verificationMode` it is treated as `hybrid`. If
+`authPin.enabled: false`, it is treated as `key-only`.
 
 ### `PEER_NOT_FOUND`
 
-- ตรวจ Server ทำงาน
-- ตรวจ `masterSecret` ตรงกัน
-- ตรวจ registry/public key
-- ตรวจ UDP เครือข่าย
-- Client ลองชั่วโมงก่อนหน้าให้อัตโนมัติ
+- Check that the Server is running
+- Check that `masterSecret` matches
+- Check the registry/public key
+- Check UDP connectivity
+- The Client automatically tries the previous hour's slot
 
 ### `EADDRINUSE`
 
@@ -812,12 +825,12 @@ ssh -p 8023 localhost
 
 ### SSH `Permission denied (publickey)`
 
-- ตรวจ `~/.ssh/authorized_keys` และสิทธิ์
-- ตรวจ `PasswordAuthentication no` และรีสตาร์ต sshd
+- Check `~/.ssh/authorized_keys` and its permissions
+- Check `PasswordAuthentication no` and restart sshd
 
 ---
 
-## 21) โครงสร้างโปรเจกต์
+## 21) Project structure
 
 ```text
 p2pgate/
@@ -834,6 +847,7 @@ p2pgate/
 ├── LICENSE
 ├── NOTICE
 ├── README.md
+├── README.th.md
 ├── TESTING.md
 ├── config.example.json
 ├── package.json
@@ -861,16 +875,15 @@ p2pgate/
     └── self-test.js
 ```
 
-### การพัฒนาและ CI
+### Development and CI
 
-- คู่มือทดสอบก่อนใช้งานจริง: [`TESTING.md`](TESTING.md)
-- ประวัติเวอร์ชัน: [`CHANGELOG.md`](CHANGELOG.md)
-- แนวทางมีส่วนร่วม: [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- นโยบายความปลอดภัย: [`SECURITY.md`](SECURITY.md)
-- GitHub Actions รัน `npm ci --ignore-scripts`, `npm run check`
-  และ `npm run self-test` บน Ubuntu (Node 20/22/24), Windows (24)
-  และ macOS (24)
-- คำสั่งรวมสำหรับตรวจก่อน commit:
+- Manual testing guide (Thai): [`TESTING.md`](TESTING.md)
+- Version history: [`CHANGELOG.md`](CHANGELOG.md)
+- Contribution guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Security policy: [`SECURITY.md`](SECURITY.md)
+- GitHub Actions runs `npm ci --ignore-scripts`, `npm run check`, and
+  `npm run self-test` on Ubuntu (Node 20/22/24), Windows (24), and macOS (24)
+- Run everything before committing:
 
 ```sh
 npm test
@@ -878,38 +891,43 @@ npm test
 
 ---
 
-## 22) หมายเหตุทางเทคนิค
+## 22) Technical notes
 
-- **Registry merge:** config keys = scram; file entries override; expired file entry denies
-- **POSIX check:** symlink/owner/group-other permissions before fast-path
+- **Registry merge:** config keys = scram; file entries override; an expired
+  file entry denies access
+- **POSIX check:** symlink/owner/group-other permissions before the fast path
 - **Live reload:** `mtimeMs` + atomic rename
-- **Status frames v3:** `DECLINED`, `FASTPATH_READY`, `CHALLENGE_REQUIRED`, `READY`
-- **Client READY:** Client ส่งหลังได้ credential เพื่อไม่ให้เวลาพิมพ์ถูกนับใน 10 วินาที
-- **Control protocol:** newline-delimited JSON, version `1`, max 4096 bytes, timeout 5 วินาที
+- **Status frames v3:** `DECLINED`, `FASTPATH_READY`, `CHALLENGE_REQUIRED`,
+  `READY`
+- **Client READY:** sent after obtaining a credential so typing time is not
+  counted against the 10-second timeout
+- **Control protocol:** newline-delimited JSON, version `1`, max 4096 bytes,
+  5-second timeout
 - **Control commands:** `status`, `pin`, `revoke`
-  - `status` ไม่คืน PIN
-  - `pin` อ่านจาก memory เท่านั้น
-  - `revoke` ใช้ `AuthGuard.revoke(key, 'manual')` แล้วปิด active streams
-- **Control socket:** POSIX `0600`, Windows named pipe, stale-socket probe ก่อนลบ
-- **doctor:** read-only, exit 1 เมื่อมี `❌`, ไม่พิมพ์ secrets
-- **Trusted expiry:** CLI บังคับ `--expires` หรือ `--permanent`; ไฟล์เดิมยังใช้ได้
-- **SCRAM:** ยังใช้ challenge/response แบบ mutual และตรวจ `serverSig`
-- **Session PIN:** 10 ตัวอักษร Base32, salt ใหม่ทุกครั้งที่สร้าง/เปลี่ยน
+  - `status` never returns the PIN
+  - `pin` reads from memory only
+  - `revoke` calls `AuthGuard.revoke(key, 'manual')` and closes active streams
+- **Control socket:** POSIX `0600`, Windows named pipe, stale-socket probe
+  before removal
+- **doctor:** read-only, exit 1 on `❌`, never prints secrets
+- **Trusted expiry:** the CLI requires `--expires` or `--permanent`; existing
+  file entries remain compatible
+- **SCRAM:** mutual challenge/response with `serverSig` verification
+- **Session PIN:** 10 Base32 characters, a new salt on every creation/rotation
 - **Async scrypt:** `crypto.scrypt` (N=16384, r=8, p=1)
 - **Lockout:** 24-hour failure window, lockfile, atomic rename, mtime reload
-- **Concurrency:** 1 ต่อคีย์, 3 ทั้งระบบ
-- **Invalid delay:** 2.5–3.5 วินาที (self-test ใช้ค่าสั้น)
-- **No `P2PGATE_TEST_*` env hooks**
-- **Self-test:** ใช้ `HyperDHT.bootstrapper` และ injected clock/delay
+- **Concurrency:** 1 per key, 3 total
+- **Invalid delay:** 2.5–3.5 seconds (the self-test uses shorter values)
+- **No `P2PGATE_TEST_*` environment hooks**
+- **Self-test:** uses `HyperDHT.bootstrapper` and injected clock/delay
 
 ---
 
 ## 23) License
 
-p2pgate ใช้ **Apache License 2.0**
+p2pgate is licensed under the **Apache License 2.0**.
 
 - [`LICENSE`](LICENSE)
 - [`NOTICE`](NOTICE)
 
 Copyright 2026 dhammawatthumpra-coder
-
