@@ -881,11 +881,9 @@ p2pgate/
 - Version history: [`CHANGELOG.md`](CHANGELOG.md)
 - Contribution guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Security policy: [`SECURITY.md`](SECURITY.md)
-- GitHub Actions workflow is included in `.github/workflows/ci.yml`
-  (Ubuntu Node 20/22/24, Windows 24, macOS 24).
-  For private repositories, GitHub-hosted Actions may require enabling
-  private-repo Actions/billing on the account first.
-- Until CI is enabled, run the full check locally before pushing:
+- GitHub Actions runs `npm ci --ignore-scripts`, `npm run check`, and
+  `npm run self-test` on Ubuntu (Node 20/22/24), Windows (24), and macOS (24)
+- Run everything before committing:
 
 ```sh
 npm test

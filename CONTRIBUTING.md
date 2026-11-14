@@ -18,8 +18,6 @@ npm run self-test
 ```
 
 ก่อนส่ง PR ต้องผ่านทั้ง `npm run check` และ `npm run self-test`
-หาก GitHub Actions ของ repository ยังไม่เปิดใช้งาน ให้แนบผล `npm test`
-ในคำอธิบาย PR ด้วย
 
 สำหรับการทดสอบกับ SSH จริงและเครือข่าย 4G ดู [`TESTING.md`](TESTING.md)
 
