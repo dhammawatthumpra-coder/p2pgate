@@ -881,9 +881,11 @@ p2pgate/
 - Version history: [`CHANGELOG.md`](CHANGELOG.md)
 - Contribution guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Security policy: [`SECURITY.md`](SECURITY.md)
-- GitHub Actions runs `npm ci --ignore-scripts`, `npm run check`, and
-  `npm run self-test` on Ubuntu (Node 20/22/24), Windows (24), and macOS (24)
-- Run everything before committing:
+- The GitHub Actions workflow (`.github/workflows/ci.yml`) runs
+  `npm ci --ignore-scripts`, `npm run check`, and `npm run self-test` on
+  Ubuntu (Node 20/22/24), Windows (24), and macOS (24) when GitHub Actions
+  is available for the account.
+- Run the same checks locally before pushing:
 
 ```sh
 npm test
