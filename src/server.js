@@ -200,6 +200,7 @@ async function startServer(config, options = {}) {
 
   const allowedSet = normalizeAllowedKeys(config.allowedClientKeys)
   const verificationMode = normalizeVerificationMode(config.verificationMode)
+  const authMode = config.authMode === 'password' ? 'password' : 'registry'
   const sessionAuthEnabled = verificationMode !== 'key-only'
 
   const targetHost = config.targetHost === undefined ? '127.0.0.1' : String(config.targetHost)
@@ -225,6 +226,20 @@ async function startServer(config, options = {}) {
     ? parseScramVerifier(authPin.unattended)
     : null
   const hasFallback = unattendedVerifier !== null
+  if (authMode === 'password' && !unattendedVerifier) {
+    const err = new Error(
+      'authMode is password but authPin.unattended is not configured; run p2pgate setup or p2pgate password reset'
+    )
+    err.code = 'PASSWORD_NOT_CONFIGURED'
+    throw err
+  }
+  if (authMode === 'password' && verificationMode === 'key-only') {
+    const err = new Error(
+      'authMode=password cannot be combined with verificationMode=key-only'
+    )
+    err.code = 'CONFIG_INVALID'
+    throw err
+  }
   const interactive = options.interactive !== undefined
     ? options.interactive === true
     : Boolean(process.stdout.isTTY)
@@ -293,7 +308,7 @@ async function startServer(config, options = {}) {
   })
   await registry.init()
 
-  if (registry.isEmpty()) {
+  if (registry.isEmpty() && authMode !== 'password') {
     const err = new Error(
       'No client devices are registered in allowedClientKeys or trusted_devices'
     )
@@ -471,6 +486,14 @@ async function startServer(config, options = {}) {
         retryAfterMs: status.remainingMs,
         permanent: status.permanent
       }
+    }
+
+    if (authMode === 'password') {
+      if (!unattendedVerifier) {
+        return { action: 'decline', reason: 'password_unavailable' }
+      }
+      if (device.fastpathAllowed) return { action: 'fastpath' }
+      return { action: 'challenge' }
     }
 
     return evaluateDevicePolicy(device, {
@@ -1045,6 +1068,7 @@ async function startServer(config, options = {}) {
         ok: true,
         mode: 'server',
         verificationMode,
+        authMode,
         currentSlot,
         listeningSlots: [...listeners.keys()].sort((a, b) => a - b),
         sessionGeneration: authGuard.pinGeneration,
@@ -1156,6 +1180,7 @@ async function startServer(config, options = {}) {
   void audit.record('server.start', {
     source: 'server',
     mode: verificationMode,
+    authMode,
     registrySize: registry.size,
     targetPort,
     slots: [...listeners.keys()].sort((a, b) => a - b)
@@ -1183,6 +1208,9 @@ async function startServer(config, options = {}) {
     },
     get verificationMode() {
       return verificationMode
+    },
+    get authMode() {
+      return authMode
     },
     get authEnabled() {
       return sessionAuthEnabled

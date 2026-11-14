@@ -252,6 +252,22 @@ async function runDoctor(options = {}) {
       : 'ฝั่ง Client จะเชื่อมต่อก่อนและรอสถานะจากเซิร์ฟเวอร์'
   )
 
+  if (config.mode === 'server' && config.authMode === 'password') {
+    if (config.authPin && config.authPin.unattended) {
+      report.write(
+        'ok',
+        'password auth mode is configured',
+        'Clients need masterSecret + password; registered keys are optional'
+      )
+    } else {
+      report.write(
+        'error',
+        'password auth mode has no connection password',
+        'Run: p2pgate password reset'
+      )
+    }
+  }
+
   // 4. File permissions
   if (process.platform === 'win32') {
     report.write(
@@ -313,11 +329,19 @@ async function runDoctor(options = {}) {
       devices = await registry.listDevices()
 
       if (devices.length === 0) {
-        report.write(
-          'error',
-          'ไม่มีอุปกรณ์ลงทะเบียน',
-          'เพิ่มด้วย: p2pgate devices add <publicKeyHex> --mode scram'
-        )
+        if (config.authMode === 'password') {
+          report.write(
+            'ok',
+            'password auth mode: no pre-registered devices required',
+            'Clients use masterSecret + password'
+          )
+        } else {
+          report.write(
+            'error',
+            'ไม่มีอุปกรณ์ลงทะเบียน',
+            'เพิ่มด้วย: p2pgate devices add <publicKeyHex> --mode scram'
+          )
+        }
       } else {
         report.write('ok', `อุปกรณ์ลงทะเบียน: ${devices.length} รายการ`)
       }
@@ -352,7 +376,9 @@ async function runDoctor(options = {}) {
       }
 
       const fastpath = devices.filter((device) => device.fastpathAllowed)
-      if (config.verificationMode === 'hybrid' && fastpath.length === 0) {
+      if (config.authMode !== 'password' &&
+        config.verificationMode === 'hybrid' &&
+        fastpath.length === 0) {
         report.write(
           'warn',
           'hybrid ไม่มี trusted device ที่ใช้ fast-path ได้',

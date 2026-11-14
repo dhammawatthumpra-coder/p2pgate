@@ -1,6 +1,7 @@
 {
   "mode": "server",
   "masterSecret": "REPLACE_WITH_64_HEX_CHARS_GENERATED_BY_SETUP",
+  "authMode": "registry",
   "targetHost": "127.0.0.1",
   "targetPort": 8022,
   "localPort": 8022,

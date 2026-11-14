@@ -7,6 +7,30 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.6.0] - 2026-11-15
+
+### Added
+
+- Zero-setup `p2pgate server`: สร้าง config, masterSecret และ connection password อัตโนมัติ
+- `p2pgate connect` พร้อม `-s/-p` สำหรับเชื่อมต่อแบบบรรทัดเดียว
+- `authMode: password|registry` (password เป็นค่าเริ่มต้นของ zero-setup)
+- `p2pgate password reset`
+- `P2PGATE_LANG=en|th` และ `--lang`
+- `quickstart.txt` สำหรับ headless first run (สิทธิ์ `0600`)
+
+### Changed
+
+- `p2pgate setup` เป็น advanced configuration
+- Client สร้าง key และ config อัตโนมัติผ่าน `connect`
+- `p2pgate server` เริ่มได้แม้ registry ว่างใน password mode
+- README/README.th อัปเดต zero-setup flow
+
+### Security
+
+- Connection password 24 ตัวอักษร เก็บเฉพาะ SCRAM verifier
+- เตือนเมื่อใช้ `-p` บน command line
+- Existing registry configs ไม่ถูกสลับเป็น password mode อัตโนมัติ
+
 ## [1.5.0] - 2026-11-15
 
 ### Added

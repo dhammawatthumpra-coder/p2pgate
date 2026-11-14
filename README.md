@@ -1,4 +1,4 @@
-# p2pgate (v1.5)
+# p2pgate (v1.6)
 
 **English** | [ไทย](README.th.md)
 
@@ -11,18 +11,42 @@ firewall without exposing an inbound port. It combines **mutual SCRAM**,
 **verification policy modes**, a **dual-source device registry**, and a
 **local control plane**.
 
-Designed for **Redmi 14C (Android 14, Termux)**, but works on Windows, macOS,
-Linux, and other Android devices with Node.js 20 or newer.
+Works on Termux/Android, Linux, macOS, and Windows with Node.js 20 or newer.
 
-> Version 1.5 adds JSONL audit logs, passphrase-protected client keys,
-> machine-readable `--json` output, per-server control tokens, and lockout
-> state in `devices list`.
-> **Update both Server and Client to v1.5.**
-> The tunnel/auth protocol remains compatible with v1.4.
+> Version 1.6 adds **zero-setup server startup**, a **connection-password auth
+> mode**, `p2pgate connect` (including a one-line `-s`/`-p` form), and
+> `P2PGATE_LANG=en|th` localization for the setup/quickstart flow.
 >
 > **Install:** `npm install -g p2pgate`
 >
 > Manual testing guide (Thai): [`TESTING.md`](TESTING.md)
+
+## Quick start (no setup)
+
+On the Server, first run:
+
+```sh
+p2pgate server
+```
+
+It creates `~/.p2pgate/config.json`, generates a `masterSecret` and a
+connection password, then starts. Copy the printed credentials.
+
+On any Client:
+
+```sh
+p2pgate connect -s <masterSecret> -p <password>
+# or interactive:
+p2pgate connect
+```
+
+The client key is generated automatically. Open another terminal:
+
+```sh
+ssh -p 8022 localhost
+```
+
+Advanced configuration remains available through `p2pgate setup`.
 
 ---
 
@@ -104,6 +128,32 @@ Configure in `config.json`:
 
 > A v1.2 config without `verificationMode` is treated as `hybrid`.
 > A legacy config with `authPin.enabled: false` is treated as `key-only`.
+
+### Authentication modes
+
+`authMode` controls whether a client key must be registered before connecting:
+
+| Mode | Behavior |
+|---|---|
+| `password` | Any client key is accepted if it provides the correct connection password. Registered trusted devices can still use fast-path. |
+| `registry` | Client keys must exist in `allowedClientKeys` or `trusted_devices` before authentication. |
+
+`p2pgate server` on a fresh machine creates `authMode: password`.
+Advanced setups created by `p2pgate setup` use `registry`.
+
+```json
+"authMode": "password"
+```
+
+The connection password is stored only as a SCRAM verifier in
+`authPin.unattended`. Rotate it with:
+
+```sh
+p2pgate password reset
+```
+
+> Password mode is convenient but weaker than a key whitelist. Use a long
+> password, and register trusted devices for fast-path when possible.
 
 ---
 
@@ -552,7 +602,7 @@ npm install -g p2pgate
 p2pgate --version
 ```
 
-### From source on Termux (Redmi 14C)
+### From source on Termux
 
 ```sh
 pkg update && pkg upgrade -y
@@ -813,6 +863,10 @@ Messages never contain the PIN or password.
 | Command | Purpose |
 |---|---|
 | `p2pgate setup` | Configure and select a verification mode |
+| `p2pgate setup --easy` | Generate a password-auth config with minimal prompts |
+| `p2pgate server` | Start the Server (auto-creates config on first run) |
+| `p2pgate connect` | Connect from a Client with masterSecret + password |
+| `p2pgate connect -s <secret> -p <password>` | One-line client connect |
 | `p2pgate keygen` | Create/show the Client key |
 | `p2pgate keygen --passphrase` | Protect an existing/new key with a passphrase |
 | `p2pgate keygen --unprotect` | Remove passphrase protection (prompts) |
@@ -829,6 +883,7 @@ Messages never contain the PIN or password.
 | `p2pgate status --json` | Machine-readable Server status |
 | `p2pgate pin` | Request the Session PIN from a running Server |
 | `p2pgate revoke <key>` | Revoke a key and close active connections |
+| `p2pgate password reset` | Rotate the connection password |
 | `p2pgate doctor` | Diagnose the installation and suggest fixes |
 | `p2pgate doctor --json` | Machine-readable diagnostics |
 | `p2pgate unlock --list` | Show lockout/revocation state |
@@ -1013,13 +1068,15 @@ p2pgate/
 │   ├── releases/
 │   │   ├── v1.4.0.md
 │   │   ├── v1.4.1.md
-│   │   └── v1.5.0.md
+│   │   ├── v1.5.0.md
+│   │   └── v1.6.0.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
 │       ├── phase4-v1.3.0.md
 │       ├── phase5-v1.4.0.md
 │       ├── phase6-v1.5.0.md
+│       ├── phase7-v1.6.0.md
 │       └── project-spec.md
 ├── package.json
 ├── package-lock.json
@@ -1031,6 +1088,8 @@ p2pgate/
     ├── auth-guard.js
     ├── device-registry.js
     ├── audit-log.js
+    ├── i18n.js
+    ├── quickstart.js
     ├── control.js
     ├── doctor.js
     ├── config-loader.js
@@ -1097,6 +1156,25 @@ npm test
 - **Invalid delay:** 2.5–3.5 seconds (the self-test uses shorter values)
 - **No `P2PGATE_TEST_*` environment hooks**
 - **Self-test:** uses `HyperDHT.bootstrapper` and injected clock/delay
+
+---
+
+## 22.1) Localization
+
+```sh
+P2PGATE_LANG=en p2pgate server
+P2PGATE_LANG=th p2pgate setup
+```
+
+or:
+
+```sh
+p2pgate --lang th doctor
+```
+
+The language is selected from `P2PGATE_LANG`/`--lang`, then `LANG`/`LC_ALL`,
+and falls back to English. Quickstart, setup, server, connect, and help output
+are localized; some legacy command details remain bilingual/in progress.
 
 ---
 

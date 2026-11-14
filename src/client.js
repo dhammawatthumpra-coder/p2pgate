@@ -461,6 +461,13 @@ async function startClient(config, options = {}) {
       )
     }
 
+    if (reason === 'password_unavailable') {
+      throw new AuthError(
+        'เซิร์ฟเวอร์ยังไม่ได้ตั้ง connection password',
+        'STATUS_DECLINED'
+      )
+    }
+
     if (reason === 'busy') {
       throw new AuthError(
         'เซิร์ฟเวอร์กำลังยืนยันตัวตนรายการอื่นอยู่ กรุณาลองใหม่',

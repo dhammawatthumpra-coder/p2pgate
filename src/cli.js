@@ -9,7 +9,8 @@ const {
   expandHome,
   loadConfig,
   readConfigRaw,
-  resolveConfigPath
+  resolveConfigPath,
+  saveConfig
 } = require('./config-loader')
 const { startServer } = require('./server')
 const { startClient } = require('./client')
@@ -24,9 +25,20 @@ const {
 } = require('./control')
 const { promptHidden } = require('./auth')
 const { createAuditLog } = require('./audit-log')
+const {
+  DEFAULT_CLIENT_CONFIG_PATH,
+  createServerPasswordConfig,
+  createClientPasswordConfig,
+  generateConnectionPassword,
+  writeQuickstartFile
+} = require('./quickstart')
+const { t, setLanguage } = require('./i18n')
 const { runDoctor } = require('./doctor')
 const {
-  normalizeClientPublicKeyHex
+  normalizeClientPublicKeyHex,
+  assertMasterSecret,
+  deriveScramVerifier,
+  serializeScramVerifier
 } = require('./crypto-utils')
 const {
   clientKeyExists,
@@ -37,25 +49,27 @@ const {
 } = require('./keygen')
 const { version } = require('../package.json')
 
-const HELP_TEXT = `p2pgate v1.5 — อุโมงค์ TCP แบบ P2P สำหรับ Termux (Zero-Trust + SCRAM)
+const HELP_TEXT = `p2pgate v1.6 — อุโมงค์ TCP แบบ P2P สำหรับ SSH (HyperDHT)
 
 การใช้งาน:
-  p2pgate setup [--config <path>]
-      ตั้งค่าครั้งแรกแบบถาม-ตอบ (แนะนำ)
+  p2pgate server [--config <path>]
+      เริ่มเซิร์ฟเวอร์ ครั้งแรกจะสร้าง config, masterSecret
+      และ connection password ให้อัตโนมัติ
+
+  p2pgate connect [-s <masterSecret>] [-p <password>] [--port <localPort>]
+      เชื่อมต่อจาก Client และสร้าง client key อัตโนมัติ
+
+  p2pgate setup [--easy] [--mode server|client] [--config <path>]
+      ตั้งค่าแบบ advanced
 
   p2pgate keygen [--config <path>] [--force]
       [--passphrase] [--passphrase-stdin] [--unprotect]
       สร้างหรือแสดงกุญแจประจำเครื่อง Client และพิมพ์ Public Key
       --passphrase: ตั้ง/เปลี่ยน passphrase สำหรับ client key
 
-  p2pgate server [--config <path>]
-      เริ่มเซิร์ฟเวอร์และแสดง Session PIN 10 ตัวอักษรบนหน้าจอ
-
   p2pgate client [--config <path>] [--port <localPort>] [--pin-stdin]
       [--key-passphrase-stdin]
-      เริ่มอุโมงค์และยืนยันตัวตนด้วย PIN หรือรหัสผ่านสำรอง
-      Client จะเชื่อมต่อก่อน และถาม PIN เฉพาะเมื่อเซิร์ฟเวอร์ต้องใช้ two-step
-      ถ้าไม่ระบุ --pin-stdin จะถามแบบซ่อนการพิมพ์
+      เริ่มอุโมงค์แบบ advanced (ใช้ config ที่ตั้งไว้แล้ว)
 
   p2pgate devices list [--config <path>]
   p2pgate devices add <publicKeyHex> [--mode trusted|scram]
@@ -70,12 +84,15 @@ const HELP_TEXT = `p2pgate v1.5 — อุโมงค์ TCP แบบ P2P ส�
   p2pgate pin [--config <path>]
       ขอ Session PIN ปัจจุบันจากเซิร์ฟเวอร์ที่รันอยู่ (key-only ไม่มี PIN)
 
+  p2pgate password reset [--config <path>]
+      สร้าง connection password ใหม่และแสดงค่าใหม่
+
   p2pgate revoke <clientPublicKeyHex> [--config <path>]
       เพิกถอนคีย์ถาวรและตัด connection ที่เปิดอยู่ทันที
       คืนสิทธิ์ได้ด้วย p2pgate unlock <key>
 
   p2pgate doctor [--config <path>] [--json]
-      ตรวจสุขภาพการติดตั้งและแสดงคำแนะนำเป็นภาษาไทย
+      ตรวจสุขภาพการติดตั้งและแสดงคำแนะนำ
 
   p2pgate unlock <clientPublicKeyHex>
   p2pgate unlock --list
@@ -84,6 +101,10 @@ const HELP_TEXT = `p2pgate v1.5 — อุโมงค์ TCP แบบ P2P ส�
 
   p2pgate help
       แสดงข้อความช่วยเหลือนี้
+
+ภาษา:
+  P2PGATE_LANG=en|th   หรือ --lang en|th
+  ค่าเริ่มต้น: ตาม LANG/LC_ALL แล้ว fallback เป็น en
 
 แหล่งข้อมูล PIN/รหัสผ่าน (เรียงตามลำดับความสำคัญ):
   1) --pin-stdin   อ่านหนึ่งบรรทัดจาก stdin
@@ -96,42 +117,106 @@ Passphrase ของ client key:
   3) ถามแบบซ่อนการพิมพ์ (ค่าเริ่มต้น)
 
 ตัวอย่าง:
-  p2pgate setup
-  p2pgate keygen --passphrase
   p2pgate server
-  p2pgate client
-  p2pgate client --pin-stdin < pin.txt
+  p2pgate connect -s <masterSecret> -p <password>
+  p2pgate connect
+  p2pgate setup --easy
+  p2pgate keygen --passphrase
   ssh -p 8022 localhost
   p2pgate devices list
   p2pgate devices add <key> --mode trusted --expires 2027-12-31T23:59:59Z --comment "ops-laptop"
   p2pgate status --json
-  p2pgate pin
-  p2pgate revoke <key>
+  p2pgate password reset
   p2pgate doctor --json
   p2pgate unlock --list
   p2pgate unlock --all
 
 ความปลอดภัย:
+  - masterSecret และ password เป็นความลับ ห้าม commit หรือแชร์
+  - หลีกเลี่ยงการใส่ password ด้วย -p ใน shell history; ใช้ prompt หรือ env
   - Session PIN มี 10 ตัวอักษร แสดงเป็น XXXXX-XXXXX และเปลี่ยนเมื่อมี
     การพยายามผิดหลายครั้ง
   - รหัสผ่านสำรองต้องยาวอย่างน้อย 12 ตัวอักษรและตัวพิมพ์เล็ก-ใหญ่มีความหมาย
   - ไม่มี flag --pin เพื่อไม่ให้รหัสผ่านไปปรากฏใน ps หรือ shell history
-  - หลีกเลี่ยงคำสั่ง P2PGATE_PIN=... แบบ inline เพราะ shell อาจบันทึกประวัติ
-    ใช้การถามแบบซ่อนหรือ --pin-stdin จากไฟล์ที่ปลอดภัยดีกว่า
   - อุโมงค์ผูกกับ 127.0.0.1 เท่านั้น
 `
 
+const HELP_TEXT_EN = `p2pgate v1.6 — P2P TCP tunnel for SSH (HyperDHT)
+
+Usage:
+  p2pgate server [--config <path>]
+      Start the Server. On first run, generates config, masterSecret,
+      and a connection password automatically.
+
+  p2pgate connect [-s <masterSecret>] [-p <password>] [--port <localPort>]
+      Connect from a Client. Generates a client key automatically.
+
+  p2pgate client [--config <path>] [--port <localPort>] [--pin-stdin]
+  p2pgate setup [--easy] [--mode server|client] [--config <path>]
+      Advanced configuration.
+
+  p2pgate keygen [--passphrase] [--unprotect]
+  p2pgate devices list|add|remove
+  p2pgate status [--json]
+  p2pgate pin
+  p2pgate revoke <key>
+  p2pgate password reset
+  p2pgate doctor [--json]
+  p2pgate unlock --list|<key>|--all
+
+Common options:
+  --config <path>   Config file
+  --port <number>   Local port (client commands)
+  -s, --secret      masterSecret (connect)
+  -p, --password    connection password (connect)
+  --password-stdin  read password from stdin
+  --lang en|th      UI language (or P2PGATE_LANG)
+
+Security:
+  - masterSecret and password are secrets; do not commit or share them
+  - prefer the hidden prompt or environment variables over -p
+  - client keys can be passphrase-protected with p2pgate keygen --passphrase
+  - the tunnel binds 127.0.0.1 only
+`
+
 function printHelp() {
-  process.stdout.write(`${HELP_TEXT}\n`)
+  process.stdout.write(`${t(HELP_TEXT, HELP_TEXT_EN)}\n`)
 }
 
 function printError(err) {
   const message = err && err.message ? err.message : String(err)
   const code = err && err.code
 
-  process.stderr.write(`\n❌ เกิดข้อผิดพลาด: ${message}\n`)
+  process.stderr.write(t(
+    `\n❌ เกิดข้อผิดพลาด: ${message}\n`,
+    `\n❌ Error: ${message}\n`
+  ))
 
   switch (code) {
+    case 'LANG_INVALID':
+      process.stderr.write(t(
+        '👉 รองรับเฉพาะ en และ th\n',
+        '👉 Supported languages: en, th\n'
+      ))
+      break
+    case 'MASTER_SECRET_REQUIRED':
+      process.stderr.write(t(
+        '👉 ต้องระบุ masterSecret (ใช้ -s หรือ P2PGATE_MASTER_SECRET)\n',
+        '👉 masterSecret is required (use -s or P2PGATE_MASTER_SECRET)\n'
+      ))
+      break
+    case 'PASSWORD_REQUIRED':
+      process.stderr.write(t(
+        '👉 ต้องระบุ password (ใช้ -p, --password-stdin หรือ P2PGATE_PASSWORD)\n',
+        '👉 password is required (use -p, --password-stdin, or P2PGATE_PASSWORD)\n'
+      ))
+      break
+    case 'PASSWORD_NOT_CONFIGURED':
+      process.stderr.write(t(
+        '👉 authMode=password แต่ยังไม่มี connection password กรุณารัน p2pgate password reset\n',
+        '👉 authMode=password has no connection password; run p2pgate password reset\n'
+      ))
+      break
     case 'CONFIG_NOT_FOUND':
       process.stderr.write('👉 ยังไม่มีไฟล์ตั้งค่า กรุณารัน: p2pgate setup\n')
       break
@@ -397,26 +482,90 @@ async function waitForShutdownSignal() {
 
 async function commandServer(values) {
   const configPath = resolveConfigPath(values.config)
-  const config = await loadConfig(configPath)
+  let config
+  let created = null
+
+  try {
+    config = await loadConfig(configPath)
+  } catch (err) {
+    if (!err || err.code !== 'CONFIG_NOT_FOUND') throw err
+
+    created = await createServerPasswordConfig()
+    await saveConfig(configPath, created.config)
+    config = await loadConfig(configPath)
+  }
+
+  if (config.mode !== 'server') {
+    const err = new Error('config mode is client; use p2pgate connect or p2pgate client')
+    err.code = 'CONFIG_INVALID'
+    throw err
+  }
 
   process.stdout.write('\n=== p2pgate server ===\n')
-  process.stdout.write(`ไฟล์ตั้งค่า: ${configPath}\n`)
+  process.stdout.write(t(`ไฟล์ตั้งค่า: ${configPath}\n`, `Config: ${configPath}\n`))
+
+  if (created) {
+    if (process.stdout.isTTY) {
+      process.stdout.write(t(
+        '\n🔑 ตั้งค่าเริ่มต้นให้แล้ว (เก็บค่าเหล่านี้เป็นความลับ)\n',
+        '\n🔑 Initial setup complete (keep these values secret)\n'
+      ))
+      process.stdout.write(`   masterSecret: ${created.masterSecret}\n`)
+      process.stdout.write(`   password:     ${created.password}\n`)
+      process.stdout.write(t(
+        '   Client: p2pgate connect -s <masterSecret> -p <password>\n\n',
+        '   Client: p2pgate connect -s <masterSecret> -p <password>\n\n'
+      ))
+    } else {
+      const quickstartPath = await writeQuickstartFile({
+        configPath,
+        masterSecret: created.masterSecret,
+        password: created.password,
+        targetPort: config.targetPort
+      })
+      process.stdout.write(t(
+        `🔑 สร้าง credential เริ่มต้นแล้ว: ${quickstartPath}\n\n`,
+        `🔑 Initial credentials written to: ${quickstartPath}\n\n`
+      ))
+    }
+  } else if (config.authMode === 'password' && process.stdout.isTTY) {
+    process.stdout.write(t(
+      `masterSecret: ${config.masterSecret}\n`,
+      `masterSecret: ${config.masterSecret}\n`
+    ))
+    process.stdout.write(t(
+      'password: ใช้ค่าที่สร้างตอนรันครั้งแรก หรือรัน p2pgate password reset\n\n',
+      'password: use the value from the first run, or run p2pgate password reset\n\n'
+    ))
+  }
 
   const server = await startServer(config)
   const address = server.currentPublicKeyHex()
 
-  process.stdout.write('\n✅ เซิร์ฟเวอร์พร้อมทำงานแล้ว\n')
-  process.stdout.write(`   ส่งต่อไปยัง: 127.0.0.1:${config.targetPort}\n`)
-  process.stdout.write(`   โหมดยืนยันตัวตน: ${server.verificationMode}\n`)
-  process.stdout.write(`   อุปกรณ์ที่ลงทะเบียน: ${server.registrySize} รายการ\n`)
-  process.stdout.write(`   Public Key รอบนี้: ${address}\n\n`)
-  process.stdout.write('กด Ctrl+C เพื่อหยุดอย่างปลอดภัย\n')
+  process.stdout.write(t('\n✅ เซิร์ฟเวอร์พร้อมทำงานแล้ว\n', '\n✅ Server is ready\n'))
+  process.stdout.write(t(
+    `   ส่งต่อไปยัง: 127.0.0.1:${config.targetPort}\n`,
+    `   Target: 127.0.0.1:${config.targetPort}\n`
+  ))
+  process.stdout.write(t(
+    `   โหมดยืนยันตัวตน: ${server.verificationMode} (${server.authMode})\n`,
+    `   Verification: ${server.verificationMode} (${server.authMode})\n`
+  ))
+  process.stdout.write(t(
+    `   อุปกรณ์ที่ลงทะเบียน: ${server.registrySize} รายการ\n`,
+    `   Registered devices: ${server.registrySize}\n`
+  ))
+  process.stdout.write(`   Public Key: ${address}\n\n`)
+  process.stdout.write(t('กด Ctrl+C เพื่อหยุดอย่างปลอดภัย\n', 'Press Ctrl+C to stop safely\n'))
 
   const signal = await waitForShutdownSignal()
-  process.stdout.write(`\nได้รับสัญญาณ ${signal} กำลังปิดระบบ...\n`)
+  process.stdout.write(t(
+    `\nได้รับสัญญาณ ${signal} กำลังปิดระบบ...\n`,
+    `\nReceived ${signal}; shutting down...\n`
+  ))
 
   await server.close()
-  process.stdout.write('ปิดระบบเรียบร้อย\n')
+  process.stdout.write(t('ปิดระบบเรียบร้อย\n', 'Server stopped\n'))
 }
 
 async function commandClient(values) {
@@ -497,6 +646,176 @@ async function openCliAudit(config) {
   })
   await audit.init()
   return audit
+}
+
+async function commandConnect(values) {
+  if (values['secret-stdin'] && values['password-stdin']) {
+    const err = new Error(
+      'ใช้ --secret-stdin และ --password-stdin พร้อมกันไม่ได้'
+    )
+    err.code = 'CONFIG_INVALID'
+    throw err
+  }
+
+  const configPath = values.config
+    ? resolveConfigPath(values.config)
+    : DEFAULT_CLIENT_CONFIG_PATH
+
+  let existing = null
+  try {
+    existing = await loadConfig(configPath)
+    if (existing.mode !== 'client') {
+      const err = new Error(
+        'config is for a server; choose another --config path for the client'
+      )
+      err.code = 'CONFIG_INVALID'
+      throw err
+    }
+  } catch (err) {
+    if (!err || err.code !== 'CONFIG_NOT_FOUND') throw err
+  }
+
+  const envSecret = typeof process.env.P2PGATE_MASTER_SECRET === 'string'
+    ? process.env.P2PGATE_MASTER_SECRET
+    : null
+  if (envSecret !== null) delete process.env.P2PGATE_MASTER_SECRET
+
+  const envPassword = typeof process.env.P2PGATE_PASSWORD === 'string'
+    ? process.env.P2PGATE_PASSWORD
+    : null
+  if (envPassword !== null) delete process.env.P2PGATE_PASSWORD
+
+  let masterSecret = values.secret || envSecret
+  if (!masterSecret && values['secret-stdin']) {
+    masterSecret = (await readStdinLine()).trim()
+  }
+  if (!masterSecret && existing && existing.masterSecret) {
+    masterSecret = existing.masterSecret
+  }
+  if (!masterSecret) {
+    try {
+      masterSecret = (await promptHidden(
+        t('🔑 masterSecret: ', '🔑 masterSecret: ')
+      )).trim()
+    } catch {
+      const err = new Error(
+        'masterSecret is required; use -s or P2PGATE_MASTER_SECRET'
+      )
+      err.code = 'MASTER_SECRET_REQUIRED'
+      throw err
+    }
+  }
+
+  try {
+    masterSecret = assertMasterSecret(masterSecret)
+  } catch (err) {
+    const wrapped = new Error(
+      `masterSecret ไม่ถูกต้อง: ${err.message}`
+    )
+    wrapped.code = 'MASTER_SECRET_INVALID'
+    throw wrapped
+  }
+
+  let password = values.password || envPassword
+  if (!password && values['password-stdin']) {
+    password = (await readStdinLine()).trim()
+  }
+  if (!password) {
+    try {
+      password = (await promptHidden(
+        t('🔑 password: ', '🔑 password: ')
+      )).trim()
+    } catch {
+      const err = new Error(
+        'password is required; use -p, --password-stdin, or P2PGATE_PASSWORD'
+      )
+      err.code = 'PASSWORD_REQUIRED'
+      throw err
+    }
+  }
+
+  if (typeof password !== 'string' || password === '') {
+    const err = new Error('password must not be empty')
+    err.code = 'PASSWORD_REQUIRED'
+    throw err
+  }
+
+  if (values.password) {
+    process.stderr.write(t(
+      '⚠️  การใส่ password บน command line อาจถูกเห็นใน shell history/ps\n',
+      '⚠️  Passing the password on the command line may expose it in shell history/ps\n'
+    ))
+  }
+
+  let localPort = 8022
+  if (values.port !== undefined) {
+    localPort = Number(values.port)
+    if (!Number.isInteger(localPort) || localPort < 1 || localPort > 65535) {
+      const err = new Error('--port ต้องเป็นตัวเลขระหว่าง 1 ถึง 65535')
+      err.code = 'CONFIG_INVALID'
+      throw err
+    }
+  } else if (existing && Number.isInteger(existing.localPort)) {
+    localPort = existing.localPort
+  }
+
+  const clientKeyPath = existing && existing.clientKeyPath
+    ? existing.clientKeyPath
+    : DEFAULT_CLIENT_KEY_PATH
+
+  if (!clientKeyExists(clientKeyPath)) {
+    const key = await generateClientKey(clientKeyPath)
+    process.stdout.write(t(
+      `\n🔑 สร้าง client key ใหม่แล้ว: ${key.path}\n`,
+      `\n🔑 Created a new client key: ${key.path}\n`
+    ))
+    process.stdout.write(t(
+      `   Public Key: ${key.publicKey}\n`,
+      `   Public Key: ${key.publicKey}\n`
+    ))
+  }
+
+  const config = createClientPasswordConfig({
+    masterSecret,
+    clientKeyPath,
+    localPort
+  })
+
+  if (values.port !== undefined) config.localPort = localPort
+  await saveConfig(configPath, config)
+
+  process.stdout.write(t(
+    '\n=== p2pgate connect ===\n',
+    '\n=== p2pgate connect ===\n'
+  ))
+  process.stdout.write(t(
+    `ไฟล์ตั้งค่า: ${configPath}\n`,
+    `Config: ${configPath}\n`
+  ))
+
+  const client = await startClient(config, {
+    credential: password
+  })
+  const address = client.address()
+
+  process.stdout.write(t('\n✅ อุโมงค์พร้อมใช้งานแล้ว\n', '\n✅ Tunnel is ready\n'))
+  process.stdout.write(t(
+    `   เปิดพอร์ตเฉพาะ: 127.0.0.1:${address.port}\n`,
+    `   Local listener: 127.0.0.1:${address.port}\n`
+  ))
+  process.stdout.write(t(
+    `   วิธีเชื่อมต่อ: ssh -p ${address.port} localhost\n\n`,
+    `   Connect with: ssh -p ${address.port} localhost\n\n`
+  ))
+  process.stdout.write(t('กด Ctrl+C เพื่อหยุดอย่างปลอดภัย\n', 'Press Ctrl+C to stop safely\n'))
+
+  const signal = await waitForShutdownSignal()
+  process.stdout.write(t(
+    `\nได้รับสัญญาณ ${signal} กำลังปิดระบบ...\n`,
+    `\nReceived ${signal}; shutting down...\n`
+  ))
+  await client.close()
+  process.stdout.write(t('ปิดระบบเรียบร้อย\n', 'Client stopped\n'))
 }
 
 async function commandDevices(values, positionals) {
@@ -822,6 +1141,7 @@ async function commandStatus(values = {}) {
 
   process.stdout.write('\n=== p2pgate status ===\n')
   process.stdout.write(`โหมดยืนยันตัวตน: ${response.verificationMode}\n`)
+  process.stdout.write(`โหมดยืนยันสิทธิ์: ${response.authMode || '-'}\n`)
   process.stdout.write(`Session PIN: ${pinState}\n`)
   process.stdout.write(`Slot ปัจจุบัน: ${response.currentSlot}\n`)
   process.stdout.write(
@@ -960,6 +1280,51 @@ async function commandDoctor(values) {
   }
 }
 
+async function commandPassword(values, positionals) {
+  if (positionals[1] !== 'reset') {
+    process.stderr.write(t(
+      '❌ การใช้งาน: p2pgate password reset\n',
+      '❌ Usage: p2pgate password reset\n'
+    ))
+    process.exitCode = 1
+    return
+  }
+
+  const configPath = resolveConfigPath(values.config)
+  const config = await loadConfig(configPath)
+
+  if (config.mode !== 'server' || config.authMode !== 'password') {
+    process.stderr.write(t(
+      '❌ คำสั่งนี้ใช้ได้เฉพาะ Server ที่ใช้ authMode=password\n',
+      '❌ This command requires a Server with authMode=password\n'
+    ))
+    process.exitCode = 1
+    return
+  }
+
+  const password = generateConnectionPassword()
+  const verifier = await deriveScramVerifier(password)
+  config.authPin = {
+    enabled: true,
+    unattended: serializeScramVerifier(verifier)
+  }
+
+  await saveConfig(configPath, config)
+
+  process.stdout.write(t(
+    `\n✅ ตั้ง password ใหม่แล้ว: ${password}\n`,
+    `\n✅ New connection password: ${password}\n`
+  ))
+  process.stdout.write(t(
+    '   ถ้า Server กำลังรันอยู่ ให้รีสตาร์ตเพื่อใช้ค่าใหม่\n\n',
+    '   If the Server is running, restart it to use the new password\n\n'
+  ))
+
+  const audit = await openCliAudit(config)
+  await audit.record('password.reset', { source: 'cli' })
+  await audit.close()
+}
+
 async function commandUnlock(values, positionals) {
   let config = null
   try {
@@ -1058,7 +1423,14 @@ async function main(argv) {
       allowPositionals: true,
       options: {
         config: { type: 'string', short: 'c' },
-        port: { type: 'string', short: 'p' },
+        port: { type: 'string' },
+        secret: { type: 'string', short: 's' },
+        password: { type: 'string', short: 'p' },
+        'secret-stdin': { type: 'boolean' },
+        'password-stdin': { type: 'boolean' },
+        lang: { type: 'string' },
+        easy: { type: 'boolean' },
+        quick: { type: 'boolean' },
         'pin-stdin': { type: 'boolean' },
         'key-passphrase-stdin': { type: 'boolean' },
         passphrase: { type: 'boolean' },
@@ -1086,6 +1458,14 @@ async function main(argv) {
   const { values, positionals } = parsed
   const command = positionals[0] || 'help'
 
+  try {
+    setLanguage(values.lang)
+  } catch (err) {
+    process.stderr.write(`❌ ${err.message}\n`)
+    process.exitCode = 1
+    return
+  }
+
   if (values.version) {
     process.stdout.write(`p2pgate ${version}\n`)
     return
@@ -1099,7 +1479,11 @@ async function main(argv) {
   switch (command) {
     case 'setup': {
       const configPath = resolveConfigPath(values.config)
-      await runSetupWizard({ configPath })
+      await runSetupWizard({
+        configPath,
+        easy: values.easy === true || values.quick === true,
+        mode: values.mode
+      })
       return
     }
     case 'keygen':
@@ -1110,6 +1494,9 @@ async function main(argv) {
       return
     case 'client':
       await commandClient(values)
+      return
+    case 'connect':
+      await commandConnect(values)
       return
     case 'devices':
       await commandDevices(values, positionals)
@@ -1122,6 +1509,9 @@ async function main(argv) {
       return
     case 'revoke':
       await commandRevoke(positionals)
+      return
+    case 'password':
+      await commandPassword(values, positionals)
       return
     case 'doctor':
       await commandDoctor(values)

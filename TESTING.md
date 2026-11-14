@@ -1,6 +1,6 @@
-# p2pgate v1.5 — คู่มือทดสอบก่อนใช้งานจริง
+# p2pgate v1.6 — คู่มือทดสอบก่อนใช้งานจริง
 
-เอกสารนี้เป็น **manual acceptance test** สำหรับตรวจสอบว่า p2pgate v1.5.0
+เอกสารนี้เป็น **manual acceptance test** สำหรับตรวจสอบว่า p2pgate v1.6.0
 ทำงานได้จริงบนเครื่องและเครือข่ายของคุณ ไม่ใช่แค่ผ่าน self-test
 
 > ⚠️ ควรทดสอบในเครื่อง/บัญชีผู้ใช้ทดสอบก่อน
@@ -154,7 +154,7 @@ npm run self-test
 - มี `SELF-TEST PASSED`
 - ไม่มี `FAILED` หรือ stack trace
 
-จำนวน check ที่ควรมากกว่าหรือเท่ากับ v1.5: **34 checks**
+จำนวน check ที่ควรมากกว่าหรือเท่ากับ v1.6: **35 checks**
 
 ### 2.4 ตรวจ metadata
 
@@ -635,7 +635,7 @@ Get-NetTCPConnection -State Listen |
 
 ---
 
-## 10.4) L9 — v1.5 Security & Automation
+## 10.4) L9 — v1.6 Security & Automation
 
 ### Client key passphrase
 
@@ -687,7 +687,7 @@ p2pgate devices list
 
 ---
 
-## 11) Known Limitations ของ v1.5.0
+## 11) Known Limitations ของ v1.6.0
 
 สิ่งเหล่านี้ **ยังไม่มี** และไม่ควรถือว่าเป็นบั๊ก:
 
@@ -706,13 +706,17 @@ p2pgate devices list
 คัดลอกตารางนี้ไปใช้บันทึกผล:
 
 ```text
-p2pgate v1.5.0 — Test Record
+p2pgate v1.6.0 — Test Record
 วันที่:
 เครื่อง Server:
 เครื่อง Client:
 เครือข่าย:
 
-[ ] L0 npm ci + check + self-test (34 checks)
+[ ] L0 npm ci + check + self-test (35 checks)
+[ ] L0 zero-setup server + connect
+[ ] L0 connect -s -p
+[ ] L0 password reset
+[ ] L0 P2PGATE_LANG=en/th
 [ ] L1 SSH ผ่านอุโมงค์ (LAN)
 [ ] L1 ถ่ายโอนข้อมูล 10–20 MB
 [ ] L2 Termux + 4G

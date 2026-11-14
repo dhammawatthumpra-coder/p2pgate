@@ -24,6 +24,7 @@ const DEFAULT_CLIENT_KEY_PATH = path.join(DEFAULT_CONFIG_DIR, 'client-key.json')
 
 const TARGET_HOST = '127.0.0.1'
 const VALID_MODES = new Set(['server', 'client'])
+const AUTH_MODES = Object.freeze(['password', 'registry'])
 
 class ConfigError extends Error {
   constructor(message, code) {
@@ -51,6 +52,7 @@ function defaultConfig() {
   return {
     mode: 'server',
     masterSecret: '',
+    authMode: 'password',
     targetHost: TARGET_HOST,
     targetPort: 8022,
     localPort: 8022,
@@ -262,6 +264,21 @@ function normalizeAuditLog(value, base) {
   return { enabled, path: filePath, maxBytes }
 }
 
+function normalizeAuthMode(value, raw) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return Array.isArray(raw.allowedClientKeys) && raw.allowedClientKeys.length > 0
+      ? 'registry'
+      : 'password'
+  }
+
+  const mode = String(value).trim().toLowerCase()
+  if (!AUTH_MODES.includes(mode)) {
+    throw new ConfigError('authMode must be password or registry', 'CONFIG_INVALID')
+  }
+
+  return mode
+}
+
 /**
  * Merges a raw configuration object with defaults and validates every field.
  */
@@ -318,9 +335,12 @@ function normalizeConfig(raw) {
     ? base.trustedDevicesFile
     : path.resolve(expandHome(String(raw.trustedDevicesFile)))
 
+  const authMode = normalizeAuthMode(raw.authMode, raw)
+
   return {
     mode,
     masterSecret,
+    authMode,
     targetHost,
     targetPort: parsePort(raw.targetPort === undefined ? base.targetPort : raw.targetPort, 'targetPort'),
     localPort: parsePort(

@@ -1,4 +1,4 @@
-# p2pgate (v1.5)
+# p2pgate (v1.6)
 
 [English](README.md) | **ไทย**
 
@@ -6,21 +6,45 @@
 [![license](https://img.shields.io/npm/l/p2pgate.svg)](LICENSE)
 [![Node.js](https://img.shields.io/node/v/p2pgate.svg)](package.json)
 
-อุโมงค์ TCP แบบ P2P ขนาดเล็ก สำหรับเข้าถึง SSH บนมือถือที่อยู่หลัง CGNAT/ไฟร์วอลล์
+อุโมงค์ TCP แบบ P2P ขนาดเล็ก สำหรับเข้าถึง SSH บนเครื่องที่อยู่หลัง CGNAT/ไฟร์วอลล์
 โดยไม่ต้องเปิดพอร์ตออกสู่อินเทอร์เน็ต พร้อม **Mutual SCRAM**, **Verification Policy Modes**,
-**Dual-Source Device Registry** และ **Local Control Plane**
+**Dual-Source Device Registry**, **Local Control Plane** และ **Zero-setup mode**
 
-ออกแบบสำหรับ **Redmi 14C (Android 14, Termux)** แต่ใช้ได้กับ Windows, macOS, Linux
-และ Android เครื่องอื่นที่มี Node.js 20 ขึ้นไป
+ใช้ได้กับ Termux/Android, Linux, macOS และ Windows ที่มี Node.js 20 ขึ้นไป
 
-> เวอร์ชัน 1.5 เพิ่ม audit log แบบ JSONL, client key ที่ป้องกันด้วย passphrase,
-> `--json` สำหรับ status/doctor, control token และแสดง lockout ใน `devices list`
-> **ต้องอัปเดตทั้ง Server และ Client เป็น v1.5**
-> (โปรโตคอล tunnel/auth ยังเข้ากันได้กับ v1.4)
+> เวอร์ชัน 1.6 เพิ่ม **zero-setup server**, **connection-password auth**,
+> `p2pgate connect` (รวมแบบบรรทัดเดียว `-s`/`-p`) และ `P2PGATE_LANG=en|th`
 >
 > **ติดตั้ง:** `npm install -g p2pgate`
 >
 > คู่มือทดสอบก่อนใช้งานจริง: [`TESTING.md`](TESTING.md)
+
+## เริ่มใช้งานเร็ว (ไม่ต้อง setup)
+
+เครื่อง Server ครั้งแรก:
+
+```sh
+p2pgate server
+```
+
+ระบบจะสร้าง `~/.p2pgate/config.json`, generate `masterSecret` และ
+connection password ให้ แล้วเริ่มทำงานทันที — คัดลอกค่าที่แสดงไว้
+
+เครื่อง Client เครื่องไหนก็ได้:
+
+```sh
+p2pgate connect -s <masterSecret> -p <password>
+# หรือแบบถาม:
+p2pgate connect
+```
+
+Client key ถูกสร้างอัตโนมัติ จากนั้นเปิด terminal ใหม่:
+
+```sh
+ssh -p 8022 localhost
+```
+
+ถ้าต้องการตั้งค่า advanced ใช้ `p2pgate setup`
 
 ---
 
@@ -100,6 +124,32 @@ ssh -p 8022 localhost
 
 > ค่าเริ่มต้นของ config v1.2 ที่ไม่มี `verificationMode` คือ `hybrid`
 > ถ้า config เดิมมี `authPin.enabled: false` จะถูกตีความเป็น `key-only`
+
+### Authentication Modes
+
+`authMode` กำหนดว่าต้องลงทะเบียน client key ก่อนหรือไม่:
+
+| โหมด | พฤติกรรม |
+|---|---|
+| `password` | รับ client key ที่ไม่รู้จักได้ ถ้าใส่ connection password ถูก; trusted device ที่ลงทะเบียนยังใช้ fast-path ได้ |
+| `registry` | ต้องมี key ใน `allowedClientKeys` หรือ `trusted_devices` ก่อน |
+
+`p2pgate server` ครั้งแรกจะสร้าง `authMode: password`
+ส่วน `p2pgate setup` แบบ advanced จะใช้ `registry`
+
+```json
+"authMode": "password"
+```
+
+connection password เก็บเฉพาะ SCRAM verifier ใน `authPin.unattended`
+เปลี่ยนรหัสด้วย:
+
+```sh
+p2pgate password reset
+```
+
+> password mode สะดวกแต่ปลอดภัยน้อยกว่า registry
+> ควรใช้ password ยาวและลงทะเบียน trusted device สำหรับ fast-path
 
 ---
 
@@ -536,7 +586,7 @@ npm install -g p2pgate
 p2pgate --version
 ```
 
-### ติดตั้งจาก source บน Termux (Redmi 14C)
+### ติดตั้งจาก source บน Termux
 
 ```sh
 pkg update && pkg upgrade -y
@@ -792,6 +842,10 @@ tail -f ~/.p2pgate/server.log
 | คำสั่ง | ความหมาย |
 |---|---|
 | `p2pgate setup` | ตั้งค่าและเลือก verificationMode |
+| `p2pgate setup --easy` | สร้าง config แบบ password ด้วยคำถามน้อยที่สุด |
+| `p2pgate server` | เริ่ม Server (สร้าง config อัตโนมัติครั้งแรก) |
+| `p2pgate connect` | เชื่อมต่อด้วย masterSecret + password |
+| `p2pgate connect -s <secret> -p <password>` | เชื่อมต่อแบบบรรทัดเดียว |
 | `p2pgate keygen` | สร้าง/แสดงกุญแจ Client |
 | `p2pgate keygen --passphrase` | ตั้ง/เปลี่ยน passphrase สำหรับ client key |
 | `p2pgate keygen --unprotect` | ถอด passphrase (ต้องยืนยันของเดิม) |
@@ -808,6 +862,7 @@ tail -f ~/.p2pgate/server.log
 | `p2pgate status --json` | ดูสถานะแบบ machine-readable |
 | `p2pgate pin` | ขอ Session PIN จากเซิร์ฟเวอร์ที่รันอยู่ |
 | `p2pgate revoke <key>` | เพิกถอนคีย์และตัด connection ที่เปิดอยู่ |
+| `p2pgate password reset` | เปลี่ยน connection password |
 | `p2pgate doctor` | ตรวจสุขภาพการติดตั้งและแนะนำวิธีแก้ |
 | `p2pgate doctor --json` | ตรวจสุขภาพแบบ machine-readable |
 | `p2pgate unlock --list` | ดูสถานะ lockout/revoke |
@@ -991,13 +1046,15 @@ p2pgate/
 │   ├── releases/
 │   │   ├── v1.4.0.md
 │   │   ├── v1.4.1.md
-│   │   └── v1.5.0.md
+│   │   ├── v1.5.0.md
+│   │   └── v1.6.0.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
 │       ├── phase4-v1.3.0.md
 │       ├── phase5-v1.4.0.md
 │       ├── phase6-v1.5.0.md
+│       ├── phase7-v1.6.0.md
 │       └── project-spec.md
 ├── package.json
 ├── package-lock.json
@@ -1009,6 +1066,8 @@ p2pgate/
     ├── auth-guard.js
     ├── device-registry.js
     ├── audit-log.js
+    ├── i18n.js
+    ├── quickstart.js
     ├── control.js
     ├── doctor.js
     ├── config-loader.js
@@ -1065,6 +1124,27 @@ npm test
 - **Invalid delay:** 2.5–3.5 วินาที (self-test ใช้ค่าสั้น)
 - **No `P2PGATE_TEST_*` env hooks**
 - **Self-test:** ใช้ `HyperDHT.bootstrapper` และ injected clock/delay
+
+---
+
+## 22.1) ภาษา
+
+```sh
+P2PGATE_LANG=en p2pgate server
+P2PGATE_LANG=th p2pgate setup
+```
+
+หรือ:
+
+```sh
+p2pgate --lang th doctor
+```
+
+ลำดับการเลือกภาษา: `P2PGATE_LANG`/`--lang` → `LANG`/`LC_ALL` → ค่าเริ่มต้น `en`
+
+quickstart, setup, server, connect และ help รองรับสองภาษา
+
+คำสั่ง legacy บางส่วนยังอยู่ในระหว่างการแปล
 
 ---
 

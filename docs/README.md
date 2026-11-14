@@ -10,12 +10,14 @@
 | [Phase 4 — Verification modes](specs/phase4-v1.3.0.md) | v1.3.0 | Verification policy modes, trusted_devices registry, status frames v3 |
 | [Phase 5 — Control plane](specs/phase5-v1.4.0.md) | v1.4.0 | Local control socket, doctor, trusted-device expiry enforcement |
 | [Phase 6 — Auditability](specs/phase6-v1.5.0.md) | v1.5.0 | Audit log, encrypted keys, JSON output, control token |
+| [Phase 7 — Zero-setup](specs/phase7-v1.6.0.md) | v1.6.0 | Zero-setup server, password auth, one-line connect |
 
 The Phase 4 document was converted from the original `.docx` handoff file to
 Markdown for easier review and diffing.
 
 ## Other documents
 
+- [Release notes v1.6.0](releases/v1.6.0.md)
 - [Release notes v1.5.0](releases/v1.5.0.md)
 - [Release notes v1.4.1](releases/v1.4.1.md)
 - [Release notes v1.4.0](releases/v1.4.0.md)

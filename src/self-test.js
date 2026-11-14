@@ -1230,7 +1230,74 @@ async function main() {
     await twoStepServer.close()
 
     // ---------------------------------------------------------------------
-    // 10d. Doctor and trusted-device expiry enforcement
+    // 10d. password auth mode accepts a new client key
+    // ---------------------------------------------------------------------
+    const passwordSecret = crypto.randomBytes(32).toString('hex')
+    const passwordControlPath = controlPathFor('password')
+    const passwordServer = await startServer({
+      mode: 'server',
+      masterSecret: passwordSecret,
+      authMode: 'password',
+      targetHost: '127.0.0.1',
+      targetPort: echoPort,
+      localPort: 8022,
+      clientKeyPath: path.join(tempDir, 'password-server-key.json'),
+      allowedClientKeys: [],
+      verificationMode: 'hybrid',
+      trustedDevicesFile: path.join(tempDir, 'password-devices'),
+      auditLog: { enabled: false },
+      customBootstrap: bootstrap,
+      authPin: { enabled: true, unattended: unattendedVerifier },
+      telegramAlert: { enabled: false, botToken: '', chatId: '' }
+    }, {
+      log: quiet,
+      showSessionPin: false,
+      sendStartupAlert: false,
+      failDelayMs: [10, 20],
+      lockoutStatePath: path.join(tempDir, 'password-lockout.json'),
+      authTimeoutMs: 4_000,
+      interactive: false,
+      controlSocketPath: passwordControlPath,
+      controlTokenPath: path.join(tempDir, 'control-password.token')
+    })
+    extraServers.push(passwordServer)
+
+    assert.equal(passwordServer.authMode, 'password')
+    assert.equal(passwordServer.registrySize, 0)
+
+    const passwordClientBase = { ...clientBase, masterSecret: passwordSecret }
+    const passwordModeClient = await startTestClient(
+      unauthorizedKeyPath,
+      unattendedPassword,
+      { base: passwordClientBase }
+    )
+    const passwordModePayload = crypto.randomBytes(128)
+    assert.deepEqual(
+      await echoThrough(passwordModeClient, passwordModePayload),
+      passwordModePayload
+    )
+
+    const wrongPasswordClient = await startTestClient(
+      unauthorizedKeyPath,
+      'wrong-password-000000',
+      { base: passwordClientBase }
+    )
+    const targetBeforeWrongPassword = targetConnections
+    const wrongPasswordResult = await sendAndExpectNoEcho(
+      wrongPasswordClient.address().port,
+      Buffer.from('wrong-password')
+    )
+    assert.equal(wrongPasswordResult.closed, true)
+    assert.equal(wrongPasswordResult.received, 0)
+    assert.equal(targetConnections, targetBeforeWrongPassword)
+    checks.push('password auth mode accepts an unregistered key and rejects a wrong password')
+
+    await passwordModeClient.close()
+    await wrongPasswordClient.close()
+    await passwordServer.close()
+
+    // ---------------------------------------------------------------------
+    // 10e. Doctor and trusted-device expiry enforcement
     // ---------------------------------------------------------------------
     const doctorConfigPath = path.join(tempDir, 'doctor-server.json')
     await fs.writeFile(

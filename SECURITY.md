@@ -4,9 +4,10 @@
 
 | Version | Supported |
 |---|---|
-| 1.5.x | ✅ |
-| 1.4.x | ⚠️ อัปเกรดเป็น 1.5.x |
-| 1.3.x | ⚠️ อัปเกรดเป็น 1.5.x |
+| 1.6.x | ✅ |
+| 1.5.x | ⚠️ อัปเกรดเป็น 1.6.x |
+| 1.4.x | ⚠️ อัปเกรดเป็น 1.6.x |
+| 1.3.x | ⚠️ อัปเกรดเป็น 1.6.x |
 | ต่ำกว่า 1.3 | ❌ |
 
 ## การรายงานช่องโหว่
@@ -48,6 +49,8 @@
 
 - `key-only` ไม่มี PIN เป็นด่านที่สอง — ความปลอดภัยขึ้นกับ client key
 - `trusted` device ข้ามการถาม PIN ตามการออกแบบ
+- `authMode: password` รับ client key ที่ไม่รู้จักได้หาก password ถูก
+  จึงอ่อนกว่า `registry`; ใช้ password ยาวและพิจารณา trusted device
 - Windows ไม่ได้ตรวจ POSIX permission/ACL ของไฟล์ config และ trusted devices
   และ Node core ไม่ได้ตั้ง custom DACL ให้ named pipe; ใช้ control token เสริม
 - audit log เป็นไฟล์ local และไม่ได้ทำ tamper-evident logging
