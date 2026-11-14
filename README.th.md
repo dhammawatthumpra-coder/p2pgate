@@ -1,4 +1,4 @@
-# p2pgate (v1.4)
+# p2pgate (v1.5)
 
 [English](README.md) | **ไทย**
 
@@ -13,10 +13,10 @@
 ออกแบบสำหรับ **Redmi 14C (Android 14, Termux)** แต่ใช้ได้กับ Windows, macOS, Linux
 และ Android เครื่องอื่นที่มี Node.js 20 ขึ้นไป
 
-> เวอร์ชัน 1.4 เพิ่ม local control socket (`status`, `pin`, `revoke`),
-> คำสั่ง `doctor` และบังคับวันหมดอายุสำหรับ trusted devices
-> **ต้องอัปเดตทั้ง Server และ Client เป็น v1.4** เพื่อใช้คำสั่งใหม่ครบชุด
-> (โปรโตคอล tunnel/auth ยังเข้ากันได้กับ v1.3)
+> เวอร์ชัน 1.5 เพิ่ม audit log แบบ JSONL, client key ที่ป้องกันด้วย passphrase,
+> `--json` สำหรับ status/doctor, control token และแสดง lockout ใน `devices list`
+> **ต้องอัปเดตทั้ง Server และ Client เป็น v1.5**
+> (โปรโตคอล tunnel/auth ยังเข้ากันได้กับ v1.4)
 >
 > **ติดตั้ง:** `npm install -g p2pgate`
 >
@@ -54,6 +54,10 @@ ssh -p 8022 localhost
 - trusted devices ต้องมีวันหมดอายุหรือระบุ `--permanent` อย่างชัดเจน
 - Lockout แบบก้าวหน้า 3/15 นาที, 6/6 ชั่วโมง, 10/ถาวร
 - ปลดล็อกได้ทันทีด้วย `p2pgate unlock`
+- **Audit log แบบ JSONL** สำหรับ auth/control/device events โดยไม่บันทึก secrets
+- **Client key ที่ป้องกันด้วย passphrase** (scrypt + AES-256-GCM)
+- **`status --json` / `doctor --json`** สำหรับ automation
+- **Control token ต่อเซิร์ฟเวอร์** สำหรับ local control plane
 - ใช้ dependency ภายนอกเพียงตัวเดียว: `hyperdht`
 
 ---
@@ -220,7 +224,7 @@ Client จะ **เชื่อมต่อก่อน** แล้วรอส�
 2. `P2PGATE_PIN` — environment variable (ลบออกจาก process ทันที)
 3. Hidden prompt — ค่าเริ่มต้น
 
-> p2pgate ไม่มี flag `--pin`> เพื่อไม่ให้รหัสผ่านปรากฏใน `ps` หรือ shell history
+> p2pgate ไม่มี flag `--pin` เพื่อไม่ให้รหัสผ่านปรากฏใน `ps` หรือ shell history
 >
 > หลีกเลี่ยง `P2PGATE_PIN=... p2pgate client` แบบ inline
 > ใช้ hidden prompt หรือ `--pin-stdin` จากไฟล์ที่ปลอดภัย
@@ -245,6 +249,45 @@ Get-Content .\pin.txt | p2pgate client --pin-stdin
 export P2PGATE_PIN='...'
 p2pgate client
 unset P2PGATE_PIN
+```
+
+### Passphrase ของ Client Key
+
+ป้องกัน client key ด้วย passphrase ได้ โดย seed จะถูกเข้ารหัสด้วย
+scrypt + AES-256-GCM และ public key ยังอ่านได้สำหรับ diagnostics
+
+```sh
+p2pgate keygen --passphrase
+```
+
+แบบไม่ interactive:
+
+```sh
+printf '%s\n' 'your-long-passphrase' | p2pgate keygen --config ~/.p2pgate/config.json --passphrase-stdin
+```
+
+ตอนเริ่ม Client:
+
+```sh
+p2pgate client --key-passphrase-stdin < ~/.p2pgate/key-passphrase.txt
+```
+
+หรือ:
+
+```sh
+export P2PGATE_KEY_PASSPHRASE='...'
+p2pgate client
+unset P2PGATE_KEY_PASSPHRASE
+```
+
+- passphrase ต้องยาวอย่างน้อย 12 ตัวอักษร
+- ไม่มี argument `--passphrase <value>`
+- `--key-passphrase-stdin` ใช้ร่วมกับ `--pin-stdin` ไม่ได้
+- client key แบบ plaintext เดิมยังใช้ได้; `doctor` จะแนะนำให้เพิ่ม passphrase
+- ถอดการป้องกัน:
+
+```sh
+p2pgate keygen --unprotect
 ```
 
 ---
@@ -306,13 +349,15 @@ p2pgate devices remove <publicKeyHex>
   ป้ายชื่อ: -
   สถานะ: ใช้งาน
   Fast-path: ไม่ใช่
+  Lockout: ปกติ
+  ล้มเหลวใน 24 ชม.: 0 ครั้ง
 ```
 
 ---
 
 ## 8) Local Control Plane (`status` / `pin` / `revoke`)
 
-Server v1.4 เปิด **local control socket** สำหรับจัดการเซิร์ฟเวอร์ที่กำลังรันอยู่
+Server v1.5 เปิด **local control socket** สำหรับจัดการเซิร์ฟเวอร์ที่กำลังรันอยู่
 โดยไม่ต้องรีสตาร์ตและไม่ต้องเปิดพอร์ต TCP เพิ่ม
 
 ### ตำแหน่ง socket
@@ -326,11 +371,16 @@ Server v1.4 เปิด **local control socket** สำหรับจัดก
 - socket ถูกลบเมื่อเซิร์ฟเวอร์ปิดอย่างถูกต้อง
 - ถ้า socket ค้างจาก process ที่ตายไปแล้ว ระบบจะ probe ก่อนและลบทิ้ง
 - ถ้ามีเซิร์ฟเวอร์อื่นใช้ socket อยู่ จะเริ่มไม่ได้และแจ้ง `CONTROL_IN_USE`
+- ทุก request ต้องมี **control token** ของเซิร์ฟเวอร์ เก็บที่
+  `~/.p2pgate/control.token` สิทธิ์ `0600` และจะไม่ถูกพิมพ์ออกมา
+- POSIX ตรวจ owner และสิทธิ์ `0600` ของ socket
+- Windows ใช้ token ช่วย authenticate เสริม named-pipe DACL
 
 ### คำสั่ง
 
 ```sh
 p2pgate status
+p2pgate status --json
 p2pgate pin
 p2pgate revoke <clientPublicKeyHex>
 ```
@@ -346,6 +396,15 @@ p2pgate revoke <clientPublicKeyHex>
 - จำนวน connection และคีย์ที่เชื่อมต่อ
 - จำนวนที่ถูกบล็อกสะสม
 - uptime, ไฟล์ trusted_devices, control socket path
+
+ใช้ `--json` สำหรับ automation:
+
+```sh
+p2pgate status --json
+```
+
+ผลลัพธ์เป็น JSON object เดียว โดย `"ok": true` เมื่อสำเร็จ
+และ `"ok": false` พร้อม `error` เมื่อล้มเหลว (exit code 1)
 
 #### `p2pgate pin`
 
@@ -389,6 +448,7 @@ p2pgate unlock <clientPublicKeyHex>
 ```sh
 p2pgate doctor
 p2pgate doctor --config /path/to/config.json
+p2pgate doctor --json
 ```
 
 ตรวจสอบ:
@@ -396,20 +456,63 @@ p2pgate doctor --config /path/to/config.json
 1. เวอร์ชัน Node.js (ต้อง >= 20)
 2. ไฟล์ config อ่านและ validate ได้
 3. `verificationMode` และฟิลด์ที่เกี่ยวข้อง
-4. สิทธิ์ไฟล์ config, client key, trusted_devices, lockout state
+4. สิทธิ์ไฟล์ config, client key, trusted_devices, lockout state, audit log
    - บน Windows จะแจ้งว่าไม่ได้ตรวจ POSIX permission
 5. Device registry: จำนวนอุปกรณ์, อุปกรณ์หมดอายุ,
    trusted ที่ไม่มีวันหมดอายุ, สิทธิ์ไฟล์, registry ว่าง
 6. ปลายทาง: Server ตรวจว่า `127.0.0.1:<targetPort>` มี sshd ฟังอยู่หรือไม่
    Client ตรวจว่าพอร์ตท้องถิ่นว่างหรือไม่
-7. Control plane: ถ้าเซิร์ฟเวอร์รันอยู่จะ query `status`
-8. Lockout state: จำนวนที่ถูกระงับ/เพิกถอน
+7. Control plane: ถ้าเซิร์ฟเวอร์รันอยู่จะ query `status` ด้วย token
+8. Lockout state และขนาด/สิทธิ์ audit log
 9. คำเตือนเรื่องการมองเห็น Session PIN ในโหมดไม่มี terminal
-10. กุญแจ Client ฝั่ง Client ว่ามีและถูกต้องหรือไม่
+10. กุญแจ Client ว่ามี ถูกต้อง และป้องกันด้วย passphrase หรือไม่
 
 - exit code `0` เมื่อไม่มี `❌`
 - exit code `1` เมื่อมีปัญหาวิกฤต
 - ไม่พิมพ์ `masterSecret`, seed, verifier หรือ PIN
+
+`--json` คืนผลแบบ machine-readable:
+
+```json
+{
+  "ok": false,
+  "exitCode": 1,
+  "summary": { "critical": 1, "warnings": 2 },
+  "checks": [
+    { "level": "ok", "title": "...", "detail": "..." }
+  ]
+}
+```
+
+---
+
+## 9.1) Audit Log
+
+Server และ CLI เขียนเหตุการณ์ด้านความปลอดภัยลงไฟล์ JSONL ภายในเครื่อง:
+
+```json
+{"ts":"2026-11-15T10:00:00.000Z","event":"auth.success","source":"server","key":"<hex>","mode":"pin"}
+```
+
+ค่าเริ่มต้น:
+
+```json
+"auditLog": {
+  "enabled": true,
+  "path": "~/.p2pgate/audit.log",
+  "maxBytes": 5242880
+}
+```
+
+- ไฟล์สิทธิ์ `0600` โฟลเดอร์ `0700`
+- หมุนไฟล์เก่าเป็น `audit.log.1` เมื่อเกิน `maxBytes`
+- events: `server.start`, `auth.success`, `auth.failure`, `auth.declined`,
+  `auth.fastpath`, `control.revoke`, `session.pin.rotate`, `device.add`,
+  `device.remove`, `device.revoke`, `device.unlock`, `device.unlock_all`
+- ไม่บันทึก PIN, รหัสผ่าน, passphrase, master secret, seed, verifier
+  หรือ control token
+- ถ้าเขียน audit ไม่ได้ จะ log ไว้แต่ไม่บล็อกการยืนยันตัวตน
+- ปิดได้ด้วย `"auditLog": { "enabled": false }`
 
 ---
 
@@ -664,12 +767,19 @@ tail -f ~/.p2pgate/server.log
   หากสิทธิ์ไม่ปลอดภัย fast-path จะถูกปิด
 - **Progressive lockout** 3/15m, 6/6h, 10/permanent
 - **Control socket** เป็น local-only (`0600` หรือ named pipe ของผู้ใช้)
+  - ทุก request ต้องมี control token ที่เก็บสิทธิ์ `0600`
+  - POSIX ตรวจ owner และสิทธิ์ `0600`
   - PIN ถูกอ่านจาก RAM และส่งผ่าน socket เท่านั้น
   - revoke ตัด connection ที่เปิดอยู่และบันทึกการระงับถาวร
   - ไม่มี TCP listener สำหรับ control plane
+  - Windows ใช้ token เสริม named-pipe DACL (Node core ตั้ง DACL เองไม่ได้)
+- **Client key ที่ป้องกันด้วย passphrase** ใช้ scrypt + AES-256-GCM
+  โดย key แบบ plaintext เดิมยังใช้ได้และ `doctor` จะแนะนำให้เพิ่ม passphrase
+- **Audit log** สิทธิ์ `0600` เป็น JSONL และไม่บันทึก secrets
 - **trusted device** ข้าม PIN จึงต้องมีวันหมดอายุหรือ `--permanent` อย่างชัดเจน
 - **พอร์ตภายใน** ผูกกับ `127.0.0.1`
-- **ไฟล์ config/กุญแจ/lockout/trusted_devices** สิทธิ์ `0600`
+- **ไฟล์ config/กุญแจ/lockout/trusted_devices/control token/audit log**
+  สิทธิ์ `0600`
 - **doctor** ไม่พิมพ์ secrets และไม่แก้ไขไฟล์
 
 > p2pgate ไม่ได้แทนที่ SSH security ทั้งหมด
@@ -683,18 +793,23 @@ tail -f ~/.p2pgate/server.log
 |---|---|
 | `p2pgate setup` | ตั้งค่าและเลือก verificationMode |
 | `p2pgate keygen` | สร้าง/แสดงกุญแจ Client |
+| `p2pgate keygen --passphrase` | ตั้ง/เปลี่ยน passphrase สำหรับ client key |
+| `p2pgate keygen --unprotect` | ถอด passphrase (ต้องยืนยันของเดิม) |
 | `p2pgate server` | เริ่ม Server |
 | `p2pgate client` | เริ่ม Client และขอ credential เฉพาะเมื่อต้อง two-step |
 | `p2pgate client --pin-stdin` | อ่าน credential จาก stdin เมื่อถูกถาม |
-| `p2pgate devices list` | แสดง registry ที่ merge แล้ว |
+| `p2pgate client --key-passphrase-stdin` | อ่าน passphrase ของ client key จาก stdin |
+| `p2pgate devices list` | แสดง registry และ lockout state |
 | `p2pgate devices add <key> --mode trusted --expires ...` | เพิ่ม trusted device ชั่วคราว |
 | `p2pgate devices add <key> --mode trusted --permanent` | เพิ่ม trusted device ถาวร (ต้องยืนยันเจตนา) |
 | `p2pgate devices add <key> --mode scram` | เพิ่มอุปกรณ์ที่ต้อง two-step |
 | `p2pgate devices remove <key>` | ลบออกจาก trusted_devices |
 | `p2pgate status` | ดูสถานะเซิร์ฟเวอร์ผ่าน control socket |
+| `p2pgate status --json` | ดูสถานะแบบ machine-readable |
 | `p2pgate pin` | ขอ Session PIN จากเซิร์ฟเวอร์ที่รันอยู่ |
 | `p2pgate revoke <key>` | เพิกถอนคีย์และตัด connection ที่เปิดอยู่ |
 | `p2pgate doctor` | ตรวจสุขภาพการติดตั้งและแนะนำวิธีแก้ |
+| `p2pgate doctor --json` | ตรวจสุขภาพแบบ machine-readable |
 | `p2pgate unlock --list` | ดูสถานะ lockout/revoke |
 | `p2pgate unlock <key>` | ปลดล็อกเฉพาะคีย์ |
 | `p2pgate unlock --all` | ปลดล็อกทั้งหมด |
@@ -710,6 +825,8 @@ tail -f ~/.p2pgate/server.log
 - trusted devices: `~/.p2pgate/trusted_devices`
 - lockout state: `~/.p2pgate/lockout-state.json`
 - control socket: `~/.p2pgate/control.sock` (Windows: named pipe)
+- control token: `~/.p2pgate/control.token`
+- audit log: `~/.p2pgate/audit.log`
 
 ---
 
@@ -732,6 +849,9 @@ tail -f ~/.p2pgate/server.log
   ระบบจะ probe และลบ socket ที่ไม่มีเจ้าของให้
 - ถ้าขึ้น `CONTROL_IN_USE` แสดงว่ามีเซิร์ฟเวอร์อื่นใช้ socket อยู่
   ให้ปิดตัวเก่าก่อน
+- ถ้าขึ้น `UNAUTHORIZED` แสดงว่า control token ไม่ตรงหรือค้างจากเซิร์ฟเวอร์เก่า
+  ให้รีสตาร์ตเซิร์ฟเวอร์เพื่อสร้าง `~/.p2pgate/control.token` ใหม่
+- ถ้าไม่พบ token ให้เริ่มเซิร์ฟเวอร์ก่อน CLI จะยืนยันตัวตนไม่ได้
 
 ### `revoke` แล้วยังเชื่อมต่อได้
 
@@ -786,6 +906,17 @@ p2pgate devices add <key> --mode trusted --permanent
 ### `PIN_REQUIRED`
 
 Client ต้อง two-step แต่ไม่มี terminal / ไม่มี `--pin-stdin` / ไม่มี `P2PGATE_PIN`
+
+### Passphrase ของ client key ผิดพลาด
+
+- `KEY_PASSPHRASE_REQUIRED`: key ถูกป้องกันและไม่มีทางส่ง passphrase
+  - ใช้ `--key-passphrase-stdin` หรือ `P2PGATE_KEY_PASSPHRASE`
+- `KEY_PASSPHRASE_INVALID`: passphrase ไม่ถูกต้อง
+- `KEY_PASSPHRASE_WEAK`: passphrase ใหม่สั้นกว่า 12 ตัวอักษร
+- เพิ่ม protection ให้ key เดิม:
+  ```sh
+  p2pgate keygen --passphrase
+  ```
 
 ### `PIN_ROTATED_OR_INVALID`
 
@@ -859,12 +990,14 @@ p2pgate/
 │   ├── README.md
 │   ├── releases/
 │   │   ├── v1.4.0.md
-│   │   └── v1.4.1.md
+│   │   ├── v1.4.1.md
+│   │   └── v1.5.0.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
 │       ├── phase4-v1.3.0.md
 │       ├── phase5-v1.4.0.md
+│       ├── phase6-v1.5.0.md
 │       └── project-spec.md
 ├── package.json
 ├── package-lock.json
@@ -875,6 +1008,7 @@ p2pgate/
     ├── auth.js
     ├── auth-guard.js
     ├── device-registry.js
+    ├── audit-log.js
     ├── control.js
     ├── doctor.js
     ├── config-loader.js
@@ -910,12 +1044,17 @@ npm test
 - **Live reload:** `mtimeMs` + atomic rename
 - **Status frames v3:** `DECLINED`, `FASTPATH_READY`, `CHALLENGE_REQUIRED`, `READY`
 - **Client READY:** Client ส่งหลังได้ credential เพื่อไม่ให้เวลาพิมพ์ถูกนับใน 10 วินาที
-- **Control protocol:** newline-delimited JSON, version `1`, max 4096 bytes, timeout 5 วินาที
+- **Control protocol:** newline-delimited JSON, version `2`, max 4096 bytes, timeout 5 วินาที
 - **Control commands:** `status`, `pin`, `revoke`
+  - ทุก request ต้องมี control token
   - `status` ไม่คืน PIN
   - `pin` อ่านจาก memory เท่านั้น
   - `revoke` ใช้ `AuthGuard.revoke(key, 'manual')` แล้วปิด active streams
-- **Control socket:** POSIX `0600`, Windows named pipe, stale-socket probe ก่อนลบ
+- **Control socket:** POSIX `0600` ตรวจ owner/permission, Windows named pipe, stale-socket probe ก่อนลบ
+- **Control token:** 32 random bytes, SHA-256 + `timingSafeEqual`, ไฟล์ `0600`
+- **Audit log:** JSONL แบบ serialize, หมุนหนึ่งไฟล์, กรอง secret fields, ไม่บล็อก auth
+- **Client key encryption:** scrypt (N=16384, r=8, p=1) + AES-256-GCM
+- **JSON output:** `status --json` และ `doctor --json`
 - **doctor:** read-only, exit 1 เมื่อมี `❌`, ไม่พิมพ์ secrets
 - **Trusted expiry:** CLI บังคับ `--expires` หรือ `--permanent`; ไฟล์เดิมยังใช้ได้
 - **SCRAM:** ยังใช้ challenge/response แบบ mutual และตรวจ `serverSig`

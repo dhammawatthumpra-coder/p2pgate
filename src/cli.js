@@ -2,6 +2,7 @@
 'use strict'
 
 const path = require('node:path')
+const readline = require('node:readline/promises')
 const { parseArgs } = require('node:util')
 const {
   DEFAULT_CLIENT_KEY_PATH,
@@ -18,8 +19,11 @@ const { DeviceRegistry, validateDeviceAddOptions } = require('./device-registry'
 const {
   CONTROL_VERSION,
   defaultControlSocketPath,
+  readControlToken,
   sendControlCommand
 } = require('./control')
+const { promptHidden } = require('./auth')
+const { createAuditLog } = require('./audit-log')
 const { runDoctor } = require('./doctor')
 const {
   normalizeClientPublicKeyHex
@@ -27,23 +31,28 @@ const {
 const {
   clientKeyExists,
   generateClientKey,
-  loadClientKey
+  inspectClientKey,
+  protectClientKey,
+  unprotectClientKey
 } = require('./keygen')
 const { version } = require('../package.json')
 
-const HELP_TEXT = `p2pgate v1.4 — อุโมงค์ TCP แบบ P2P สำหรับ Termux (Zero-Trust + SCRAM)
+const HELP_TEXT = `p2pgate v1.5 — อุโมงค์ TCP แบบ P2P สำหรับ Termux (Zero-Trust + SCRAM)
 
 การใช้งาน:
   p2pgate setup [--config <path>]
       ตั้งค่าครั้งแรกแบบถาม-ตอบ (แนะนำ)
 
   p2pgate keygen [--config <path>] [--force]
+      [--passphrase] [--passphrase-stdin] [--unprotect]
       สร้างหรือแสดงกุญแจประจำเครื่อง Client และพิมพ์ Public Key
+      --passphrase: ตั้ง/เปลี่ยน passphrase สำหรับ client key
 
   p2pgate server [--config <path>]
       เริ่มเซิร์ฟเวอร์และแสดง Session PIN 10 ตัวอักษรบนหน้าจอ
 
   p2pgate client [--config <path>] [--port <localPort>] [--pin-stdin]
+      [--key-passphrase-stdin]
       เริ่มอุโมงค์และยืนยันตัวตนด้วย PIN หรือรหัสผ่านสำรอง
       Client จะเชื่อมต่อก่อน และถาม PIN เฉพาะเมื่อเซิร์ฟเวอร์ต้องใช้ two-step
       ถ้าไม่ระบุ --pin-stdin จะถามแบบซ่อนการพิมพ์
@@ -55,7 +64,7 @@ const HELP_TEXT = `p2pgate v1.4 — อุโมงค์ TCP แบบ P2P ส�
       จัดการไฟล์ trusted_devices
       trusted ต้องระบุ --expires หรือ --permanent เท่านั้น
 
-  p2pgate status [--config <path>]
+  p2pgate status [--config <path>] [--json]
       ดูสถานะเซิร์ฟเวอร์ที่รันอยู่ผ่าน local control socket
 
   p2pgate pin [--config <path>]
@@ -65,7 +74,7 @@ const HELP_TEXT = `p2pgate v1.4 — อุโมงค์ TCP แบบ P2P ส�
       เพิกถอนคีย์ถาวรและตัด connection ที่เปิดอยู่ทันที
       คืนสิทธิ์ได้ด้วย p2pgate unlock <key>
 
-  p2pgate doctor [--config <path>]
+  p2pgate doctor [--config <path>] [--json]
       ตรวจสุขภาพการติดตั้งและแสดงคำแนะนำเป็นภาษาไทย
 
   p2pgate unlock <clientPublicKeyHex>
@@ -81,19 +90,24 @@ const HELP_TEXT = `p2pgate v1.4 — อุโมงค์ TCP แบบ P2P ส�
   2) P2PGATE_PIN   ตัวแปรสภาพแวดล้อม (ถูกลบออกจาก process ทันที)
   3) ถามแบบซ่อนการพิมพ์ (ค่าเริ่มต้น)
 
+Passphrase ของ client key:
+  1) --key-passphrase-stdin   อ่านหนึ่งบรรทัดจาก stdin
+  2) P2PGATE_KEY_PASSPHRASE   ตัวแปรสภาพแวดล้อม (ถูกลบออกจาก process ทันที)
+  3) ถามแบบซ่อนการพิมพ์ (ค่าเริ่มต้น)
+
 ตัวอย่าง:
   p2pgate setup
-  p2pgate keygen
+  p2pgate keygen --passphrase
   p2pgate server
   p2pgate client
   p2pgate client --pin-stdin < pin.txt
   ssh -p 8022 localhost
   p2pgate devices list
   p2pgate devices add <key> --mode trusted --expires 2027-12-31T23:59:59Z --comment "ops-laptop"
-  p2pgate status
+  p2pgate status --json
   p2pgate pin
   p2pgate revoke <key>
-  p2pgate doctor
+  p2pgate doctor --json
   p2pgate unlock --list
   p2pgate unlock --all
 
@@ -151,6 +165,24 @@ function printError(err) {
     case 'CLIENT_KEY_MISMATCH':
       process.stderr.write(
         '👉 ไฟล์กุญแจ Client ไม่สอดคล้องกัน กรุณาสร้างใหม่ด้วย: p2pgate keygen --force\n'
+      )
+      break
+    case 'KEY_PASSPHRASE_REQUIRED':
+      process.stderr.write(
+        '👉 client key ถูกป้องกันด้วย passphrase\n'
+      )
+      process.stderr.write(
+        '   ใช้ --key-passphrase-stdin หรือ P2PGATE_KEY_PASSPHRASE หรือรันใน terminal\n'
+      )
+      break
+    case 'KEY_PASSPHRASE_INVALID':
+      process.stderr.write(
+        '👉 passphrase ของ client key ไม่ถูกต้อง\n'
+      )
+      break
+    case 'KEY_PASSPHRASE_WEAK':
+      process.stderr.write(
+        '👉 passphrase ต้องยาวอย่างน้อย 12 ตัวอักษร\n'
       )
       break
     case 'AUTH_VERIFIER_INVALID':
@@ -216,25 +248,138 @@ function printPublicKey(publicKey, keyPath, isNew) {
   process.stdout.write('แล้วรีสตาร์ตเซิร์ฟเวอร์ (หรือรัน setup บน Server อีกครั้ง)\n')
 }
 
+async function readStdinLine() {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  })
+
+  try {
+    return await rl.question('')
+  } finally {
+    rl.close()
+  }
+}
+
+async function askKeyPassphrase(question) {
+  try {
+    return (await promptHidden(question)).trim()
+  } catch {
+    const err = new Error(
+      'ต้องใช้ terminal สำหรับกรอก passphrase หรือใช้ --passphrase-stdin'
+    )
+    err.code = 'KEY_PASSPHRASE_REQUIRED'
+    throw err
+  }
+}
+
+async function askNewKeyPassphrase() {
+  while (true) {
+    const first = await askKeyPassphrase(
+      'ตั้ง passphrase สำหรับ client key (อย่างน้อย 12 ตัวอักษร): '
+    )
+
+    if (first.length < 12) {
+      process.stdout.write('❌ passphrase ต้องยาวอย่างน้อย 12 ตัวอักษร\n')
+      continue
+    }
+
+    const second = await askKeyPassphrase('ยืนยัน passphrase อีกครั้ง: ')
+    if (first !== second) {
+      process.stdout.write('❌ passphrase ทั้งสองครั้งไม่ตรงกัน\n')
+      continue
+    }
+
+    return first
+  }
+}
+
+async function getKeygenPassphrase(values) {
+  if (values['passphrase-stdin']) {
+    const passphrase = (await readStdinLine()).trim()
+    if (passphrase.length < 12) {
+      const err = new Error('passphrase ต้องยาวอย่างน้อย 12 ตัวอักษร')
+      err.code = 'KEY_PASSPHRASE_WEAK'
+      throw err
+    }
+    return passphrase
+  }
+
+  if (values.passphrase) return askNewKeyPassphrase()
+  return null
+}
+
 async function commandKeygen(values) {
   const configPath = resolveConfigPath(values.config)
   const keyPath = await resolveKeyPath(configPath)
+  const exists = clientKeyExists(keyPath)
 
-  if (clientKeyExists(keyPath) && !values.force) {
-    const key = await loadClientKey(keyPath)
+  if (exists && values.unprotect) {
+    const metadata = await inspectClientKey(keyPath)
+    if (!metadata.encrypted) {
+      process.stdout.write('\nℹ️  client key นี้ไม่ได้ป้องกันด้วย passphrase\n')
+      return
+    }
+
+    const currentPassphrase = await askKeyPassphrase(
+      'passphrase ปัจจุบันของ client key: '
+    )
+    const key = await unprotectClientKey(keyPath, { currentPassphrase })
+    process.stdout.write('\n✅ ถอด passphrase ออกจาก client key แล้ว\n')
     printPublicKey(key.publicKey, key.path, false)
     return
   }
 
-  if (clientKeyExists(keyPath) && values.force) {
+  if (exists && !values.force) {
+    const metadata = await inspectClientKey(keyPath)
+
+    if (values.passphrase || values['passphrase-stdin']) {
+      let currentPassphrase = null
+      if (metadata.encrypted) {
+        currentPassphrase = await askKeyPassphrase(
+          'passphrase ปัจจุบันของ client key: '
+        )
+      }
+
+      const passphrase = await getKeygenPassphrase(values)
+      const key = await protectClientKey(keyPath, {
+        currentPassphrase,
+        passphrase
+      })
+
+      process.stdout.write('\n✅ ตั้ง passphrase ให้ client key แล้ว\n')
+      printPublicKey(key.publicKey, key.path, false)
+      return
+    }
+
+    process.stdout.write(`\n🔑 พบ client key เดิม: ${metadata.path}\n`)
+    process.stdout.write(
+      `   สถานะ: ${metadata.encrypted ? 'ป้องกันด้วย passphrase' : 'ไม่มีการป้องกัน'}\n`
+    )
+    printPublicKey(metadata.publicKey, metadata.path, false)
+
+    if (!metadata.encrypted) {
+      process.stdout.write(
+        '💡 แนะนำ: เพิ่ม passphrase ด้วย `p2pgate keygen --passphrase`\n'
+      )
+    }
+    return
+  }
+
+  if (exists && values.force) {
     process.stdout.write(
       '⚠️  กำลังสร้างกุญแจใหม่ทับของเดิม — Server จะปฏิเสธกุญแจเดิมทันที\n'
     )
     process.stdout.write('    อย่าลืมนำ Public Key ใหม่ไปเพิ่มในเครื่อง Server\n')
   }
 
-  const key = await generateClientKey(keyPath)
+  const passphrase = await getKeygenPassphrase(values)
+  const key = await generateClientKey(keyPath, { passphrase })
   printPublicKey(key.publicKey, key.path, true)
+
+  if (key.encrypted) {
+    process.stdout.write('🔐 client key ถูกป้องกันด้วย passphrase\n')
+  }
 }
 
 async function waitForShutdownSignal() {
@@ -293,6 +438,25 @@ async function commandClient(values) {
   process.stdout.write('\n=== p2pgate client ===\n')
   process.stdout.write(`ไฟล์ตั้งค่า: ${configPath}\n`)
 
+  if (values['key-passphrase-stdin'] && values['pin-stdin']) {
+    const err = new Error(
+      'ใช้ --key-passphrase-stdin และ --pin-stdin พร้อมกันไม่ได้'
+    )
+    err.code = 'CONFIG_INVALID'
+    throw err
+  }
+
+  let keyPassphrase
+  if (values['key-passphrase-stdin']) {
+    process.stdout.write('🔐 จะอ่าน passphrase ของ client key จาก stdin\n')
+    keyPassphrase = (await readStdinLine()).trim()
+    if (keyPassphrase === '') {
+      const err = new Error('passphrase ของ client key ว่างเปล่า')
+      err.code = 'KEY_PASSPHRASE_REQUIRED'
+      throw err
+    }
+  }
+
   if (values['pin-stdin']) {
     process.stdout.write(
       '🔐 จะอ่าน PIN/รหัสผ่านจาก stdin เฉพาะเมื่อเซิร์ฟเวอร์ต้องใช้ two-step\n'
@@ -304,7 +468,8 @@ async function commandClient(values) {
   }
 
   const client = await startClient(config, {
-    pinStdin: values['pin-stdin'] === true
+    pinStdin: values['pin-stdin'] === true,
+    keyPassphrase
   })
   const address = client.address()
 
@@ -318,6 +483,20 @@ async function commandClient(values) {
 
   await client.close()
   process.stdout.write('ปิดอุโมงค์เรียบร้อย\n')
+}
+
+async function openCliAudit(config) {
+  const auditConfig = config && config.auditLog && typeof config.auditLog === 'object'
+    ? config.auditLog
+    : {}
+  const audit = createAuditLog({
+    enabled: auditConfig.enabled !== false,
+    path: auditConfig.path,
+    maxBytes: auditConfig.maxBytes,
+    log: () => {}
+  })
+  await audit.init()
+  return audit
 }
 
 async function commandDevices(values, positionals) {
@@ -335,6 +514,8 @@ async function commandDevices(values, positionals) {
 
   if (subcommand === 'list') {
     const devices = await registry.listDevices()
+    const guard = new AuthGuard({})
+    await guard.init()
 
     process.stdout.write('\n=== p2pgate devices ===\n')
     process.stdout.write(`โหมดยืนยันตัวตน: ${config.verificationMode}\n`)
@@ -348,6 +529,7 @@ async function commandDevices(values, positionals) {
 
     if (devices.length === 0) {
       process.stdout.write('\nไม่มีอุปกรณ์ที่ลงทะเบียน\n')
+      await guard.close()
       return
     }
 
@@ -355,6 +537,16 @@ async function commandDevices(values, positionals) {
       const source = device.source === 'config'
         ? 'config.json (allowedClientKeys)'
         : 'trusted_devices'
+      const lock = guard.getStatus(device.key)
+      let lockState = 'ปกติ'
+
+      if (lock.revoked) {
+        lockState = 'เพิกถอนด้วยคำสั่ง revoke'
+      } else if (lock.permanent) {
+        lockState = 'ระงับถาวร'
+      } else if (lock.locked) {
+        lockState = `ระงับอีก ${formatRemaining(lock.remainingMs)}`
+      }
 
       process.stdout.write(`\n- ${device.key}\n`)
       process.stdout.write(`  แหล่งที่มา: ${source}\n`)
@@ -366,9 +558,12 @@ async function commandDevices(values, positionals) {
       process.stdout.write(`  ป้ายชื่อ: ${device.label || '-'}\n`)
       process.stdout.write(`  สถานะ: ${device.active ? 'ใช้งาน' : 'หมดอายุ'}\n`)
       process.stdout.write(`  Fast-path: ${device.fastpathAllowed ? 'ใช่' : 'ไม่ใช่'}\n`)
+      process.stdout.write(`  Lockout: ${lockState}\n`)
+      process.stdout.write(`  ล้มเหลวใน 24 ชม.: ${lock.failures} ครั้ง\n`)
     }
 
     process.stdout.write('\n')
+    await guard.close()
     return
   }
 
@@ -454,6 +649,17 @@ async function commandDevices(values, positionals) {
         '   ℹ️  คีย์นี้อยู่ใน config.json ด้วย; trusted_devices จะมีผลเหนือกว่า\n'
       )
     }
+
+    const audit = await openCliAudit(config)
+    await audit.record('device.add', {
+      source: 'cli',
+      key: result.key,
+      profile,
+      expires: values.expires || null,
+      permanent: values.permanent === true,
+      replaced: result.replaced
+    })
+    await audit.close()
     return
   }
 
@@ -495,6 +701,14 @@ async function commandDevices(values, positionals) {
         '   ⚠️  คีย์นี้ยังอยู่ใน allowedClientKeys ของ config.json (โปรไฟล์ scram)\n'
       )
     }
+
+    const audit = await openCliAudit(config)
+    await audit.record('device.remove', {
+      source: 'cli',
+      key: result.key,
+      removed: result.removed
+    })
+    await audit.close()
     return
   }
 
@@ -532,28 +746,46 @@ function formatUptime(ms) {
 }
 
 async function sendControl(request) {
+  const token = await readControlToken()
   return sendControlCommand(
     defaultControlSocketPath(),
-    { v: CONTROL_VERSION, ...request },
+    { v: CONTROL_VERSION, token, ...request },
     { timeoutMs: 3000 }
   )
 }
 
 function isControlUnavailable(err) {
-  return err && err.code === 'CONTROL_UNAVAILABLE'
+  return err && (
+    err.code === 'CONTROL_UNAVAILABLE' ||
+    err.code === 'CONTROL_TOKEN_MISSING' ||
+    err.code === 'CONTROL_TOKEN_INVALID'
+  )
 }
 
-async function commandStatus() {
+function writeJson(value) {
+  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
+}
+
+async function commandStatus(values = {}) {
+  const json = values.json === true
   let response
 
   try {
     response = await sendControl({ cmd: 'status' })
   } catch (err) {
     if (isControlUnavailable(err)) {
-      process.stderr.write(
-        '\n⚠️  ไม่พบเซิร์ฟเวอร์ที่กำลังทำงาน (control socket ไม่พร้อมใช้งาน)\n'
-      )
-      process.stderr.write('   เริ่มเซิร์ฟเวอร์ด้วย: p2pgate server\n')
+      if (json) {
+        writeJson({
+          ok: false,
+          error: err.code || 'CONTROL_UNAVAILABLE',
+          message: 'server is not running or the control token is unavailable'
+        })
+      } else {
+        process.stderr.write(
+          '\n⚠️  ไม่พบเซิร์ฟเวอร์ที่กำลังทำงาน (control socket ไม่พร้อมใช้งาน)\n'
+        )
+        process.stderr.write('   เริ่มเซิร์ฟเวอร์ด้วย: p2pgate server\n')
+      }
       process.exitCode = 1
       return
     }
@@ -562,12 +794,23 @@ async function commandStatus() {
   }
 
   if (!response || response.ok !== true) {
-    process.stderr.write(
-      `\n❌ เซิร์ฟเวอร์ตอบกลับผิดพลาด: ${
-        response && response.error ? response.error : 'UNKNOWN'
-      }\n`
-    )
+    if (json) {
+      writeJson(response && typeof response === 'object'
+        ? response
+        : { ok: false, error: 'UNKNOWN' })
+    } else {
+      process.stderr.write(
+        `\n❌ เซิร์ฟเวอร์ตอบกลับผิดพลาด: ${
+          response && response.error ? response.error : 'UNKNOWN'
+        }\n`
+      )
+    }
     process.exitCode = 1
+    return
+  }
+
+  if (json) {
+    writeJson({ ...response, ok: true })
     return
   }
 
@@ -685,6 +928,13 @@ async function commandRevoke(positionals) {
 
   try {
     const status = await guard.revoke(keyHex, 'manual')
+    const audit = await openCliAudit(null)
+    await audit.record('device.revoke', {
+      source: 'cli',
+      key: status.key,
+      mode: 'offline'
+    })
+    await audit.close()
     process.stdout.write(
       `\n✅ บันทึกการเพิกถอนแล้ว (เซิร์ฟเวอร์ไม่ได้ทำงานอยู่): ${status.key}\n`
     )
@@ -701,13 +951,23 @@ async function commandRevoke(positionals) {
 
 async function commandDoctor(values) {
   const configPath = resolveConfigPath(values.config)
-  const result = await runDoctor({ configPath })
+  const result = await runDoctor({
+    configPath,
+    json: values.json === true
+  })
   if (result && result.exitCode) {
     process.exitCode = result.exitCode
   }
 }
 
 async function commandUnlock(values, positionals) {
+  let config = null
+  try {
+    config = await loadConfig(resolveConfigPath(values.config))
+  } catch {
+    // Unlock works without a config file; audit uses the default path.
+  }
+
   const guard = new AuthGuard({})
   await guard.init()
 
@@ -741,6 +1001,12 @@ async function commandUnlock(values, positionals) {
 
     if (values.all) {
       const count = await guard.unlockAll()
+      const audit = await openCliAudit(config)
+      await audit.record('device.unlock_all', {
+        source: 'cli',
+        count
+      })
+      await audit.close()
       process.stdout.write(`\n✅ ปลดล็อกทั้งหมดแล้ว (${count} รายการ)\n`)
       return
     }
@@ -765,6 +1031,14 @@ async function commandUnlock(values, positionals) {
     }
 
     const existed = await guard.unlock(keyHex)
+    const audit = await openCliAudit(config)
+    await audit.record('device.unlock', {
+      source: 'cli',
+      key: keyHex,
+      existed
+    })
+    await audit.close()
+
     if (existed) {
       process.stdout.write(`\n✅ ปลดล็อกแล้ว: ${keyHex}\n`)
     } else {
@@ -786,6 +1060,11 @@ async function main(argv) {
         config: { type: 'string', short: 'c' },
         port: { type: 'string', short: 'p' },
         'pin-stdin': { type: 'boolean' },
+        'key-passphrase-stdin': { type: 'boolean' },
+        passphrase: { type: 'boolean' },
+        'passphrase-stdin': { type: 'boolean' },
+        unprotect: { type: 'boolean' },
+        json: { type: 'boolean' },
         mode: { type: 'string' },
         expires: { type: 'string' },
         permanent: { type: 'boolean' },
@@ -836,7 +1115,7 @@ async function main(argv) {
       await commandDevices(values, positionals)
       return
     case 'status':
-      await commandStatus()
+      await commandStatus(values)
       return
     case 'pin':
       await commandPin()

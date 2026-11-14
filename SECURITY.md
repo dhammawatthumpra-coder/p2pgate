@@ -4,8 +4,9 @@
 
 | Version | Supported |
 |---|---|
-| 1.4.x | ✅ |
-| 1.3.x | ⚠️ อัปเกรดเป็น 1.4.x |
+| 1.5.x | ✅ |
+| 1.4.x | ⚠️ อัปเกรดเป็น 1.5.x |
+| 1.3.x | ⚠️ อัปเกรดเป็น 1.5.x |
 | ต่ำกว่า 1.3 | ❌ |
 
 ## การรายงานช่องโหว่
@@ -48,9 +49,12 @@
 - `key-only` ไม่มี PIN เป็นด่านที่สอง — ความปลอดภัยขึ้นกับ client key
 - `trusted` device ข้ามการถาม PIN ตามการออกแบบ
 - Windows ไม่ได้ตรวจ POSIX permission/ACL ของไฟล์ config และ trusted devices
+  และ Node core ไม่ได้ตั้ง custom DACL ให้ named pipe; ใช้ control token เสริม
+- audit log เป็นไฟล์ local และไม่ได้ทำ tamper-evident logging
 - `revoke` ตัดที่ระดับ stream ของ p2pgate
   ไม่ได้สั่งปิด SSH session ระดับ OS โดยตรง
-- ยังไม่มี master-secret rotation หรือ passphrase-protected client key
+- client key แบบเข้ารหัสยังเปิดเผย `publicKey` และ metadata ในไฟล์
+- ยังไม่มี master-secret rotation หรือ multi-target policy
 
 ## Safe Harbor
 

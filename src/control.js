@@ -6,10 +6,11 @@ const net = require('node:net')
 const os = require('node:os')
 const path = require('node:path')
 
-const CONTROL_VERSION = 1
+const CONTROL_VERSION = 2
 const MAX_CONTROL_BYTES = 4096
 const MAX_CONTROL_RESPONSE_BYTES = 65_536
 const CONTROL_TIMEOUT_MS = 5000
+const TOKEN_HEX = /^[0-9a-f]{64}$/i
 
 function defaultControlSocketPath() {
   if (process.platform === 'win32') {
@@ -22,6 +23,77 @@ function defaultControlSocketPath() {
   }
 
   return path.join(os.homedir(), '.p2pgate', 'control.sock')
+}
+
+function defaultControlTokenPath() {
+  return path.join(os.homedir(), '.p2pgate', 'control.token')
+}
+
+function tokenDigest(value) {
+  return crypto.createHash('sha256').update(String(value || ''), 'utf8').digest()
+}
+
+function verifyControlToken(received, expected) {
+  if (typeof received !== 'string' || typeof expected !== 'string') return false
+  return crypto.timingSafeEqual(tokenDigest(received), tokenDigest(expected))
+}
+
+async function createControlToken(filePath = defaultControlTokenPath()) {
+  const absolutePath = path.resolve(filePath)
+  const token = crypto.randomBytes(32).toString('hex')
+  const dir = path.dirname(absolutePath)
+
+  await fsp.mkdir(dir, { recursive: true, mode: 0o700 })
+  try {
+    await fsp.chmod(dir, 0o700)
+  } catch {
+    // Windows and some filesystems do not enforce POSIX modes.
+  }
+
+  await fsp.writeFile(absolutePath, `${token}\n`, { mode: 0o600 })
+  try {
+    await fsp.chmod(absolutePath, 0o600)
+  } catch {
+    // See above.
+  }
+
+  return { token, path: absolutePath }
+}
+
+async function readControlToken(filePath = defaultControlTokenPath()) {
+  const absolutePath = path.resolve(filePath)
+  let raw
+
+  try {
+    raw = await fsp.readFile(absolutePath, 'utf8')
+  } catch (err) {
+    const missing = new Error(
+      `control token not found: ${absolutePath}`
+    )
+    missing.code = 'CONTROL_TOKEN_MISSING'
+    missing.cause = err
+    throw missing
+  }
+
+  const token = raw.trim()
+  if (!TOKEN_HEX.test(token)) {
+    const invalid = new Error(
+      `control token is malformed: ${absolutePath}`
+    )
+    invalid.code = 'CONTROL_TOKEN_INVALID'
+    throw invalid
+  }
+
+  return token
+}
+
+async function removeControlToken(filePath) {
+  if (!filePath) return
+  try {
+    await fsp.rm(path.resolve(filePath), { force: true })
+  } catch {
+    // Ignore.
+  }
 }
 
 function writeResponse(socket, response) {
@@ -38,6 +110,29 @@ function writeResponse(socket, response) {
 
 function isPosix() {
   return process.platform !== 'win32'
+}
+
+async function verifySocketPermissions(socketPath) {
+  if (!isPosix()) return
+
+  const stat = await fsp.lstat(socketPath)
+  let reason = null
+
+  if (!stat.isSocket()) {
+    reason = 'not-a-socket'
+  } else if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) {
+    reason = 'wrong-owner'
+  } else if ((stat.mode & 0o077) !== 0) {
+    reason = 'group-or-other-permissions'
+  }
+
+  if (reason) {
+    const err = new Error(
+      `control socket has unsafe permissions or ownership (${reason}): ${socketPath}`
+    )
+    err.code = 'CONTROL_INSECURE'
+    throw err
+  }
 }
 
 function probeSocket(socketPath, timeoutMs = 500) {
@@ -103,9 +198,14 @@ async function startControlServer(options = {}) {
   const socketPath = options.socketPath || defaultControlSocketPath()
   const handler = options.handler
   const log = typeof options.log === 'function' ? options.log : () => {}
+  const token = options.token
 
   if (typeof handler !== 'function') {
     throw new Error('control server handler is required')
+  }
+
+  if (typeof token !== 'string' || !TOKEN_HEX.test(token)) {
+    throw new Error('control server token is required')
   }
 
   await prepareSocketPath(socketPath, log)
@@ -157,6 +257,11 @@ async function startControlServer(options = {}) {
 
       if (!request || request.v !== CONTROL_VERSION) {
         fail('UNSUPPORTED_VERSION', 'unsupported control protocol version')
+        return
+      }
+
+      if (!verifyControlToken(request.token, token)) {
+        fail('UNAUTHORIZED', 'invalid control token')
         return
       }
 
@@ -230,6 +335,25 @@ async function startControlServer(options = {}) {
     }
   }
 
+  try {
+    await verifySocketPermissions(socketPath)
+  } catch (err) {
+    await new Promise((resolve) => {
+      server.close(() => resolve())
+      if (typeof server.closeAllConnections === 'function') {
+        server.closeAllConnections()
+      }
+    })
+    if (isPosix()) {
+      try {
+        await fsp.rm(socketPath, { force: true })
+      } catch {
+        // Ignore.
+      }
+    }
+    throw err
+  }
+
   log(`CONTROL socket listening: ${socketPath}`)
 
   async function close() {
@@ -261,6 +385,9 @@ function sendControlCommand(socketPath, request, options = {}) {
   const timeoutMs = Number.isInteger(options.timeoutMs)
     ? options.timeoutMs
     : 2000
+  const payload = options.token && request && request.token === undefined
+    ? { ...request, token: options.token }
+    : request
 
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ path: socketPath })
@@ -344,7 +471,7 @@ function sendControlCommand(socketPath, request, options = {}) {
 
     socket.once('connect', () => {
       try {
-        socket.write(`${JSON.stringify(request)}\n`)
+        socket.write(`${JSON.stringify(payload)}\n`)
       } catch (err) {
         finish(err)
       }
@@ -361,6 +488,12 @@ module.exports = {
   MAX_CONTROL_BYTES,
   MAX_CONTROL_RESPONSE_BYTES,
   defaultControlSocketPath,
+  defaultControlTokenPath,
+  createControlToken,
+  readControlToken,
+  removeControlToken,
+  verifyControlToken,
+  verifySocketPermissions,
   startControlServer,
   sendControlCommand
 }

@@ -463,6 +463,7 @@ async function runSetupWizard(options = {}) {
       allowedClientKeys: [...allowedKeys],
       verificationMode,
       trustedDevicesFile,
+      auditLog: existing && existing.auditLog ? existing.auditLog : undefined,
       customBootstrap: Array.isArray(existing && existing.customBootstrap)
         ? existing.customBootstrap
         : [],

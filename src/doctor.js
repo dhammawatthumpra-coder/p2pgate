@@ -7,10 +7,11 @@ const path = require('node:path')
 
 const { loadConfig } = require('./config-loader')
 const { DeviceRegistry } = require('./device-registry')
-const { clientKeyExists, loadClientKey } = require('./keygen')
+const { clientKeyExists, inspectClientKey } = require('./keygen')
 const {
   CONTROL_VERSION,
   defaultControlSocketPath,
+  readControlToken,
   sendControlCommand
 } = require('./control')
 
@@ -23,19 +24,24 @@ const MIN_NODE_MAJOR = 20
 const TCP_PROBE_TIMEOUT_MS = 1500
 const CONTROL_PROBE_TIMEOUT_MS = 1000
 
-function createReporter(output) {
+function createReporter(output, json = false) {
   const lines = []
+  const checks = []
 
   function write(level, title, detail) {
     const icon = level === 'ok' ? '✅' : level === 'warn' ? '⚠️' : '❌'
+    const text = detail ? String(detail) : ''
     const line = `${icon} ${title}`
     lines.push(line)
-    if (detail) lines.push(`   ${detail.replace(/\n/g, '\n   ')}`)
+    if (text) lines.push(`   ${text.replace(/\n/g, '\n   ')}`)
+    checks.push({ level, title: String(title), detail: text })
+
+    if (json) return
     output.write(`${line}\n`)
-    if (detail) output.write(`   ${detail.replace(/\n/g, '\n   ')}\n`)
+    if (text) output.write(`   ${text.replace(/\n/g, '\n   ')}\n`)
   }
 
-  return { write, lines }
+  return { write, lines, checks }
 }
 
 async function checkPermissions({ filePath, label, required, report }) {
@@ -182,11 +188,14 @@ async function readLockoutSummary(filePath) {
  */
 async function runDoctor(options = {}) {
   const output = options.output || process.stdout
-  const report = createReporter(output)
+  const json = options.json === true
+  const report = createReporter(output, json)
   const configPath = options.configPath
 
-  output.write('\n=== p2pgate doctor ===\n')
-  output.write(`เวลา: ${new Date().toISOString()}\n\n`)
+  if (!json) {
+    output.write('\n=== p2pgate doctor ===\n')
+    output.write(`เวลา: ${new Date().toISOString()}\n\n`)
+  }
 
   // 1. Node.js version
   const nodeMajor = Number(process.versions.node.split('.')[0])
@@ -219,8 +228,17 @@ async function runDoctor(options = {}) {
   }
 
   if (!config) {
-    output.write('\n❌ doctor พบปัญหาที่ต้องแก้ไขก่อน\n\n')
-    return { exitCode: 1, lines: report.lines }
+    if (json) {
+      output.write(`${JSON.stringify({
+        ok: false,
+        exitCode: 1,
+        summary: { critical: 1, warnings: 0 },
+        checks: report.checks
+      }, null, 2)}\n`)
+    } else {
+      output.write('\n❌ doctor พบปัญหาที่ต้องแก้ไขก่อน\n\n')
+    }
+    return { exitCode: 1, lines: report.lines, checks: report.checks }
   }
 
   // 3. Verification mode
@@ -386,29 +404,42 @@ async function runDoctor(options = {}) {
 
   // 7. Live control plane
   const controlSocketPath = defaultControlSocketPath()
+  let controlToken = null
 
   try {
-    const status = await sendControlCommand(
-      controlSocketPath,
-      { v: CONTROL_VERSION, cmd: 'status' },
-      { timeoutMs: CONTROL_PROBE_TIMEOUT_MS }
-    )
-
-    if (status && status.ok) {
-      report.write(
-        'ok',
-        'เซิร์ฟเวอร์กำลังทำงานและตอบสนอง control socket',
-        `โหมด: ${status.verificationMode}; connection: ${status.activeConnections}; slot: ${status.currentSlot}`
-      )
-    } else {
-      report.write('warn', 'control socket ตอบกลับผิดพลาด', status && status.error ? status.error : 'unknown')
-    }
-  } catch (err) {
+    controlToken = await readControlToken()
+  } catch {
     report.write(
       'warn',
-      'ไม่พบเซิร์ฟเวอร์ที่กำลังทำงาน',
+      'ไม่พบ control token',
       `control socket: ${controlSocketPath}\nเริ่มด้วย: p2pgate server`
     )
+  }
+
+  if (controlToken !== null) {
+    try {
+      const status = await sendControlCommand(
+        controlSocketPath,
+        { v: CONTROL_VERSION, cmd: 'status' },
+        { timeoutMs: CONTROL_PROBE_TIMEOUT_MS, token: controlToken }
+      )
+
+      if (status && status.ok) {
+        report.write(
+          'ok',
+          'เซิร์ฟเวอร์กำลังทำงานและตอบสนอง control socket',
+          `โหมด: ${status.verificationMode}; connection: ${status.activeConnections}; slot: ${status.currentSlot}`
+        )
+      } else {
+        report.write('warn', 'control socket ตอบกลับผิดพลาด', status && status.error ? status.error : 'unknown')
+      }
+    } catch (err) {
+      report.write(
+        'warn',
+        'ไม่พบเซิร์ฟเวอร์ที่กำลังทำงาน',
+        `control socket: ${controlSocketPath}\nเริ่มด้วย: p2pgate server`
+      )
+    }
   }
 
   // 8. Lockout state
@@ -427,6 +458,31 @@ async function runDoctor(options = {}) {
         `สถานะ lockout: ${lockout.clients} รายการ`,
         `ระงับชั่วคราว/ถาวร: ${lockout.suspended}; เพิกถอนด้วย revoke: ${lockout.revoked}`
       )
+    }
+  }
+
+  // 8b. Audit log
+  if (config.mode === 'server' && config.auditLog && config.auditLog.enabled) {
+    const auditOk = await checkPermissions({
+      filePath: config.auditLog.path,
+      label: 'audit log',
+      required: false,
+      report
+    })
+
+    if (auditOk) {
+      try {
+        const stat = await fsp.stat(config.auditLog.path)
+        if (stat.size > config.auditLog.maxBytes) {
+          report.write(
+            'warn',
+            'audit log มีขนาดใหญ่กว่าที่กำหนด',
+            `size: ${stat.size} bytes; maxBytes: ${config.auditLog.maxBytes}`
+          )
+        }
+      } catch {
+        // Missing file was already reported by checkPermissions.
+      }
     }
   }
 
@@ -469,26 +525,46 @@ async function runDoctor(options = {}) {
       )
     } else {
       try {
-        const key = await loadClientKey(config.clientKeyPath)
-        report.write('ok', 'กุญแจ Client ถูกต้อง', `public key: ${key.publicKey}`)
+        const key = await inspectClientKey(config.clientKeyPath)
+        if (key.encrypted) {
+          report.write(
+            'ok',
+            'กุญแจ Client ถูกต้องและป้องกันด้วย passphrase',
+            `public key: ${key.publicKey}`
+          )
+        } else {
+          report.write(
+            'warn',
+            'กุญแจ Client ไม่ได้ป้องกันด้วย passphrase',
+            `public key: ${key.publicKey}\nแนะนำ: p2pgate keygen --passphrase`
+          )
+        }
       } catch (err) {
         report.write('error', 'กุญแจ Client ไม่ถูกต้อง', err.message)
       }
     }
   }
 
-  const criticalCount = report.lines.filter((line) => line.startsWith('❌')).length
-  const warnCount = report.lines.filter((line) => line.startsWith('⚠️')).length
+  const criticalCount = report.checks.filter((check) => check.level === 'error').length
+  const warnCount = report.checks.filter((check) => check.level === 'warn').length
+  const exitCode = criticalCount === 0 ? 0 : 1
 
-  if (criticalCount === 0) {
+  if (json) {
+    output.write(`${JSON.stringify({
+      ok: exitCode === 0,
+      exitCode,
+      summary: { critical: criticalCount, warnings: warnCount },
+      checks: report.checks
+    }, null, 2)}\n`)
+  } else if (criticalCount === 0) {
     output.write(`\n✅ doctor ตรวจสอบเสร็จสิ้น (คำเตือน ${warnCount} รายการ)\n\n`)
-    return { exitCode: 0, lines: report.lines }
+  } else {
+    output.write(
+      `\n❌ doctor พบปัญหา ${criticalCount} รายการที่ต้องแก้ไข (คำเตือน ${warnCount} รายการ)\n\n`
+    )
   }
 
-  output.write(
-    `\n❌ doctor พบปัญหา ${criticalCount} รายการที่ต้องแก้ไข (คำเตือน ${warnCount} รายการ)\n\n`
-  )
-  return { exitCode: 1, lines: report.lines }
+  return { exitCode, lines: report.lines, checks: report.checks }
 }
 
 module.exports = {

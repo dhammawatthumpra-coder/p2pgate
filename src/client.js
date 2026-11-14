@@ -169,10 +169,6 @@ async function startClient(config, options = {}) {
     config.localPort === undefined ? 8022 : config.localPort
   )
 
-  const clientKey = await loadClientKey(config.clientKeyPath || DEFAULT_CLIENT_KEY_PATH)
-  const keyPair = clientKey.keyPair
-  const clientPublicKeyHex = Buffer.from(keyPair.publicKey).toString('hex')
-
   const log = typeof options.log === 'function'
     ? options.log
     : (line) => console.log(line)
@@ -193,6 +189,81 @@ async function startClient(config, options = {}) {
     input: options.input || process.stdin,
     output: options.output || process.stdout
   }
+
+  const envKeyPassphrase = typeof process.env.P2PGATE_KEY_PASSPHRASE === 'string'
+    ? process.env.P2PGATE_KEY_PASSPHRASE
+    : null
+  if (envKeyPassphrase !== null) delete process.env.P2PGATE_KEY_PASSPHRASE
+
+  const suppliedKeyPassphrase = typeof options.keyPassphrase === 'string'
+    ? options.keyPassphrase
+    : null
+  let keyPassphrase = suppliedKeyPassphrase !== null
+    ? suppliedKeyPassphrase
+    : envKeyPassphrase
+
+  async function loadKeyWithPassphrase() {
+    let attempts = 0
+    const allowRetry = suppliedKeyPassphrase === null && envKeyPassphrase === null
+
+    while (true) {
+      try {
+        return await loadClientKey(
+          config.clientKeyPath || DEFAULT_CLIENT_KEY_PATH,
+          { passphrase: keyPassphrase }
+        )
+      } catch (err) {
+        if (err && err.code === 'KEY_PASSPHRASE_REQUIRED') {
+          if (!promptOptions.input || !promptOptions.input.isTTY) {
+            throw new AuthError(
+              'client key ถูกป้องกันด้วย passphrase แต่ไม่มี terminal; ใช้ --key-passphrase-stdin หรือ P2PGATE_KEY_PASSPHRASE',
+              'KEY_PASSPHRASE_REQUIRED'
+            )
+          }
+
+          keyPassphrase = (await promptHidden(
+            '🔐 Passphrase สำหรับ client key: ',
+            promptOptions
+          )).trim()
+
+          if (keyPassphrase === '') {
+            throw new AuthError(
+              'passphrase ว่างเปล่า',
+              'KEY_PASSPHRASE_REQUIRED'
+            )
+          }
+          continue
+        }
+
+        if (err && err.code === 'KEY_PASSPHRASE_INVALID') {
+          if (!allowRetry) {
+            throw new AuthError(
+              'passphrase ของ client key ไม่ถูกต้อง',
+              'KEY_PASSPHRASE_INVALID'
+            )
+          }
+
+          attempts += 1
+          if (attempts >= 3 || !promptOptions.input || !promptOptions.input.isTTY) {
+            throw new AuthError(
+              'passphrase ของ client key ไม่ถูกต้อง',
+              'KEY_PASSPHRASE_INVALID'
+            )
+          }
+
+          writeLog('passphrase ไม่ถูกต้อง ลองอีกครั้ง')
+          keyPassphrase = null
+          continue
+        }
+
+        throw err
+      }
+    }
+  }
+
+  const clientKey = await loadKeyWithPassphrase()
+  const keyPair = clientKey.keyPair
+  const clientPublicKeyHex = Buffer.from(keyPair.publicKey).toString('hex')
 
   // Read the environment credential once and remove it immediately so child
   // processes never inherit it.

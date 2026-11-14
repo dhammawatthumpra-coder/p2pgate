@@ -35,8 +35,12 @@ const {
 } = require('./device-registry')
 const {
   defaultControlSocketPath,
+  defaultControlTokenPath,
+  createControlToken,
+  removeControlToken,
   startControlServer
 } = require('./control')
+const { createAuditLog } = require('./audit-log')
 
 const ROTATION_CHECK_MS = 60_000
 const ALERT_MIN_INTERVAL_MS = 60_000
@@ -266,6 +270,19 @@ async function startServer(config, options = {}) {
   })
   await authGuard.init()
 
+  const auditConfig = config.auditLog && typeof config.auditLog === 'object'
+    ? config.auditLog
+    : {}
+  const audit = createAuditLog({
+    enabled: options.auditLog === false
+      ? false
+      : auditConfig.enabled !== false,
+    path: options.auditLogPath || auditConfig.path,
+    maxBytes: auditConfig.maxBytes,
+    log: writeLog
+  })
+  await audit.init()
+
   const registry = new DeviceRegistry({
     configKeys: [...allowedSet],
     filePath: config.trustedDevicesFile,
@@ -326,6 +343,11 @@ async function startServer(config, options = {}) {
     }
 
     displaySessionPin(generation, reason)
+    void audit.record('session.pin.rotate', {
+      source: 'server',
+      generation,
+      reason
+    })
     return activePin
   }
 
@@ -364,6 +386,7 @@ async function startServer(config, options = {}) {
   let closed = false
   let rotationTimer = null
   let control = null
+  let controlTokenPath = null
 
   function sendIntrusionAlert(remotePublicKeyHex) {
     if (!telegram) return
@@ -534,6 +557,14 @@ async function startServer(config, options = {}) {
       `AUTH FAILED client=${remoteHex} mode=${mode} attempts=${failure ? failure.failures : 0}` +
       `${failure && failure.locked ? ` status=${failure.permanent ? 'permanent' : failure.notification}` : ''}`
     )
+    void audit.record('auth.failure', {
+      source: 'server',
+      key: remoteHex,
+      mode,
+      attempts: failure ? failure.failures : 0,
+      locked: Boolean(failure && failure.locked),
+      permanent: Boolean(failure && failure.permanent)
+    })
 
     return { ok: false }
   }
@@ -543,6 +574,11 @@ async function startServer(config, options = {}) {
 
     if (decision.action === 'decline') {
       blockedCount++
+      void audit.record('auth.declined', {
+        source: 'server',
+        key: remoteHex,
+        reason: decision.reason
+      })
 
       if (decision.reason === 'unlisted') {
         writeLog(`DECLINED unlisted client=${remoteHex}`)
@@ -560,6 +596,10 @@ async function startServer(config, options = {}) {
         status: AUTH_STATUS.FASTPATH_READY
       })
       writeLog(`FASTPATH client=${remoteHex}`)
+      void audit.record('auth.fastpath', {
+        source: 'server',
+        key: remoteHex
+      })
       return { ok: true, leftover: Buffer.alloc(0) }
     }
 
@@ -596,6 +636,11 @@ async function startServer(config, options = {}) {
       ready.status !== AUTH_STATUS.READY
     ) {
       writeLog(`AUTH REJECTED client=${remoteHex} reason=bad-ready`)
+      void audit.record('auth.declined', {
+        source: 'server',
+        key: remoteHex,
+        reason: 'bad_ready'
+      })
       return sendDeclined(stream, 'bad_ready')
     }
 
@@ -605,6 +650,11 @@ async function startServer(config, options = {}) {
 
     if (decision.action === 'decline') {
       blockedCount++
+      void audit.record('auth.declined', {
+        source: 'server',
+        key: remoteHex,
+        reason: decision.reason
+      })
 
       if (decision.reason === 'unlisted') {
         writeLog(`DECLINED unlisted client=${remoteHex} (post-ready)`)
@@ -621,10 +671,20 @@ async function startServer(config, options = {}) {
     if (!gate.ok) {
       if (gate.busy) {
         writeLog(`AUTH REJECTED client=${remoteHex} reason=busy`)
+        void audit.record('auth.declined', {
+          source: 'server',
+          key: remoteHex,
+          reason: 'busy'
+        })
         return sendDeclined(stream, 'busy')
       }
 
       writeLog(`AUTH REJECTED client=${remoteHex} reason=locked`)
+      void audit.record('auth.declined', {
+        source: 'server',
+        key: remoteHex,
+        reason: 'locked'
+      })
       return sendDeclined(stream, 'locked', {
         retryAfterMs: gate.retryAfterMs,
         permanent: gate.permanent
@@ -725,6 +785,11 @@ async function startServer(config, options = {}) {
       const serverSig = computeServerSignature(verifier.serverKey, authMessage).toString('hex')
       writeAuthMessage(stream, { v: AUTH_VERSION, ok: true, serverSig })
       writeLog(`AUTH OK client=${remoteHex} method=${mode}`)
+      void audit.record('auth.success', {
+        source: 'server',
+        key: remoteHex,
+        mode
+      })
 
       return {
         ok: true,
@@ -907,6 +972,11 @@ async function startServer(config, options = {}) {
       }
     }
 
+    if (controlTokenPath !== null) {
+      await removeControlToken(controlTokenPath)
+      controlTokenPath = null
+    }
+
     for (const entry of activeConnections) {
       try {
         if (entry.stream) entry.stream.destroy()
@@ -932,6 +1002,9 @@ async function startServer(config, options = {}) {
     } catch {
       // Ignore.
     }
+
+    void audit.record('server.stop', { source: 'server' })
+    await audit.close()
 
     writeLog('server stopped')
   }
@@ -1033,6 +1106,11 @@ async function startServer(config, options = {}) {
       }
 
       writeLog(`CONTROL revoke client=${key} closed=${closed}`)
+      void audit.record('control.revoke', {
+        source: 'server',
+        key,
+        closed
+      })
       return { ok: true, key, closed, status }
     }
 
@@ -1045,12 +1123,19 @@ async function startServer(config, options = {}) {
 
   if (options.controlSocket !== false) {
     try {
+      const tokenInfo = await createControlToken(
+        options.controlTokenPath || defaultControlTokenPath()
+      )
+      controlTokenPath = tokenInfo.path
       control = await startControlServer({
         socketPath: controlSocketPath,
+        token: tokenInfo.token,
         handler: controlHandler,
         log: writeLog
       })
     } catch (err) {
+      await removeControlToken(controlTokenPath)
+      controlTokenPath = null
       await close()
       throw err
     }
@@ -1067,6 +1152,14 @@ async function startServer(config, options = {}) {
 
     sendTelegramMessage(telegram, text).catch(noop)
   }
+
+  void audit.record('server.start', {
+    source: 'server',
+    mode: verificationMode,
+    registrySize: registry.size,
+    targetPort,
+    slots: [...listeners.keys()].sort((a, b) => a - b)
+  })
 
   return {
     dht,
@@ -1102,6 +1195,9 @@ async function startServer(config, options = {}) {
     },
     get controlEnabled() {
       return control !== null
+    },
+    get controlTokenPath() {
+      return controlTokenPath
     },
     listDevices() {
       return registry.listDevices()

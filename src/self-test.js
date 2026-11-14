@@ -19,7 +19,13 @@ const {
   deriveScramVerifier,
   serializeScramVerifier
 } = require('./crypto-utils')
-const { generateClientKey, loadClientKey } = require('./keygen')
+const {
+  generateClientKey,
+  loadClientKey,
+  inspectClientKey,
+  protectClientKey,
+  unprotectClientKey
+} = require('./keygen')
 const { startServer, AlertRateLimiter } = require('./server')
 const { startClient } = require('./client')
 const { AuthGuard } = require('./auth-guard')
@@ -30,9 +36,10 @@ const {
 } = require('./device-registry')
 const {
   CONTROL_VERSION,
-  startControlServer,
-  sendControlCommand
+  sendControlCommand,
+  readControlToken
 } = require('./control')
+const { AuditLog } = require('./audit-log')
 const { runDoctor } = require('./doctor')
 const { readControlLine, decodeControl, AUTH_STATUS } = require('./auth')
 
@@ -423,6 +430,102 @@ async function main() {
     checks.push('trusted_devices reloads on mtime change without restart')
 
     // ---------------------------------------------------------------------
+    // 4b. Audit log format, sanitization, and rotation
+    // ---------------------------------------------------------------------
+    const auditUnitPath = path.join(tempDir, 'audit-unit.log')
+    const auditUnit = new AuditLog({
+      enabled: true,
+      filePath: auditUnitPath,
+      maxBytes: 1024
+    })
+    await auditUnit.init()
+    await auditUnit.record('test.event', {
+      source: 'test',
+      key: 'a'.repeat(64),
+      pin: 'DO-NOT-LOG',
+      password: 'DO-NOT-LOG',
+      passphrase: 'DO-NOT-LOG',
+      token: 'DO-NOT-LOG',
+      detail: 'safe'
+    })
+    await auditUnit.close()
+
+    const auditLines = (await fs.readFile(auditUnitPath, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+    assert.equal(auditLines[0].event, 'test.event')
+    assert.equal(auditLines[0].source, 'test')
+    assert.equal(auditLines[0].detail, 'safe')
+    assert.equal(auditLines[0].pin, undefined)
+    assert.equal(auditLines[0].password, undefined)
+    assert.equal(auditLines[0].passphrase, undefined)
+    assert.equal(auditLines[0].token, undefined)
+
+    const auditRotate = new AuditLog({
+      enabled: true,
+      filePath: auditUnitPath,
+      maxBytes: 1024
+    })
+    await auditRotate.init()
+    for (let i = 0; i < 6; i++) {
+      await auditRotate.record('test.large', {
+        source: 'test',
+        detail: 'x'.repeat(300)
+      })
+    }
+    await auditRotate.close()
+    assert.equal(await fs.stat(`${auditUnitPath}.1`).then(() => true), true)
+    checks.push('audit log writes JSONL, drops secret fields, and rotates')
+
+    // ---------------------------------------------------------------------
+    // 4c. Encrypted client key round-trip and plaintext compatibility
+    // ---------------------------------------------------------------------
+    const keyPassphrase = 'CorrectHorseBatteryStaple-42'
+    const encryptedKeyPath = path.join(tempDir, 'encrypted-key.json')
+    const encryptedKey = await generateClientKey(encryptedKeyPath, {
+      passphrase: keyPassphrase
+    })
+
+    const encryptedMeta = await inspectClientKey(encryptedKeyPath)
+    assert.equal(encryptedMeta.encrypted, true)
+    assert.equal(encryptedMeta.publicKey, encryptedKey.publicKey)
+
+    const encryptedLoaded = await loadClientKey(encryptedKeyPath, {
+      passphrase: keyPassphrase
+    })
+    assert.equal(encryptedLoaded.publicKey, encryptedKey.publicKey)
+    assert.equal(encryptedLoaded.encrypted, true)
+
+    await assert.rejects(
+      loadClientKey(encryptedKeyPath, { passphrase: 'wrong-passphrase-000' }),
+      (err) => err && err.code === 'KEY_PASSPHRASE_INVALID'
+    )
+    await assert.rejects(
+      loadClientKey(encryptedKeyPath),
+      (err) => err && err.code === 'KEY_PASSPHRASE_REQUIRED'
+    )
+
+    const plainKeyPath = path.join(tempDir, 'plain-key.json')
+    const plainKey = await generateClientKey(plainKeyPath)
+    const plainLoaded = await loadClientKey(plainKeyPath)
+    assert.equal(plainLoaded.encrypted, false)
+    assert.equal(plainLoaded.publicKey, plainKey.publicKey)
+
+    const protectedKey = await protectClientKey(plainKeyPath, {
+      passphrase: keyPassphrase
+    })
+    assert.equal(protectedKey.encrypted, true)
+    assert.equal((await inspectClientKey(plainKeyPath)).encrypted, true)
+
+    const unprotectedKey = await unprotectClientKey(plainKeyPath, {
+      currentPassphrase: keyPassphrase
+    })
+    assert.equal(unprotectedKey.encrypted, false)
+    assert.equal((await loadClientKey(plainKeyPath)).publicKey, plainKey.publicKey)
+    checks.push('encrypted client keys work and plaintext keys remain compatible')
+
+    // ---------------------------------------------------------------------
     // 5. Session PIN format and initial server state
     // ---------------------------------------------------------------------
     const authorizedKeyPath = path.join(tempDir, 'authorized-key.json')
@@ -448,6 +551,7 @@ async function main() {
       ? `\\\\.\\pipe\\p2pgate-test-${process.pid}-${name}-${controlSocketSeq++}`
       : path.join(tempDir, `control-${name}.sock`)
     const mainControlPath = controlPathFor('main')
+    const auditPath = path.join(tempDir, 'audit-main.log')
 
     const trustedDevicesPath = path.join(tempDir, 'trusted_devices')
     await fs.writeFile(
@@ -506,10 +610,16 @@ async function main() {
         lockoutKey.publicKey,
         invalidKey.publicKey,
         expiredKey.publicKey,
-        revokeKey.publicKey
+        revokeKey.publicKey,
+        encryptedKey.publicKey
       ],
       verificationMode: 'hybrid',
       trustedDevicesFile: trustedDevicesPath,
+      auditLog: {
+        enabled: true,
+        path: auditPath,
+        maxBytes: 5 * 1024 * 1024
+      },
       customBootstrap: bootstrap,
       authPin: {
         enabled: true,
@@ -529,7 +639,8 @@ async function main() {
       lockoutStatePath,
       lockoutNow: () => lockoutNow,
       now: () => serverNow,
-      controlSocketPath: mainControlPath
+      controlSocketPath: mainControlPath,
+      controlTokenPath: path.join(tempDir, 'control-main.token')
     })
 
     assert.deepEqual(
@@ -606,6 +717,7 @@ async function main() {
           now: options.now || (() => serverNow),
           input: options.input,
           output: options.output,
+          keyPassphrase: options.keyPassphrase,
           credential
         }
       )
@@ -664,13 +776,44 @@ async function main() {
     checks.push('case-sensitive unattended password authenticates')
     await passwordClient.close()
 
+    const encryptedKeyClient = await startTestClient(
+      encryptedKeyPath,
+      unattendedPassword,
+      { keyPassphrase }
+    )
+    const encryptedKeyPayload = crypto.randomBytes(128)
+    assert.deepEqual(
+      await echoThrough(encryptedKeyClient, encryptedKeyPayload),
+      encryptedKeyPayload
+    )
+    checks.push('client connects with a passphrase-protected key')
+    await encryptedKeyClient.close()
+
     // ---------------------------------------------------------------------
     // 7a. Local control plane: status, pin, revoke, unlock, shutdown
     // ---------------------------------------------------------------------
-    const statusResponse = await sendControlCommand(
+    const mainControlToken = await readControlToken(gateway.controlTokenPath)
+    const mainControl = (request) => sendControlCommand(
       mainControlPath,
-      { v: CONTROL_VERSION, cmd: 'status' }
+      { v: CONTROL_VERSION, ...request },
+      { token: mainControlToken }
     )
+
+    if (process.platform !== 'win32') {
+      const socketStat = await fs.lstat(mainControlPath)
+      assert.equal(socketStat.mode & 0o777, 0o600)
+      const tokenStat = await fs.stat(gateway.controlTokenPath)
+      assert.equal(tokenStat.mode & 0o777, 0o600)
+    }
+
+    const unauthorizedControl = await sendControlCommand(
+      mainControlPath,
+      { v: CONTROL_VERSION, cmd: 'status', token: '0'.repeat(64) }
+    )
+    assert.equal(unauthorizedControl.ok, false)
+    assert.equal(unauthorizedControl.error, 'UNAUTHORIZED')
+
+    const statusResponse = await mainControl({ cmd: 'status' })
     assert.equal(statusResponse.ok, true)
     assert.equal(statusResponse.verificationMode, 'hybrid')
     assert.equal(statusResponse.registrySize, gateway.registrySize)
@@ -679,14 +822,11 @@ async function main() {
     assert.equal(statusResponse.interactive, false)
     assert.ok(statusResponse.blockedCount >= 1)
 
-    const pinResponse = await sendControlCommand(
-      mainControlPath,
-      { v: CONTROL_VERSION, cmd: 'pin' }
-    )
+    const pinResponse = await mainControl({ cmd: 'pin' })
     assert.equal(pinResponse.ok, true)
     assert.equal(pinResponse.pin, gateway.sessionPin)
     assert.equal(pinResponse.formatted, formatSessionPin(gateway.sessionPin))
-    checks.push('control status and pin are served over the local socket')
+    checks.push('control status and pin require the per-server token')
 
     const revokeClient = await startTestClient(revokeKeyPath, unattendedPassword)
     const revokeSocket = await connectLocal(revokeClient.address().port)
@@ -699,10 +839,10 @@ async function main() {
     })
     revokeSocket.on('error', noop)
 
-    const revokeResponse = await sendControlCommand(
-      mainControlPath,
-      { v: CONTROL_VERSION, cmd: 'revoke', key: revokeKey.publicKey }
-    )
+    const revokeResponse = await mainControl({
+      cmd: 'revoke',
+      key: revokeKey.publicKey
+    })
     assert.equal(revokeResponse.ok, true)
     assert.equal(revokeResponse.key, revokeKey.publicKey)
     assert.ok(revokeResponse.closed >= 1)
@@ -954,6 +1094,7 @@ async function main() {
       allowedClientKeys: [keyOnlyKey.publicKey],
       verificationMode: 'key-only',
       trustedDevicesFile: path.join(tempDir, 'keyonly-devices'),
+      auditLog: { enabled: false },
       customBootstrap: bootstrap,
       authPin: { enabled: false, unattended: null },
       telegramAlert: { enabled: false, botToken: '', chatId: '' }
@@ -964,7 +1105,8 @@ async function main() {
       failDelayMs: [10, 20],
       lockoutStatePath: path.join(tempDir, 'keyonly-lockout.json'),
       authTimeoutMs: 4_000,
-      controlSocketPath: keyOnlyControlPath
+      controlSocketPath: keyOnlyControlPath,
+      controlTokenPath: path.join(tempDir, 'control-keyonly.token')
     })
     extraServers.push(keyOnlyServer)
 
@@ -980,24 +1122,30 @@ async function main() {
     assert.deepEqual(await echoThrough(keyOnlyClient, keyOnlyPayload), keyOnlyPayload)
     checks.push('key-only mode uses fast-path with no session PIN or prompt')
 
-    const keyOnlyStatus = await sendControlCommand(
+    const keyOnlyToken = await readControlToken(keyOnlyServer.controlTokenPath)
+    const keyOnlyControlTokenPath = keyOnlyServer.controlTokenPath
+    const keyOnlyControl = (request) => sendControlCommand(
       keyOnlyControlPath,
-      { v: CONTROL_VERSION, cmd: 'status' }
+      { v: CONTROL_VERSION, ...request },
+      { token: keyOnlyToken }
     )
+
+    const keyOnlyStatus = await keyOnlyControl({ cmd: 'status' })
     assert.equal(keyOnlyStatus.ok, true)
     assert.equal(keyOnlyStatus.verificationMode, 'key-only')
     assert.equal(keyOnlyStatus.sessionPinAvailable, false)
 
-    const keyOnlyPin = await sendControlCommand(
-      keyOnlyControlPath,
-      { v: CONTROL_VERSION, cmd: 'pin' }
-    )
+    const keyOnlyPin = await keyOnlyControl({ cmd: 'pin' })
     assert.equal(keyOnlyPin.ok, false)
     assert.equal(keyOnlyPin.error, 'NO_SESSION_PIN')
 
     await keyOnlyClient.close()
     await keyOnlyServer.close()
 
+    await assert.rejects(
+      fs.stat(keyOnlyControlTokenPath),
+      (err) => err && err.code === 'ENOENT'
+    )
     await assert.rejects(
       sendControlCommand(keyOnlyControlPath, { v: CONTROL_VERSION, cmd: 'status' }),
       (err) => err && err.code === 'CONTROL_UNAVAILABLE'
@@ -1034,6 +1182,7 @@ async function main() {
       allowedClientKeys: [],
       verificationMode: 'two-step',
       trustedDevicesFile: twoStepDevicesPath,
+      auditLog: { enabled: false },
       customBootstrap: bootstrap,
       authPin: { enabled: true, unattended: null },
       telegramAlert: { enabled: false, botToken: '', chatId: '' }
@@ -1045,7 +1194,8 @@ async function main() {
       lockoutStatePath: path.join(tempDir, 'twostep-lockout.json'),
       authTimeoutMs: 4_000,
       interactive: true,
-      controlSocketPath: twoStepControlPath
+      controlSocketPath: twoStepControlPath,
+      controlTokenPath: path.join(tempDir, 'control-twostep.token')
     })
     extraServers.push(twoStepServer)
 
@@ -1113,6 +1263,25 @@ async function main() {
     assert.ok(!doctorText.includes(masterSecret), 'doctor must never print the master secret')
     checks.push('doctor produces structured checks without crashing or printing secrets')
 
+    let doctorJsonText = ''
+    const doctorJsonResult = await runDoctor({
+      configPath: doctorConfigPath,
+      json: true,
+      output: {
+        write(chunk) {
+          doctorJsonText += String(chunk)
+          return true
+        }
+      }
+    })
+    const doctorJson = JSON.parse(doctorJsonText)
+    assert.equal(doctorJson.exitCode, doctorJsonResult.exitCode)
+    assert.equal(typeof doctorJson.ok, 'boolean')
+    assert.ok(Array.isArray(doctorJson.checks))
+    assert.ok(doctorJson.checks.some((check) => check.level === 'ok'))
+    assert.equal(doctorJsonText.includes(masterSecret), false)
+    checks.push('doctor --json returns machine-readable checks')
+
     assert.equal(validateDeviceAddOptions({ profile: 'trusted' }).ok, false)
     assert.equal(
       validateDeviceAddOptions({
@@ -1158,6 +1327,39 @@ async function main() {
       'existing session must survive listener rotation'
     )
     checks.push('hourly rotation closes the expired listener without dropping the live session')
+
+    // ---------------------------------------------------------------------
+    // 12. Audit log integration
+    // ---------------------------------------------------------------------
+    let auditEvents = new Set()
+    await waitFor(async () => {
+      try {
+        const raw = await fs.readFile(auditPath, 'utf8')
+        auditEvents = new Set(
+          raw.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line).event)
+        )
+        return auditEvents.has('control.revoke') && auditEvents.has('auth.failure')
+      } catch {
+        return false
+      }
+    }, 5_000, 'the audit log to contain auth and control events')
+
+    const auditRaw = await fs.readFile(auditPath, 'utf8')
+    for (const event of [
+      'server.start',
+      'auth.success',
+      'auth.fastpath',
+      'auth.failure',
+      'auth.declined',
+      'control.revoke',
+      'session.pin.rotate'
+    ]) {
+      assert.ok(auditEvents.has(event), `audit log must contain ${event}`)
+    }
+    assert.equal(auditRaw.includes(masterSecret), false)
+    assert.equal(auditRaw.includes(unattendedPassword), false)
+    assert.equal(auditRaw.includes(gateway.sessionPin), false)
+    checks.push('audit log records auth/control events without secrets')
   } finally {
     if (originalSocket) {
       try {

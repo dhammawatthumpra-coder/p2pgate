@@ -7,6 +7,32 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.5.0] - 2026-11-15
+
+### Added
+
+- Audit log แบบ JSONL (`~/.p2pgate/audit.log`) พร้อม rotation
+- Client key ที่ป้องกันด้วย passphrase (scrypt + AES-256-GCM)
+- `p2pgate status --json` และ `p2pgate doctor --json`
+- Control token ต่อเซิร์ฟเวอร์ (`~/.p2pgate/control.token`)
+- POSIX control socket owner/permission check
+- แสดง lockout/revocation state ใน `p2pgate devices list`
+- Tests สำหรับ audit, encrypted key, control token, doctor JSON
+
+### Changed
+
+- Control protocol เป็น version `2` และทุก request ต้องมี token
+- `config.json` รองรับ `auditLog`
+- `doctor` ตรวจ audit log และสถานะ encryption ของ client key
+- README/TESTING/docs อัปเดต v1.5
+
+### Security
+
+- Audit log กรอง PIN/password/passphrase/seed/verifier/token
+- Control token เปรียบเทียบด้วย SHA-256 + `timingSafeEqual`
+- Windows ใช้ token เสริม named-pipe DACL (Node core ตั้ง DACL เองไม่ได้)
+- Client key passphrase ไม่รับผ่าน command-line argument
+
 ## [1.4.1] - 2026-11-14
 
 ### Changed

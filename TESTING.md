@@ -1,6 +1,6 @@
-# p2pgate v1.4 — คู่มือทดสอบก่อนใช้งานจริง
+# p2pgate v1.5 — คู่มือทดสอบก่อนใช้งานจริง
 
-เอกสารนี้เป็น **manual acceptance test** สำหรับตรวจสอบว่า p2pgate v1.4.0
+เอกสารนี้เป็น **manual acceptance test** สำหรับตรวจสอบว่า p2pgate v1.5.0
 ทำงานได้จริงบนเครื่องและเครือข่ายของคุณ ไม่ใช่แค่ผ่าน self-test
 
 > ⚠️ ควรทดสอบในเครื่อง/บัญชีผู้ใช้ทดสอบก่อน
@@ -154,7 +154,7 @@ npm run self-test
 - มี `SELF-TEST PASSED`
 - ไม่มี `FAILED` หรือ stack trace
 
-จำนวน check ที่ควรมากกว่าหรือเท่ากับ v1.4: **29 checks**
+จำนวน check ที่ควรมากกว่าหรือเท่ากับ v1.5: **34 checks**
 
 ### 2.4 ตรวจ metadata
 
@@ -635,17 +635,69 @@ Get-NetTCPConnection -State Listen |
 
 ---
 
-## 11) Known Limitations ของ v1.4.0
+## 10.4) L9 — v1.5 Security & Automation
+
+### Client key passphrase
+
+```sh
+p2pgate keygen --passphrase
+p2pgate keygen              # ต้องแสดงว่าป้องกันด้วย passphrase
+p2pgate client              # ต้องถาม passphrase
+```
+
+ทดสอบแบบไม่ interactive:
+
+```sh
+p2pgate client --key-passphrase-stdin < key-passphrase.txt
+```
+
+- passphrase ผิดต้องถูกปฏิเสธ
+- key แบบ plaintext เดิมต้องยังใช้ได้
+
+### JSON output
+
+```sh
+p2pgate status --json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);console.log(j.ok,j.verificationMode)})"
+p2pgate doctor --json   # ต้อง parse ได้และ exit code ตรงกับ critical checks
+```
+
+### Audit log
+
+```sh
+grep -E 'auth\.(success|failure|declined)|control\.revoke' ~/.p2pgate/audit.log
+```
+
+- ต้องไม่มี PIN, password, passphrase, seed, masterSecret หรือ control token
+- ไฟล์ต้องเป็น `0600`
+- เมื่อเกิน `maxBytes` ต้องมี `audit.log.1`
+
+### Control token
+
+- `~/.p2pgate/control.token` ต้องเป็น `0600`
+- ถ้าแก้ token ให้ผิด `status` ต้องได้ `UNAUTHORIZED`
+- บน POSIX control socket ต้องเป็น `0600`
+
+### Devices list
+
+```sh
+p2pgate devices list
+```
+
+- ต้องเห็น `Lockout:` และจำนวนครั้งที่ล้มเหลว
+
+---
+
+## 11) Known Limitations ของ v1.5.0
 
 สิ่งเหล่านี้ **ยังไม่มี** และไม่ควรถือว่าเป็นบั๊ก:
 
 - Master secret rotation
-- Passphrase-protected client key
-- Windows ACL enforcement (ตรวจได้แค่การมีอยู่ของไฟล์)
-- Audit log แบบ JSONL
-- CI/CD และ Git history
+- Windows ACL/DACL enforcement (ใช้ control token เสริม)
+- Audit log เป็น local และไม่ได้ทำ tamper-evident logging
+- Multi-target หรือ per-key target policy
 - Multi-tenant หรือ remote control plane
 - การตัด SSH session ระดับ OS (revoke ตัดที่ stream ของ p2pgate)
+- Long-running, multi-client stress และ NAT บางรูปแบบยังรอทดสอบ
 
 ---
 
@@ -654,13 +706,13 @@ Get-NetTCPConnection -State Listen |
 คัดลอกตารางนี้ไปใช้บันทึกผล:
 
 ```text
-p2pgate v1.4.0 — Test Record
+p2pgate v1.5.0 — Test Record
 วันที่:
 เครื่อง Server:
 เครื่อง Client:
 เครือข่าย:
 
-[ ] L0 npm ci + check + self-test
+[ ] L0 npm ci + check + self-test (34 checks)
 [ ] L1 SSH ผ่านอุโมงค์ (LAN)
 [ ] L1 ถ่ายโอนข้อมูล 10–20 MB
 [ ] L2 Termux + 4G
@@ -671,12 +723,15 @@ p2pgate v1.4.0 — Test Record
 [ ] L3 live reload
 [ ] L3 trusted expiry enforcement
 [ ] L4 status
+[ ] L4 status --json
 [ ] L4 pin
 [ ] L4 revoke + unlock
 [ ] L4 revoke offline
 [ ] L4 control socket permission
+[ ] L4 control token / UNAUTHORIZED
 [ ] L4 CONTROL_IN_USE
 [ ] L5 doctor ปกติ
+[ ] L5 doctor --json
 [ ] L5 doctor กรณีผิดปกติ
 [ ] L6 lockout 3/6/10
 [ ] L7 restart
@@ -686,6 +741,9 @@ p2pgate v1.4.0 — Test Record
 [ ] L8 long-running 24 ชม.
 [ ] L8 สลับเครือข่าย
 [ ] L8 หลาย Client
+[ ] L9 client key passphrase
+[ ] L9 audit log และไม่มี secrets
+[ ] L9 devices list แสดง lockout
 
 ปัญหาที่พบ:
 1.

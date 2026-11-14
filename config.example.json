@@ -10,6 +10,11 @@
   ],
   "verificationMode": "hybrid",
   "trustedDevicesFile": "~/.p2pgate/trusted_devices",
+  "auditLog": {
+    "enabled": true,
+    "path": "~/.p2pgate/audit.log",
+    "maxBytes": 5242880
+  },
   "customBootstrap": [],
   "authPin": {
     "enabled": true,

@@ -13,6 +13,10 @@ const {
   DEFAULT_TRUSTED_DEVICES_PATH,
   normalizeVerificationMode
 } = require('./device-registry')
+const {
+  DEFAULT_AUDIT_LOG_PATH,
+  DEFAULT_AUDIT_MAX_BYTES
+} = require('./audit-log')
 
 const DEFAULT_CONFIG_DIR = path.join(os.homedir(), '.p2pgate')
 const DEFAULT_CONFIG_PATH = path.join(DEFAULT_CONFIG_DIR, 'config.json')
@@ -54,6 +58,11 @@ function defaultConfig() {
     allowedClientKeys: [],
     verificationMode: 'hybrid',
     trustedDevicesFile: DEFAULT_TRUSTED_DEVICES_PATH,
+    auditLog: {
+      enabled: true,
+      path: DEFAULT_AUDIT_LOG_PATH,
+      maxBytes: DEFAULT_AUDIT_MAX_BYTES
+    },
     customBootstrap: [],
     authPin: {
       enabled: true,
@@ -226,6 +235,33 @@ function normalizeTelegram(value) {
   return { enabled, botToken, chatId }
 }
 
+function normalizeAuditLog(value, base) {
+  if (value === undefined) return { ...base }
+
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ConfigError('auditLog must be an object', 'CONFIG_INVALID')
+  }
+
+  const enabled = parseBoolean(value.enabled, 'auditLog.enabled', base.enabled)
+  const filePath = value.path === undefined ||
+    value.path === null ||
+    String(value.path).trim() === ''
+    ? base.path
+    : path.resolve(expandHome(String(value.path)))
+  const maxBytes = value.maxBytes === undefined
+    ? base.maxBytes
+    : Number(value.maxBytes)
+
+  if (!Number.isInteger(maxBytes) || maxBytes < 1024) {
+    throw new ConfigError(
+      'auditLog.maxBytes must be an integer of at least 1024',
+      'CONFIG_INVALID'
+    )
+  }
+
+  return { enabled, path: filePath, maxBytes }
+}
+
 /**
  * Merges a raw configuration object with defaults and validates every field.
  */
@@ -296,6 +332,7 @@ function normalizeConfig(raw) {
     allowedClientKeys: normalizeAllowedKeys(raw.allowedClientKeys),
     verificationMode,
     trustedDevicesFile,
+    auditLog: normalizeAuditLog(raw.auditLog, base.auditLog),
     customBootstrap: normalizeBootstrap(raw.customBootstrap),
     authPin: normalizeAuthPin(raw.authPin, verificationMode),
     telegramAlert: normalizeTelegram(raw.telegramAlert)

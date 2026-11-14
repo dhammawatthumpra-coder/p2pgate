@@ -1,4 +1,4 @@
-# p2pgate (v1.4)
+# p2pgate (v1.5)
 
 **English** | [ไทย](README.th.md)
 
@@ -14,11 +14,11 @@ firewall without exposing an inbound port. It combines **mutual SCRAM**,
 Designed for **Redmi 14C (Android 14, Termux)**, but works on Windows, macOS,
 Linux, and other Android devices with Node.js 20 or newer.
 
-> Version 1.4 adds a local control socket (`status`, `pin`, `revoke`),
-> the `doctor` command, and mandatory expiry (or explicit `--permanent`)
-> for trusted devices.
-> **Update both Server and Client to v1.4** to use the full command set.
-> The tunnel/auth protocol remains compatible with v1.3.
+> Version 1.5 adds JSONL audit logs, passphrase-protected client keys,
+> machine-readable `--json` output, per-server control tokens, and lockout
+> state in `devices list`.
+> **Update both Server and Client to v1.5.**
+> The tunnel/auth protocol remains compatible with v1.4.
 >
 > **Install:** `npm install -g p2pgate`
 >
@@ -58,6 +58,10 @@ ssh -p 8022 localhost
 - Trusted devices must have an expiry or an explicit `--permanent`
 - Progressive lockout: 3 attempts/15 minutes, 6/6 hours, 10/permanent
 - `p2pgate unlock` restores access immediately
+- **JSONL audit log** for auth, control, and device events (never logs secrets)
+- **Passphrase-protected client keys** (scrypt + AES-256-GCM)
+- **`status --json` / `doctor --json`** for automation
+- **Per-server control token** for the local control plane
 - Exactly one external dependency: `hyperdht`
 
 ---
@@ -255,6 +259,46 @@ p2pgate client
 unset P2PGATE_PIN
 ```
 
+### Client key passphrase
+
+A client key can be protected with a passphrase. The seed is encrypted with
+scrypt + AES-256-GCM; the public key remains readable for diagnostics.
+
+```sh
+p2pgate keygen --passphrase
+```
+
+For non-interactive creation or migration:
+
+```sh
+printf '%s\n' 'your-long-passphrase' | p2pgate keygen --config ~/.p2pgate/config.json --passphrase-stdin
+```
+
+When starting the Client:
+
+```sh
+p2pgate client --key-passphrase-stdin < ~/.p2pgate/key-passphrase.txt
+```
+
+or:
+
+```sh
+export P2PGATE_KEY_PASSPHRASE='...'
+p2pgate client
+unset P2PGATE_KEY_PASSPHRASE
+```
+
+- Minimum passphrase length is 12 characters.
+- There is no `--passphrase` argument value.
+- `--key-passphrase-stdin` cannot be combined with `--pin-stdin`.
+- Existing plaintext keys remain compatible; `doctor` recommends adding a
+  passphrase.
+- To remove protection intentionally:
+
+```sh
+p2pgate keygen --unprotect
+```
+
 ---
 
 ## 6) Progressive lockout and `unlock`
@@ -314,13 +358,15 @@ p2pgate devices remove <publicKeyHex>
   Label: -
   Status: active
   Fast-path: no
+  Lockout: normal
+  Failures in 24h: 0
 ```
 
 ---
 
 ## 8) Local control plane (`status` / `pin` / `revoke`)
 
-Server v1.4 opens a **local control socket** so the owner can manage a running
+Server v1.5 opens a **local control socket** so the owner can manage a running
 Server without restarting it and without opening another TCP port.
 
 ### Socket location
@@ -334,11 +380,17 @@ Server without restarting it and without opening another TCP port.
 - The socket is removed on graceful shutdown
 - A stale socket from a dead process is probed before removal
 - If another live Server owns the socket, startup fails with `CONTROL_IN_USE`
+- Every request requires a per-server **control token** stored at
+  `~/.p2pgate/control.token` (mode `0600`); the token is never printed
+- POSIX sockets are checked for owner and `0600` permissions
+- On Windows, the token authenticates requests in addition to the default
+  named-pipe DACL
 
 ### Commands
 
 ```sh
 p2pgate status
+p2pgate status --json
 p2pgate pin
 p2pgate revoke <clientPublicKeyHex>
 ```
@@ -354,6 +406,15 @@ Shows non-secret operational state:
 - Active connections and connected keys
 - Cumulative blocked count
 - Uptime, trusted-devices file, and control socket path
+
+Use `--json` for automation:
+
+```sh
+p2pgate status --json
+```
+
+The output is a single JSON object with `"ok": true` on success. On failure,
+`"ok": false` and an `error` field are returned; the exit code is `1`.
 
 #### `p2pgate pin`
 
@@ -411,14 +472,63 @@ It checks:
    file permissions, empty registry
 6. Target: Server checks whether `127.0.0.1:<targetPort>` is listening;
    Client checks whether the local port is available
-7. Control plane: queries `status` if the Server is running
-8. Lockout state: suspended and revoked counts
+7. Control plane: queries `status` if the Server is running (using the token)
+8. Lockout state plus audit log permissions and size
 9. Warning when a headless Server cannot expose a Session PIN
-10. Client key presence and validity in Client mode
+10. Client key presence, validity, and whether it is passphrase-protected
 
 - Exit code `0` when there is no `❌`
 - Exit code `1` when a critical check fails
 - Never prints `masterSecret`, seeds, verifier values, or PINs
+
+Use `--json` for automation:
+
+```sh
+p2pgate doctor --json
+```
+
+```json
+{
+  "ok": false,
+  "exitCode": 1,
+  "summary": { "critical": 1, "warnings": 2 },
+  "checks": [
+    { "level": "ok", "title": "...", "detail": "..." }
+  ]
+}
+```
+
+---
+
+## 9.1) Audit log
+
+The Server and CLI append security-relevant events to a local JSONL file:
+
+```json
+{"ts":"2026-11-15T10:00:00.000Z","event":"auth.success","source":"server","key":"<hex>","mode":"pin"}
+```
+
+Default configuration:
+
+```json
+"auditLog": {
+  "enabled": true,
+  "path": "~/.p2pgate/audit.log",
+  "maxBytes": 5242880
+}
+```
+
+- The file is created with mode `0600`; the parent directory uses `0700`.
+- One previous file is kept as `audit.log.1` when `maxBytes` is exceeded.
+- Events include `server.start`, `auth.success`, `auth.failure`,
+  `auth.declined`, `auth.fastpath`, `control.revoke`, `session.pin.rotate`,
+  `device.add`, `device.remove`, `device.revoke`, `device.unlock`, and
+  `device.unlock_all`.
+- The audit log never records a PIN, password, passphrase, master secret, seed,
+  verifier, or control token.
+- Audit failures are written to the Server log and do not block authentication.
+
+Set `"auditLog": { "enabled": false }` to disable it.
 
 ---
 
@@ -676,13 +786,21 @@ Messages never contain the PIN or password.
   insecure permissions disable the fast path
 - **Progressive lockout:** 3/15m, 6/6h, 10/permanent
 - **Control socket** is local-only (`0600` or a per-user named pipe)
+  - Every request requires a per-server token stored at `0600`
+  - POSIX sockets are checked for owner and `0600` permissions
   - The PIN is read from RAM and sent only over the socket
   - `revoke` closes active connections and persists a permanent suspension
   - There is no TCP listener for the control plane
+  - Windows named pipes rely on the token plus the default DACL; a custom DACL
+    is not set by Node core
+- **Passphrase-protected client keys** use scrypt + AES-256-GCM; plaintext keys
+  remain supported but `doctor` recommends protection
+- **Audit log** is `0600`, appends JSONL, and never records secrets
 - **Trusted devices** bypass the PIN, so they require an expiry or an explicit
   `--permanent`
 - **Internal ports** bind to `127.0.0.1`
-- **Config, key, lockout, and trusted_devices files** use mode `0600`
+- **Config, key, lockout, trusted_devices, control token, and audit log files**
+  use mode `0600`
 - **doctor** never prints secrets and never modifies files
 
 > p2pgate does not replace all SSH security.
@@ -696,18 +814,23 @@ Messages never contain the PIN or password.
 |---|---|
 | `p2pgate setup` | Configure and select a verification mode |
 | `p2pgate keygen` | Create/show the Client key |
+| `p2pgate keygen --passphrase` | Protect an existing/new key with a passphrase |
+| `p2pgate keygen --unprotect` | Remove passphrase protection (prompts) |
 | `p2pgate server` | Start the Server |
 | `p2pgate client` | Start the Client; ask for credentials only when required |
 | `p2pgate client --pin-stdin` | Read a credential from stdin when challenged |
-| `p2pgate devices list` | Show the merged registry |
+| `p2pgate client --key-passphrase-stdin` | Read the client-key passphrase from stdin |
+| `p2pgate devices list` | Show the merged registry and lockout state |
 | `p2pgate devices add <key> --mode trusted --expires ...` | Add a temporary trusted device |
 | `p2pgate devices add <key> --mode trusted --permanent` | Add a permanent trusted device (explicit intent) |
 | `p2pgate devices add <key> --mode scram` | Add a device that requires two-step |
 | `p2pgate devices remove <key>` | Remove a device from trusted_devices |
 | `p2pgate status` | Show Server status over the control socket |
+| `p2pgate status --json` | Machine-readable Server status |
 | `p2pgate pin` | Request the Session PIN from a running Server |
 | `p2pgate revoke <key>` | Revoke a key and close active connections |
 | `p2pgate doctor` | Diagnose the installation and suggest fixes |
+| `p2pgate doctor --json` | Machine-readable diagnostics |
 | `p2pgate unlock --list` | Show lockout/revocation state |
 | `p2pgate unlock <key>` | Unlock one key |
 | `p2pgate unlock --all` | Unlock all keys |
@@ -723,6 +846,8 @@ Default files:
 - Trusted devices: `~/.p2pgate/trusted_devices`
 - Lockout state: `~/.p2pgate/lockout-state.json`
 - Control socket: `~/.p2pgate/control.sock` (Windows: named pipe)
+- Control token: `~/.p2pgate/control.token`
+- Audit log: `~/.p2pgate/audit.log`
 
 ---
 
@@ -744,6 +869,10 @@ Default files:
 - If the Server crashed and left a stale socket, start it again; the Server
   probes and removes an unowned socket
 - `CONTROL_IN_USE` means another Server owns the socket; stop the old one first
+- If you see `UNAUTHORIZED`, the token is stale or belongs to another Server;
+  restart the Server to generate a new `~/.p2pgate/control.token`
+- If the token file is missing, start the Server; the CLI cannot authenticate
+  without it
 
 ### `revoke` does not stop a connection
 
@@ -798,6 +927,18 @@ this mode.
 
 The Client needs two-step but has no terminal, no `--pin-stdin`, and no
 `P2PGATE_PIN`.
+
+### Client key passphrase errors
+
+- `KEY_PASSPHRASE_REQUIRED`: the key is encrypted and no terminal/passphrase
+  source is available
+  - use `--key-passphrase-stdin` or `P2PGATE_KEY_PASSPHRASE`
+- `KEY_PASSPHRASE_INVALID`: the passphrase is wrong
+- `KEY_PASSPHRASE_WEAK`: a new passphrase is shorter than 12 characters
+- To add protection to an existing plaintext key:
+  ```sh
+  p2pgate keygen --passphrase
+  ```
 
 ### `PIN_ROTATED_OR_INVALID`
 
@@ -871,12 +1012,14 @@ p2pgate/
 │   ├── README.md
 │   ├── releases/
 │   │   ├── v1.4.0.md
-│   │   └── v1.4.1.md
+│   │   ├── v1.4.1.md
+│   │   └── v1.5.0.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
 │       ├── phase4-v1.3.0.md
 │       ├── phase5-v1.4.0.md
+│       ├── phase6-v1.5.0.md
 │       └── project-spec.md
 ├── package.json
 ├── package-lock.json
@@ -887,6 +1030,7 @@ p2pgate/
     ├── auth.js
     ├── auth-guard.js
     ├── device-registry.js
+    ├── audit-log.js
     ├── control.js
     ├── doctor.js
     ├── config-loader.js
@@ -926,14 +1070,22 @@ npm test
   `READY`
 - **Client READY:** sent after obtaining a credential so typing time is not
   counted against the 10-second timeout
-- **Control protocol:** newline-delimited JSON, version `1`, max 4096 bytes,
+- **Control protocol:** newline-delimited JSON, version `2`, max 4096 bytes,
   5-second timeout
 - **Control commands:** `status`, `pin`, `revoke`
+  - every request requires the per-server control token
   - `status` never returns the PIN
   - `pin` reads from memory only
   - `revoke` calls `AuthGuard.revoke(key, 'manual')` and closes active streams
-- **Control socket:** POSIX `0600`, Windows named pipe, stale-socket probe
-  before removal
+- **Control socket:** POSIX `0600` with owner/permission verification, Windows
+  named pipe, stale-socket probe before removal
+- **Control token:** 32 random bytes, SHA-256 digest comparison with
+  `timingSafeEqual`, file `0600`
+- **Audit log:** serialized JSONL append, one rotated file, secret-field
+  filtering, never blocks auth
+- **Client key encryption:** scrypt (N=16384, r=8, p=1) + AES-256-GCM, 12-byte
+  IV, 16-byte tag
+- **JSON output:** `status --json` and `doctor --json` use stdout only
 - **doctor:** read-only, exit 1 on `❌`, never prints secrets
 - **Trusted expiry:** the CLI requires `--expires` or `--permanent`; existing
   file entries remain compatible
