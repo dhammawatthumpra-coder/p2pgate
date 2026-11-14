@@ -6,9 +6,13 @@
 ## [Unreleased]
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
-- แก้ self-test ให้ทำงานได้ทั้ง terminal แบบ interactive และ non-interactive
-- จัดระเบียบ spec ไว้ใน `docs/specs/` และแปลง Phase 4 จาก `.docx` เป็น Markdown
-- แก้ `bin` path และคำอธิบายแพ็กเกจให้พร้อมสำหรับ npm
+
+## [1.4.1] - 2026-11-14
+
+### Changed
+
+- README: เพิ่มคำสั่งติดตั้ง `npm install -g p2pgate`, badges และลิงก์ npm
+- ปรับเอกสาร release/install ให้ตรงกับแพ็กเกจที่เผยแพร่แล้ว
 
 ## [1.4.0] - 2026-11-14
 
@@ -34,6 +38,9 @@
 - `server.close()` ปิดและลบ control socket
 - `npm run check` ตรวจ `src/control.js` และ `src/doctor.js`
 - README อัปเดต v1.4 และเพิ่มหัวข้อ control plane / doctor
+- แก้ self-test ให้ทำงานได้ทั้ง terminal แบบ interactive และ non-interactive
+- จัดระเบียบ spec ไว้ใน `docs/specs/` และแปลง Phase 4 จาก `.docx` เป็น Markdown
+- แก้ `bin` path และคำอธิบายแพ็กเกจให้พร้อมสำหรับ npm
 
 ### Security
 

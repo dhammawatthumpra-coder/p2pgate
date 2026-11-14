@@ -15,6 +15,7 @@ Markdown for easier review and diffing.
 
 ## Other documents
 
+- [Release notes v1.4.1](releases/v1.4.1.md)
 - [Release notes v1.4.0](releases/v1.4.0.md)
 - [Manual acceptance testing](../TESTING.md) (Thai)
 - [Changelog](../CHANGELOG.md)
