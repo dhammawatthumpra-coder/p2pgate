@@ -1,8 +1,26 @@
 {
-  "name": "@private/p2pgate",
+  "name": "p2pgate",
   "version": "1.4.0",
   "private": true,
-  "description": "Minimal Zero-Trust P2P Gateway for Termux",
+  "description": "Zero-dependency P2P TCP gateway for SSH over HyperDHT (Termux, Linux, macOS, Windows)",
+  "license": "Apache-2.0",
+  "author": "dhammawatthumpra-coder",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dhammawatthumpra-coder/p2pgate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dhammawatthumpra-coder/p2pgate/issues"
+  },
+  "homepage": "https://github.com/dhammawatthumpra-coder/p2pgate#readme",
+  "keywords": [
+    "p2p",
+    "ssh",
+    "hyperdht",
+    "termux",
+    "tunnel",
+    "scram"
+  ],
   "engines": {
     "node": ">=20.0.0"
   },

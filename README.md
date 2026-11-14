@@ -831,6 +831,8 @@ p2pgate/
 ├── CHANGELOG.md
 ├── CONTRIBUTING.md
 ├── SECURITY.md
+├── LICENSE
+├── NOTICE
 ├── README.md
 ├── TESTING.md
 ├── config.example.json
@@ -899,3 +901,15 @@ npm test
 - **Invalid delay:** 2.5–3.5 วินาที (self-test ใช้ค่าสั้น)
 - **No `P2PGATE_TEST_*` env hooks**
 - **Self-test:** ใช้ `HyperDHT.bootstrapper` และ injected clock/delay
+
+---
+
+## 23) License
+
+p2pgate ใช้ **Apache License 2.0**
+
+- [`LICENSE`](LICENSE)
+- [`NOTICE`](NOTICE)
+
+Copyright 2026 dhammawatthumpra-coder
+
