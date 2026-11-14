@@ -7,6 +7,8 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 - แก้ self-test ให้ทำงานได้ทั้ง terminal แบบ interactive และ non-interactive
+- จัดระเบียบ spec ไว้ใน `docs/specs/` และแปลง Phase 4 จาก `.docx` เป็น Markdown
+- แก้ `bin` path และคำอธิบายแพ็กเกจให้พร้อมสำหรับ npm
 
 ## [1.4.0] - 2026-11-14
 

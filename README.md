@@ -850,13 +850,18 @@ p2pgate/
 ├── README.th.md
 ├── TESTING.md
 ├── config.example.json
+├── docs/
+│   ├── README.md
+│   ├── releases/
+│   │   └── v1.4.0.md
+│   └── specs/
+│       ├── phase2-v1.1.md
+│       ├── phase3-v1.2.md
+│       ├── phase4-v1.3.0.md
+│       ├── phase5-v1.4.0.md
+│       └── project-spec.md
 ├── package.json
 ├── package-lock.json
-├── phase2.md
-├── phase3.md
-├── phase4_v1.3.0_handoff_spec.docx
-├── phase5.md
-├── spec.md
 ├── scripts/
 │   └── termux-boot.sh
 └── src/

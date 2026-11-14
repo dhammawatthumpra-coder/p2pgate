@@ -1,7 +1,7 @@
 {
   "name": "p2pgate",
   "version": "1.4.0",
-  "description": "Zero-dependency P2P TCP gateway for SSH over HyperDHT (Termux, Linux, macOS, Windows)",
+  "description": "Lightweight P2P TCP gateway for SSH over HyperDHT (single dependency)",
   "license": "Apache-2.0",
   "author": "dhammawatthumpra-coder",
   "repository": {
@@ -24,7 +24,7 @@
     "node": ">=20.0.0"
   },
   "bin": {
-    "p2pgate": "./src/cli.js"
+    "p2pgate": "src/cli.js"
   },
   "files": [
     "src/",

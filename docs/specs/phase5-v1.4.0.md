@@ -220,8 +220,8 @@ In `p2pgate devices add`:
 - `src/cli.js` (status/pin/revoke/doctor, trusted enforcement)
 - `src/self-test.js` (control, revoke, doctor coverage)
 - `package.json` (version/check)
-- `README.md` (Thai v1.4)
-- `phase5.md` (this file)
+- `README.md` (English v1.4) and `README.th.md` (Thai v1.4)
+- `docs/specs/phase5-v1.4.0.md` (this file)
 
 ---
 
