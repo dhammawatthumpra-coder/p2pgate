@@ -2,6 +2,10 @@
 
 **English** | [ไทย](README.th.md)
 
+[![npm version](https://img.shields.io/npm/v/p2pgate.svg)](https://www.npmjs.com/package/p2pgate)
+[![license](https://img.shields.io/npm/l/p2pgate.svg)](LICENSE)
+[![Node.js](https://img.shields.io/node/v/p2pgate.svg)](package.json)
+
 A small peer-to-peer TCP tunnel for reaching SSH on a device behind CGNAT or a
 firewall without exposing an inbound port. It combines **mutual SCRAM**,
 **verification policy modes**, a **dual-source device registry**, and a
@@ -15,6 +19,8 @@ Linux, and other Android devices with Node.js 20 or newer.
 > for trusted devices.
 > **Update both Server and Client to v1.4** to use the full command set.
 > The tunnel/auth protocol remains compatible with v1.3.
+>
+> **Install:** `npm install -g p2pgate`
 >
 > Manual testing guide (Thai): [`TESTING.md`](TESTING.md)
 
@@ -425,7 +431,18 @@ It checks:
 
 ---
 
-## 11) Install on Termux (Redmi 14C)
+## 11) Install
+
+### From npm (recommended)
+
+Requires Node.js 20 or newer.
+
+```sh
+npm install -g p2pgate
+p2pgate --version
+```
+
+### From source on Termux (Redmi 14C)
 
 ```sh
 pkg update && pkg upgrade -y

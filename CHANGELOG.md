@@ -24,6 +24,7 @@
 - บังคับ `--expires` หรือ `--permanent` เมื่อเพิ่ม trusted device ผ่าน CLI
 - `TESTING.md` คู่มือ manual acceptance test
 - English README (`README.md`) และ Thai translation (`README.th.md`)
+- npm package `p2pgate@1.4.0`
 - Self-test เพิ่ม coverage สำหรับ control plane, revoke/unlock, doctor
   และ trusted expiry
 

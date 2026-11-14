@@ -2,6 +2,10 @@
 
 [English](README.md) | **ไทย**
 
+[![npm version](https://img.shields.io/npm/v/p2pgate.svg)](https://www.npmjs.com/package/p2pgate)
+[![license](https://img.shields.io/npm/l/p2pgate.svg)](LICENSE)
+[![Node.js](https://img.shields.io/node/v/p2pgate.svg)](package.json)
+
 อุโมงค์ TCP แบบ P2P ขนาดเล็ก สำหรับเข้าถึง SSH บนมือถือที่อยู่หลัง CGNAT/ไฟร์วอลล์
 โดยไม่ต้องเปิดพอร์ตออกสู่อินเทอร์เน็ต พร้อม **Mutual SCRAM**, **Verification Policy Modes**,
 **Dual-Source Device Registry** และ **Local Control Plane**
@@ -13,6 +17,8 @@
 > คำสั่ง `doctor` และบังคับวันหมดอายุสำหรับ trusted devices
 > **ต้องอัปเดตทั้ง Server และ Client เป็น v1.4** เพื่อใช้คำสั่งใหม่ครบชุด
 > (โปรโตคอล tunnel/auth ยังเข้ากันได้กับ v1.3)
+>
+> **ติดตั้ง:** `npm install -g p2pgate`
 >
 > คู่มือทดสอบก่อนใช้งานจริง: [`TESTING.md`](TESTING.md)
 
@@ -416,7 +422,18 @@ p2pgate doctor --config /path/to/config.json
 
 ---
 
-## 11) ติดตั้งบน Redmi 14C (Termux)
+## 11) การติดตั้ง
+
+### ติดตั้งจาก npm (แนะนำ)
+
+ต้องใช้ Node.js 20 ขึ้นไป
+
+```sh
+npm install -g p2pgate
+p2pgate --version
+```
+
+### ติดตั้งจาก source บน Termux (Redmi 14C)
 
 ```sh
 pkg update && pkg upgrade -y
