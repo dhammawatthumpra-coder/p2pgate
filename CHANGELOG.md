@@ -7,7 +7,7 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
-## [1.7.0] - 2026-11-15
+## [1.6.4] - 2026-11-15
 
 ### Added
 
@@ -19,7 +19,7 @@
 
 - Help แสดงรูปแบบ `p2pgate server [--config <path>] [--port <targetPort>]`
 - README/README.th เพิ่มแถวคำสั่ง `server --port`
-- Roadmap: `targets` (multi-port) เลื่อนไป v1.8
+- Roadmap: `targets` (multi-port) อยู่ในแผน v1.7.0
 
 ## [1.6.3] - 2026-11-15
 
