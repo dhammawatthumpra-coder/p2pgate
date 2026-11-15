@@ -49,7 +49,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | Version | `1.8.2` (fix: config round-trip, พร้อม publish) |
 | npm `latest` | `1.8.1` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `__COMMIT__` |
+| Commit | `86d7ec4 fix(config): accept values produced by saveConfig (targets allow null, empty socks allow)` |
 | Tag | `v1.8.2` |
 | GitHub Release | `v1.8.1` = Latest; `v1.8.2` ยังไม่สร้าง |
 | Working tree | clean |
