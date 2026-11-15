@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-15
-สถานะ: **v1.6.1 committed** (patch: auth stream race; npm ยังเป็น 1.6.0 จนกว่าจะ publish)
+สถานะ: **v1.6.1 released** (npm + GitHub Release)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -38,7 +38,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 |---|---|
 | Repo | https://github.com/dhammawatthumpra-coder/p2pgate |
 | npm | https://www.npmjs.com/package/p2pgate |
-| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.6.0 |
+| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.6.1 |
 
 ---
 
@@ -51,7 +51,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | Git branch | `main` |
 | Commit | `6d484cc fix(auth): retry once when the auth stream closes mid-handshake` |
 | Tag | `v1.6.1` |
-| GitHub Release | `v1.6.0` = Latest; `v1.6.1` ยังไม่สร้าง |
+| GitHub Release | `v1.6.1` = Latest |
 | Working tree | clean |
 | Tests | `npm test` → **37 checks PASSED** (Windows + Termux) |
 | src | 16 ไฟล์, `src/self-test.js` ~1,331 บรรทัด |
@@ -383,7 +383,7 @@ cd D:\tunnel\p2pgate
 git status --short          # ต้องรู้ว่ามีไฟล์ค้างไหม
 git log --oneline -3
 npm test                    # ต้องได้ 37 checks (หรือมากกว่า)
-npm view p2pgate version    # ต้องเป็น 1.6.1 หลัง publish
+npm view p2pgate version    # ต้องเป็น 1.6.1
 ```
 
 ถ้าทุกอย่างตรงกับเอกสารนี้ แปลว่า handoff ครบ — เริ่มงานต่อได้เลย
