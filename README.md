@@ -20,6 +20,8 @@ Works on Termux/Android, Linux, macOS, and Windows with Node.js 20 or newer.
 > **Install:** `npm install -g p2pgate`
 >
 > Manual testing guide (Thai): [`TESTING.md`](TESTING.md)
+>
+> Running as a service (Termux / systemd / Windows): [`docs/SERVICE.md`](docs/SERVICE.md)
 
 ## Quick start (no setup)
 

@@ -1,0 +1,20 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# runit service for p2pgate server (termux-services)
+#
+#   mkdir -p "$PREFIX/var/service/p2pgate/log"
+#   cp run     "$PREFIX/var/service/p2pgate/run"
+#   cp log/run "$PREFIX/var/service/p2pgate/log/run"
+#   chmod +x "$PREFIX/var/service/p2pgate/run" "$PREFIX/var/service/p2pgate/log/run"
+#   sv-enable p2pgate && sv up p2pgate
+#
+# Optional: export P2PGATE_CONFIG=/path/to/config.json before sv up
+
+exec 2>&1
+
+command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock
+
+if [ -n "$P2PGATE_CONFIG" ]; then
+  exec p2pgate server --config "$P2PGATE_CONFIG"
+fi
+
+exec p2pgate server

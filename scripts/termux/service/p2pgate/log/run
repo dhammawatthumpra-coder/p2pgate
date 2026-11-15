@@ -1,0 +1,7 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# svlogd logger for the p2pgate runit service
+#
+#   mkdir -p "$PREFIX/var/log/p2pgate"
+#   chmod 700 "$PREFIX/var/log/p2pgate"
+
+exec svlogd -tt "$PREFIX/var/log/p2pgate"

@@ -18,6 +18,8 @@
 > **ติดตั้ง:** `npm install -g p2pgate`
 >
 > คู่มือทดสอบก่อนใช้งานจริง: [`TESTING.md`](TESTING.md)
+>
+> การรันเป็น service (Termux / systemd / Windows): [`docs/SERVICE.md`](docs/SERVICE.md)
 
 ## เริ่มใช้งานเร็ว (ไม่ต้อง setup)
 

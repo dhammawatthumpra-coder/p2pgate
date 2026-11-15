@@ -152,7 +152,8 @@ p2pgate connect -s <masterSecret> -p <password>
 | `src/i18n.js` | `P2PGATE_LANG` / `--lang` / `t(th, en)` |
 | `src/self-test.js` | 37 checks รวม password mode, slow credential, stream-close retry |
 
-Docs: `docs/specs/phase7-v1.6.0.md` (spec), `docs/releases/v1.6.1.md` (patch notes),
+Docs: `docs/specs/phase7-v1.6.0.md` (spec), `docs/releases/v1.6.3.md` (patch notes),
+`docs/SERVICE.md` (service/Termux/systemd/Windows runbook),
 `docs/releases/v1.6.0.md` (release notes),
 `TESTING.md` (คู่มือทดสอบภาษาไทย), `README.md` / `README.th.md`
 
@@ -366,6 +367,7 @@ ssh -p 8022 -o BatchMode=yes -o StrictHostKeyChecking=no `
 |---|---|
 | `PEER_NOT_FOUND` | `p2pgate server` ไม่ได้รัน / secret ไม่ตรง / เวลาเครื่องต่างกัน > 1 ชม. / UDP ถูกบล็อก |
 | `authentication failed: ไม่ได้รับข้อความท้าทาย...` แล้วรอบถัดไปต่อได้ | stream ตายระหว่างพิมพ์ (server restart หรือเกิน 120 วิ) — v1.6.1 retry ให้เองและ log `auth stream closed ... retrying once` |
+| headless/service แล้ว client ถูกปฏิเสธ `interactive_unavailable` | ไม่มี TTY จึงไม่มี Session PIN — ใช้ `verificationMode: key-only`, trusted fastpath, หรือ `authMode: password` (ดู `docs/SERVICE.md`) |
 | `ssh: Connection closed by 127.0.0.1` | tunnel ต่อ Server ไม่ได้ (มักเป็นข้อบน) |
 | client ค้างโดยไม่ถาม password | ใช้ `p2pgate client` (advanced) ซึ่งไม่บังคับ credential — ต้องมี `-p` หรือ prompt ถ้าใช้ `connect` |
 | trusted ไม่ fastpath | ยังไม่ `devices add --mode trusted`, หมดอายุ, หรือไฟล์สิทธิ์ไม่ใช่ 0600 |

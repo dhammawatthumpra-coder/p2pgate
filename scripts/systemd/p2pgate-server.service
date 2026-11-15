@@ -1,0 +1,40 @@
+[Unit]
+Description=p2pgate server (P2P tunnel to local SSH)
+Documentation=https://github.com/dhammawatthumpra-coder/p2pgate/blob/main/docs/SERVICE.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Adjust these to the machine. Run `which p2pgate` to confirm the binary path.
+User=p2pgate
+Group=p2pgate
+ExecStart=/usr/local/bin/p2pgate server --config /home/p2pgate/.p2pgate/config.json
+
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+
+Environment=P2PGATE_LANG=en
+
+# Do not put secrets in this unit file. Authentication comes from
+# ~/.p2pgate/config.json (0600) and ~/.p2pgate/trusted_devices (0600).
+
+# Hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+ReadWritePaths=/home/p2pgate/.p2pgate
+
+[Install]
+WantedBy=multi-user.target

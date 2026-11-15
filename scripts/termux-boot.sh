@@ -79,7 +79,11 @@ cd "$P2PGATE_DIR" 2>/dev/null || {
 while true; do
   rotate_log
   echo "--- $(date -u '+%Y-%m-%dT%H:%M:%SZ') starting p2pgate server ---" >> "$LOG_FILE"
-  node src/cli.js server >> "$LOG_FILE" 2>&1
+  if command -v p2pgate >/dev/null 2>&1; then
+    p2pgate server >> "$LOG_FILE" 2>&1
+  else
+    node src/cli.js server >> "$LOG_FILE" 2>&1
+  fi
   code=$?
   echo "--- $(date -u '+%Y-%m-%dT%H:%M:%SZ') p2pgate exited (code $code); restarting in 5s ---" >> "$LOG_FILE"
   sleep 5

@@ -1,0 +1,34 @@
+[Unit]
+Description=p2pgate client tunnel
+Documentation=https://github.com/dhammawatthumpra-coder/p2pgate/blob/main/docs/SERVICE.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Adjust to the machine.
+User=p2pgate
+Group=p2pgate
+ExecStart=/usr/local/bin/p2pgate client --config /home/p2pgate/.p2pgate/client.json
+
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+
+Environment=P2PGATE_LANG=en
+
+# NOTE: a headless client can only connect when the server does not challenge,
+# i.e. the server uses key-only mode or this client key is a trusted/fast-path
+# device. A PIN/password prompt cannot be answered without a terminal.
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+ReadWritePaths=/home/p2pgate/.p2pgate
+
+[Install]
+WantedBy=multi-user.target
