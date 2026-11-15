@@ -19,6 +19,7 @@ Markdown for easier review and diffing.
 ## Other documents
 
 - [Session handoff](HANDOFF.md) — current state, invariants, next steps
+- [Release notes v1.6.3](releases/v1.6.3.md)
 - [Release notes v1.6.2](releases/v1.6.2.md)
 - [Release notes v1.6.1](releases/v1.6.1.md)
 - [Release notes v1.6.0](releases/v1.6.0.md)

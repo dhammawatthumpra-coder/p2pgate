@@ -313,6 +313,10 @@ async function startClient(config, options = {}) {
   }
 
   async function promptForCredential() {
+    // The prompt is intentionally lazy (fast-path sessions never block), so
+    // announce why it appeared now that a connection is actually waiting.
+    writeLog('เซิร์ฟเวอร์ขอการยืนยันตัวตน: กรอก PIN (10 ตัว) หรือรหัสผ่าน (12 ตัวขึ้นไป)')
+
     while (true) {
       const value = await promptHidden(
         '🔐 PIN (10 ตัว) หรือรหัสผ่าน (12 ตัวขึ้นไป): ',

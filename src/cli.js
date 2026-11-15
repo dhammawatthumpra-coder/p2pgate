@@ -608,11 +608,11 @@ async function commandClient(values) {
 
   if (values['pin-stdin']) {
     process.stdout.write(
-      '🔐 จะอ่าน PIN/รหัสผ่านจาก stdin เฉพาะเมื่อเซิร์ฟเวอร์ต้องใช้ two-step\n'
+      '🔐 จะอ่าน PIN/รหัสผ่านจาก stdin เมื่อเซิร์ฟเวอร์ร้องขอ (ไม่ถามตอนเริ่ม)\n'
     )
   } else if (!process.env.P2PGATE_PIN) {
     process.stdout.write(
-      '🔐 จะถาม PIN เฉพาะเมื่อเซิร์ฟเวอร์ต้องใช้ two-step (trusted/key-only ไม่ถาม)\n'
+      '🔐 PIN/รหัสผ่านจะถูกถามเมื่อมี connection เข้ามาและเซิร์ฟเวอร์ร้องขอ (trusted/key-only ไม่ถาม)\n'
     )
   }
 

@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-15
-สถานะ: **v1.6.2 released** (npm + GitHub Release)
+สถานะ: **v1.6.3 prepared** (messaging patch; npm ยังเป็น 1.6.2 จนกว่าจะ publish)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -13,7 +13,7 @@
 วางข้อความนี้ใน session ใหม่:
 
 ```text
-โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.6.2)
+โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.6.3)
 อ่าน docs/HANDOFF.md ก่อน แล้วสรุปสถานะปัจจุบันและรอคำสั่ง
 ```
 
@@ -38,7 +38,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 |---|---|
 | Repo | https://github.com/dhammawatthumpra-coder/p2pgate |
 | npm | https://www.npmjs.com/package/p2pgate |
-| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.6.2 |
+| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.6.3 |
 
 ---
 
@@ -46,12 +46,12 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.6.2` (wording patch, พร้อม publish) |
-| npm `latest` | `1.6.2` |
+| Version | `1.6.3` (messaging patch, พร้อม publish) |
+| npm `latest` | `1.6.2` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `2235e80 fix(ux): neutral credential prompt wording for password mode` |
-| Tag | `v1.6.2` |
-| GitHub Release | `v1.6.2` = Latest |
+| Commit | `__COMMIT__` |
+| Tag | `v1.6.3` |
+| GitHub Release | `v1.6.2` = Latest; `v1.6.3` ยังไม่สร้าง |
 | Working tree | clean |
 | Tests | `npm test` → **37 checks PASSED** (Windows + Termux) |
 | src | 16 ไฟล์, `src/self-test.js` ~1,331 บรรทัด |
@@ -69,6 +69,12 @@ npm view p2pgate version
 ---
 
 ## 3. v1.6.0 / v1.6.1 ทำอะไรไปแล้ว
+
+### v1.6.3 (patch)
+
+- ข้อความเริ่มของ `p2pgate client` บอกชัดว่า PIN/รหัสผ่านจะถูกถามเมื่อมี connection
+- เพิ่ม log ก่อน prompt ว่าเซิร์ฟเวอร์ขอการยืนยันตัวตน
+- lazy prompt คงเดิม (trusted/fast-path ไม่ถูกถาม)
 
 ### v1.6.2 (patch)
 

@@ -1,6 +1,6 @@
 # p2pgate v1.6 — คู่มือทดสอบก่อนใช้งานจริง
 
-เอกสารนี้เป็น **manual acceptance test** สำหรับตรวจสอบว่า p2pgate v1.6.2
+เอกสารนี้เป็น **manual acceptance test** สำหรับตรวจสอบว่า p2pgate v1.6.3
 ทำงานได้จริงบนเครื่องและเครือข่ายของคุณ ไม่ใช่แค่ผ่าน self-test
 
 > ⚠️ ควรทดสอบในเครื่อง/บัญชีผู้ใช้ทดสอบก่อน
@@ -687,7 +687,7 @@ p2pgate devices list
 
 ---
 
-## 11) Known Limitations ของ v1.6.2
+## 11) Known Limitations ของ v1.6.3
 
 สิ่งเหล่านี้ **ยังไม่มี** และไม่ควรถือว่าเป็นบั๊ก:
 
@@ -706,7 +706,7 @@ p2pgate devices list
 คัดลอกตารางนี้ไปใช้บันทึกผล:
 
 ```text
-p2pgate v1.6.2 — Test Record
+p2pgate v1.6.3 — Test Record
 วันที่:
 เครื่อง Server:
 เครื่อง Client:
