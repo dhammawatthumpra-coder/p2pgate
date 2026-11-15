@@ -49,7 +49,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | Version | `1.8.4` (feature: `--no-backup`, พร้อม publish) |
 | npm `latest` | `1.8.3` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `__COMMIT__` |
+| Commit | `6891be5 feat(master): add --no-backup and incident response guide` |
 | Tag | `v1.8.4` |
 | GitHub Release | `v1.8.3` = Latest; `v1.8.4` ยังไม่สร้าง |
 | Working tree | clean |
