@@ -49,7 +49,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | Version | `1.8.3` (feature: master rotation, พร้อม publish) |
 | npm `latest` | `1.8.2` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `__COMMIT__` |
+| Commit | `e6ba7d9 feat(master): add masterSecret show/reset with backup and audit` |
 | Tag | `v1.8.3` |
 | GitHub Release | `v1.8.2` = Latest; `v1.8.3` ยังไม่สร้าง |
 | Working tree | clean |
