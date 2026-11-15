@@ -672,6 +672,8 @@ p2pgate connect -s <new masterSecret> -p <password>
 ```
 
 - `p2pgate master reset --dry-run` shows what would change without writing
+- `--no-backup` skips the backup on purpose (incident response: do not keep a
+  copy of the leaked secret on disk)
 - the previous config is copied to `config.json.bak-<timestamp>` (mode `0600`)
 - rotations are recorded in the audit log as `master.reset`
 - the connection password and trusted device keys are **not** affected
@@ -1183,7 +1185,8 @@ p2pgate/
 │   │   ├── v1.8.0.md
 │   │   ├── v1.8.1.md
 │   │   ├── v1.8.2.md
-│   │   └── v1.8.3.md
+│   │   ├── v1.8.3.md
+│   │   └── v1.8.4.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md

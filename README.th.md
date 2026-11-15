@@ -656,6 +656,7 @@ p2pgate connect -s <masterSecret ใหม่> -p <password>
 ```
 
 - `p2pgate master reset --dry-run` ดูว่าจะเปลี่ยนอะไรโดยไม่เขียนไฟล์
+- `--no-backup` ข้ามการสำรอง (ใช้ในเหตุฉุกเฉิน: ไม่เก็บค่าเก่าที่รั่วแล้วบนดิสก์)
 - config เดิมถูกคัดลอกเป็น `config.json.bak-<timestamp>` (โหมด `0600`)
 - บันทึก audit event `master.reset`
 - **ไม่กระทบ** connection password และ trusted device keys
@@ -1160,7 +1161,8 @@ p2pgate/
 │   │   ├── v1.8.0.md
 │   │   ├── v1.8.1.md
 │   │   ├── v1.8.2.md
-│   │   └── v1.8.3.md
+│   │   ├── v1.8.3.md
+│   │   └── v1.8.4.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md

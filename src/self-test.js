@@ -648,6 +648,26 @@ async function main() {
     assert.equal(backupStat.isFile(), true)
     checks.push('masterSecret rotation writes a backup and keeps other fields')
 
+    // --no-backup must not leave the old secret on disk.
+    const noBackupPath = path.join(tempDir, 'rotate-nobackup.json')
+    await fs.writeFile(
+      noBackupPath,
+      `${JSON.stringify(normalizeConfig({
+        mode: 'server',
+        masterSecret
+      }), null, 2)}\n`,
+      { mode: 0o600 }
+    )
+    const rotatedNoBackup = await rotateMasterSecret(noBackupPath, { backup: false })
+    assert.equal(rotatedNoBackup.backupPath, null)
+    assert.equal(rotatedNoBackup.backupSkipped, true)
+    const noBackupFiles = await fs.readdir(tempDir)
+    assert.equal(
+      noBackupFiles.some((name) => name.startsWith('rotate-nobackup.json.bak-')),
+      false
+    )
+    checks.push('masterSecret rotation can skip the backup on request')
+
     bootstrapper = HyperDHT.bootstrapper(bootstrapPort, '127.0.0.1')
     await bootstrapper.fullyBootstrapped()
 

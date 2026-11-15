@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-15
-สถานะ: **v1.8.3 released** (npm + GitHub Release)
+สถานะ: **v1.8.4 prepared** (feature: `--no-backup` + incident guide; npm ยังเป็น 1.8.3)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -13,7 +13,7 @@
 วางข้อความนี้ใน session ใหม่:
 
 ```text
-โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.8.3)
+โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.8.4)
 อ่าน docs/HANDOFF.md ก่อน แล้วสรุปสถานะปัจจุบันและรอคำสั่ง
 ```
 
@@ -38,7 +38,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 |---|---|
 | Repo | https://github.com/dhammawatthumpra-coder/p2pgate |
 | npm | https://www.npmjs.com/package/p2pgate |
-| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.8.3 |
+| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.8.4 |
 
 ---
 
@@ -46,14 +46,14 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.8.3` (feature: master rotation, พร้อม publish) |
-| npm `latest` | `1.8.3` |
+| Version | `1.8.4` (feature: `--no-backup`, พร้อม publish) |
+| npm `latest` | `1.8.3` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `e6ba7d9 feat(master): add masterSecret show/reset with backup and audit` |
-| Tag | `v1.8.3` |
-| GitHub Release | `v1.8.3` = Latest |
+| Commit | `__COMMIT__` |
+| Tag | `v1.8.4` |
+| GitHub Release | `v1.8.3` = Latest; `v1.8.4` ยังไม่สร้าง |
 | Working tree | clean |
-| Tests | `npm test` → **47 checks PASSED** (Windows + Termux) |
+| Tests | `npm test` → **48 checks PASSED** (Windows + Termux) |
 | src | 18 ไฟล์, `src/self-test.js` ~1,600 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
@@ -69,6 +69,12 @@ npm view p2pgate version
 ---
 
 ## 3. v1.6.0 / v1.6.1 ทำอะไรไปแล้ว
+
+### v1.8.4 (feature)
+
+- `master reset --no-backup` สำหรับ incident (ไม่เก็บ secret เก่าบนดิสก์)
+- `SECURITY.md` เพิ่มหัวข้อ Incident response (revoke → password → master → restart → clients)
+- self-test: ยืนยันว่า `--no-backup` ไม่ทิ้งไฟล์ `.bak-*`
 
 ### v1.8.3 (feature)
 
@@ -191,7 +197,7 @@ p2pgate connect -s <masterSecret> -p <password>
 | `src/keygen.js` | client key + passphrase protection |
 | `src/setup-wizard.js` | advanced setup + `--easy` + i18n |
 | `src/i18n.js` | `P2PGATE_LANG` / `--lang` / `t(th, en)` |
-| `src/self-test.js` | 47 checks รวม password, retry, targets, SOCKS5, config round-trip, master rotation |
+| `src/self-test.js` | 48 checks รวม password, retry, targets, SOCKS5, config round-trip, master rotation |
 
 Docs: `docs/specs/phase7-v1.6.0.md` (spec), `docs/releases/v1.6.3.md` (patch notes),
 `docs/SERVICE.md` (service/Termux/systemd/Windows runbook),
@@ -204,7 +210,7 @@ Docs: `docs/specs/phase7-v1.6.0.md` (spec), `docs/releases/v1.6.3.md` (patch not
 
 ```powershell
 # dev
-npm test                 # check + 47 self-test checks
+npm test                 # check + 48 self-test checks
 npm run check            # syntax check ทุกไฟล์
 npm run self-test
 
@@ -440,7 +446,7 @@ ssh -p 8022 -o BatchMode=yes -o StrictHostKeyChecking=no `
 cd D:\tunnel\p2pgate
 git status --short          # ต้องรู้ว่ามีไฟล์ค้างไหม
 git log --oneline -3
-npm test                    # ต้องได้ 47 checks (หรือมากกว่า)
+npm test                    # ต้องได้ 48 checks (หรือมากกว่า)
 npm view p2pgate version    # ต้องเป็น 1.6.1
 ```
 

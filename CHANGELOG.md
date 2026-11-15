@@ -7,6 +7,20 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.8.4] - 2026-11-15
+
+### Added
+
+- `p2pgate master reset --no-backup` — ไม่สำรอง config เดิม (สำหรับเหตุฉุกเฉิน
+  ที่ไม่ต้องการเก็บ secret เก่าไว้บนดิสก์)
+- `SECURITY.md`: หัวข้อ **Incident response** พร้อมลำดับ revoke → password reset
+  → master reset → restart → update clients และรายการไฟล์ที่ต้องลบ
+- self-test: ตรวจว่า `--no-backup` ไม่ทิ้งไฟล์ `.bak-*`
+
+### Changed
+
+- `SECURITY.md`: ตารางเวอร์ชันที่รองรับอัปเดตเป็น 1.8.x
+
 ## [1.8.3] - 2026-11-15
 
 ### Added

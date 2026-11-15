@@ -98,6 +98,7 @@ const HELP_TEXT = `p2pgate v1.8 — อุโมงค์ TCP แบบ P2P ส�
       หมุน masterSecret: สำรอง config เดิม แล้วเขียนค่าใหม่
       ต้องรีสตาร์ต Server และอัปเดต client ทุกเครื่อง
       --yes = ยืนยันโดยไม่ถาม (จำเป็นเมื่อไม่มี TTY)
+      --no-backup = ไม่สำรอง config เดิม (ใช้ในเหตุฉุกเฉิน)
 
   p2pgate revoke <clientPublicKeyHex> [--config <path>]
       เพิกถอนคีย์ถาวรและตัด connection ที่เปิดอยู่ทันที
@@ -180,6 +181,7 @@ Usage:
   p2pgate master show [--reveal] [--json]
   p2pgate master reset [--yes] [--dry-run] [--json]
       Rotate the masterSecret (backs up the old config, writes a new value)
+      --no-backup skips the backup (incident response)
   p2pgate doctor [--json]
   p2pgate unlock --list|<key>|--all
 
@@ -1496,6 +1498,7 @@ async function commandMaster(values, positionals) {
 
   const config = await loadConfig(configPath)
   const dryRun = values['dry-run'] === true
+  const backup = values['no-backup'] !== true
 
   if (!dryRun && values.yes !== true) {
     const readline = require('node:readline/promises')
@@ -1529,7 +1532,7 @@ async function commandMaster(values, positionals) {
     }
   }
 
-  const result = await rotateMasterSecret(configPath, { dryRun })
+  const result = await rotateMasterSecret(configPath, { dryRun, backup })
 
   if (values.json) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
@@ -1558,10 +1561,23 @@ async function commandMaster(values, positionals) {
       `\nmasterSecret ใหม่:\n  ${result.masterSecret}\n\n`,
       `\nNew masterSecret:\n  ${result.masterSecret}\n\n`
     ))
-    process.stdout.write(t(
-      `สำรองไฟล์เดิมไว้ที่: ${result.backupPath}\n\n`,
-      `Previous config backed up to: ${result.backupPath}\n\n`
-    ))
+
+    if (result.backupSkipped) {
+      process.stdout.write(t(
+        '⚠️  ไม่ได้สำรอง config เดิม (--no-backup): ค่าเก่าจะหายจากดิสก์\n',
+        '⚠️  Previous config not backed up (--no-backup): the old value is gone from disk\n'
+      ))
+    } else {
+      process.stdout.write(t(
+        `สำรองไฟล์เดิมไว้ที่: ${result.backupPath}\n`,
+        `Previous config backed up to: ${result.backupPath}\n`
+      ))
+      process.stdout.write(t(
+        '   ถ้าเป็นเหตุฉุกเฉิน ให้ลบไฟล์สำรองนี้หลังยืนยันว่าใช้ค่าใหม่ได้แล้ว\n',
+        '   In an incident, delete this backup after the new value is verified\n'
+      ))
+    }
+    process.stdout.write('\n')
 
     if (result.mode === 'server') {
       process.stdout.write(t(
@@ -1736,6 +1752,7 @@ async function main(argv) {
         yes: { type: 'boolean' },
         reveal: { type: 'boolean' },
         'dry-run': { type: 'boolean' },
+        'no-backup': { type: 'boolean' },
         secret: { type: 'string', short: 's' },
         password: { type: 'string', short: 'p' },
         'secret-stdin': { type: 'boolean' },

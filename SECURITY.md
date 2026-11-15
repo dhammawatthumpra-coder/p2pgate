@@ -4,11 +4,11 @@
 
 | Version | Supported |
 |---|---|
-| 1.6.x | ✅ |
-| 1.5.x | ⚠️ อัปเกรดเป็น 1.6.x |
-| 1.4.x | ⚠️ อัปเกรดเป็น 1.6.x |
-| 1.3.x | ⚠️ อัปเกรดเป็น 1.6.x |
-| ต่ำกว่า 1.3 | ❌ |
+| 1.8.x | ✅ |
+| 1.7.x | ⚠️ อัปเกรดเป็น 1.8.x |
+| 1.6.x | ⚠️ อัปเกรดเป็น 1.8.x |
+| 1.5.x | ⚠️ อัปเกรดเป็น 1.8.x |
+| ต่ำกว่า 1.5 | ❌ |
 
 ## การรายงานช่องโหว่
 
@@ -57,7 +57,44 @@
 - `revoke` ตัดที่ระดับ stream ของ p2pgate
   ไม่ได้สั่งปิด SSH session ระดับ OS โดยตรง
 - client key แบบเข้ารหัสยังเปิดเผย `publicKey` และ metadata ในไฟล์
-- ยังไม่มี master-secret rotation หรือ multi-target policy
+- SOCKS5 รองรับเฉพาะ TCP + IPv4 (v1.8) และต้องเปิด allowlist เอง
+
+## Incident response (สงสัยว่า secret รั่ว)
+
+ทำตามลำดับนี้บนเครื่อง Server:
+
+```sh
+# 1) ตัดสิทธิ์คีย์ที่น่าสงสัยทันที (ตัด session ที่เปิดอยู่ด้วย)
+p2pgate revoke <clientKey>
+
+# 2) เปลี่ยน connection password (มีผลหลังรีสตาร์ต)
+p2pgate password reset
+
+# 3) หมุน DHT identity และไม่เก็บค่าเก่าบนดิสก์
+p2pgate master reset --yes --no-backup
+
+# 4) รีสตาร์ต Server
+#    Ctrl+C แล้ว p2pgate server
+
+# 5) อัปเดต Client ทุกเครื่อง
+#    p2pgate connect -s <masterSecret ใหม่> -p <password ใหม่>
+```
+
+หลังยืนยันว่าใช้งานได้:
+
+```sh
+p2pgate devices list        # ตรวจว่ามีแต่เครื่องที่ไว้ใจ
+p2pgate status
+rm -f ~/.p2pgate/quickstart.txt
+rm -f ~/.p2pgate/config.json.bak-*   # ถ้ามีจากการหมุนครั้งก่อน
+```
+
+หลักการ:
+
+- `master reset` เปลี่ยน identity แต่ **ไม่** ตัดสิทธิ์คีย์และไม่เปลี่ยน password
+- `password reset` เปลี่ยนปัจจัยที่ใช้ยืนยัน แต่ไม่เปลี่ยน identity
+- เคสเครื่องถูกยึด (อ่าน config ได้) ต้องทำทั้งสามอย่าง: revoke + password + master
+- เก็บ audit log ไว้ตรวจย้อนหลัง (`master.reset` ถูกบันทึกพร้อม fingerprint)
 
 ## Safe Harbor
 

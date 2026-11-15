@@ -53,16 +53,19 @@ async function rotateMasterSecret(configPath, options = {}) {
   }
 
   const dryRun = options.dryRun === true
+  const backup = options.backup !== false
   let backupPath = null
 
   if (!dryRun) {
-    backupPath = backupPathFor(resolved)
+    if (backup) {
+      backupPath = backupPathFor(resolved)
 
-    await fsp.copyFile(resolved, backupPath)
-    try {
-      await fsp.chmod(backupPath, 0o600)
-    } catch {
-      // Windows and some filesystems do not enforce POSIX modes.
+      await fsp.copyFile(resolved, backupPath)
+      try {
+        await fsp.chmod(backupPath, 0o600)
+      } catch {
+        // Windows and some filesystems do not enforce POSIX modes.
+      }
     }
 
     await saveConfig(resolved, { ...config, masterSecret: nextSecret })
@@ -71,6 +74,7 @@ async function rotateMasterSecret(configPath, options = {}) {
   return {
     configPath: resolved,
     backupPath,
+    backupSkipped: !dryRun && !backup,
     dryRun,
     mode: config.mode,
     previousFingerprint: fingerprint(config.masterSecret),
