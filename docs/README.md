@@ -20,6 +20,7 @@ Markdown for easier review and diffing.
 
 - [Session handoff](HANDOFF.md) — current state, invariants, next steps
 - [Running as a service](SERVICE.md) — Termux, systemd, Windows
+- [Release notes v1.7.0](releases/v1.7.0.md)
 - [Release notes v1.6.3](releases/v1.6.3.md)
 - [Release notes v1.6.2](releases/v1.6.2.md)
 - [Release notes v1.6.1](releases/v1.6.1.md)

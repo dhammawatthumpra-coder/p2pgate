@@ -174,6 +174,9 @@ journalctl -u p2pgate-server -f
 
 แก้ `User=` และ path ใน unit ให้ตรงกับเครื่องจริง (ตรวจ `which p2pgate`)
 
+ถ้าต้องการ override พอร์ตปลายทางเฉพาะรอบ (ไม่บันทึก) เติม `--port <port>`
+ต่อท้าย `ExecStart=` ได้ เช่น `... server --config ... --port 2222`
+
 ### 5.3 Client
 
 ```sh

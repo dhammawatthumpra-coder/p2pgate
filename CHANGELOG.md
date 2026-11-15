@@ -7,6 +7,20 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.7.0] - 2026-11-15
+
+### Added
+
+- `p2pgate server --port <targetPort>` และ `--target-port <targetPort>`
+  สำหรับ override พอร์ตปลายทางเฉพาะรอบที่รัน (ไม่บันทึกลง config)
+- Error code `PORT_INVALID` พร้อมข้อความแยกจาก config error
+
+### Changed
+
+- Help แสดงรูปแบบ `p2pgate server [--config <path>] [--port <targetPort>]`
+- README/README.th เพิ่มแถวคำสั่ง `server --port`
+- Roadmap: `targets` (multi-port) เลื่อนไป v1.8
+
 ## [1.6.3] - 2026-11-15
 
 ### Changed

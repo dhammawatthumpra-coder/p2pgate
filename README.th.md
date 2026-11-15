@@ -846,6 +846,7 @@ tail -f ~/.p2pgate/server.log
 | `p2pgate setup` | ตั้งค่าและเลือก verificationMode |
 | `p2pgate setup --easy` | สร้าง config แบบ password ด้วยคำถามน้อยที่สุด |
 | `p2pgate server` | เริ่ม Server (สร้าง config อัตโนมัติครั้งแรก) |
+| `p2pgate server --port <targetPort>` | เริ่ม Server โดย override พอร์ตปลายทางเฉพาะรอบนี้ |
 | `p2pgate connect` | เชื่อมต่อด้วย masterSecret + password |
 | `p2pgate connect -s <secret> -p <password>` | เชื่อมต่อแบบบรรทัดเดียว |
 | `p2pgate keygen` | สร้าง/แสดงกุญแจ Client |

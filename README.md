@@ -867,6 +867,7 @@ Messages never contain the PIN or password.
 | `p2pgate setup` | Configure and select a verification mode |
 | `p2pgate setup --easy` | Generate a password-auth config with minimal prompts |
 | `p2pgate server` | Start the Server (auto-creates config on first run) |
+| `p2pgate server --port <targetPort>` | Start the Server with a target-port override for this run only |
 | `p2pgate connect` | Connect from a Client with masterSecret + password |
 | `p2pgate connect -s <secret> -p <password>` | One-line client connect |
 | `p2pgate keygen` | Create/show the Client key |

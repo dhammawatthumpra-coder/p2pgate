@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-15
-สถานะ: **v1.6.3 released** (npm + GitHub Release)
+สถานะ: **v1.7.0 prepared** (feature: server --port; npm ยังเป็น 1.6.3 จนกว่าจะ publish)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -13,7 +13,7 @@
 วางข้อความนี้ใน session ใหม่:
 
 ```text
-โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.6.3)
+โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.7.0)
 อ่าน docs/HANDOFF.md ก่อน แล้วสรุปสถานะปัจจุบันและรอคำสั่ง
 ```
 
@@ -38,7 +38,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 |---|---|
 | Repo | https://github.com/dhammawatthumpra-coder/p2pgate |
 | npm | https://www.npmjs.com/package/p2pgate |
-| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.6.3 |
+| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.7.0 |
 
 ---
 
@@ -46,12 +46,12 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.6.3` (messaging patch, พร้อม publish) |
-| npm `latest` | `1.6.3` |
+| Version | `1.7.0` (feature: `server --port`, พร้อม publish) |
+| npm `latest` | `1.6.3` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `9905bf3 fix(ux): explain lazy credential prompt` |
-| Tag | `v1.6.3` |
-| GitHub Release | `v1.6.3` = Latest |
+| Commit | `__COMMIT__` |
+| Tag | `v1.7.0` |
+| GitHub Release | `v1.6.3` = Latest; `v1.7.0` ยังไม่สร้าง |
 | Working tree | clean |
 | Tests | `npm test` → **37 checks PASSED** (Windows + Termux) |
 | src | 16 ไฟล์, `src/self-test.js` ~1,331 บรรทัด |
@@ -69,6 +69,13 @@ npm view p2pgate version
 ---
 
 ## 3. v1.6.0 / v1.6.1 ทำอะไรไปแล้ว
+
+### v1.7.0 (feature)
+
+- `p2pgate server --port <targetPort>` / `--target-port <targetPort>`
+  override พอร์ตปลายทางเฉพาะรอบที่รัน (ไม่บันทึก)
+- error code `PORT_INVALID` แยกจาก config error
+- `targets` (multi-port) เลื่อนไป v1.8
 
 ### v1.6.3 (patch)
 
@@ -260,7 +267,7 @@ p2pgate unlock --list
 1. **Soak + multi-client** — รัน 24 ชม., หลาย client พร้อมกัน, เก็บ log
 2. **Network switching** — ปิด/เปิด Wi-Fi, สลับ 4G, ดูว่า reconnect เองได้
 3. **เปิด CI** — แก้ billing หรือย้ายไป CI อื่น (workflow มีอยู่แต่ disable)
-4. **v1.7.0 `targets` (multi-port)** — `targets: { ssh: 22, web: 443 }`
+4. **v1.8.0 `targets` (multi-port)** — `targets: { ssh: 22, web: 443 }`
    และ `connect --target web`
 5. **แปล legacy CLI/doctor ให้ครบ en/th**
 6. **เตรียม core สำหรับ p2phub** — `p2pgate enroll`, `p2pgate agent`,
@@ -302,7 +309,7 @@ npm test
 git status --short
 
 # 2. เลขรุ่น + docs
-npm version 1.7.0 --no-git-tag-version --ignore-scripts
+npm version 1.8.0 --no-git-tag-version --ignore-scripts
 # แก้ CHANGELOG.md, README.md, README.th.md, docs/releases/v1.7.0.md,
 # docs/specs/phaseX-v1.7.0.md, TESTING.md (จำนวน checks)
 

@@ -52,9 +52,10 @@ const { version } = require('../package.json')
 const HELP_TEXT = `p2pgate v1.6 — อุโมงค์ TCP แบบ P2P สำหรับ SSH (HyperDHT)
 
 การใช้งาน:
-  p2pgate server [--config <path>]
+  p2pgate server [--config <path>] [--port <targetPort>]
       เริ่มเซิร์ฟเวอร์ ครั้งแรกจะสร้าง config, masterSecret
       และ connection password ให้อัตโนมัติ
+      --port: เปลี่ยนพอร์ตปลายทางเฉพาะรอบนี้ (ไม่บันทึก)
 
   p2pgate connect [-s <masterSecret>] [-p <password>] [--port <localPort>]
       เชื่อมต่อจาก Client และสร้าง client key อัตโนมัติ
@@ -144,9 +145,10 @@ Passphrase ของ client key:
 const HELP_TEXT_EN = `p2pgate v1.6 — P2P TCP tunnel for SSH (HyperDHT)
 
 Usage:
-  p2pgate server [--config <path>]
+  p2pgate server [--config <path>] [--port <targetPort>]
       Start the Server. On first run, generates config, masterSecret,
       and a connection password automatically.
+      --port: override the target port for this run only (not saved)
 
   p2pgate connect [-s <masterSecret>] [-p <password>] [--port <localPort>]
       Connect from a Client. Generates a client key automatically.
@@ -215,6 +217,12 @@ function printError(err) {
       process.stderr.write(t(
         '👉 authMode=password แต่ยังไม่มี connection password กรุณารัน p2pgate password reset\n',
         '👉 authMode=password has no connection password; run p2pgate password reset\n'
+      ))
+      break
+    case 'PORT_INVALID':
+      process.stderr.write(t(
+        '👉 --port ต้องเป็นตัวเลข 1-65535 และใช้ --port หรือ --target-port อย่างใดอย่างหนึ่ง\n',
+        '👉 --port must be 1-65535; use either --port or --target-port\n'
       ))
       break
     case 'CONFIG_NOT_FOUND':
@@ -501,6 +509,30 @@ async function commandServer(values) {
     throw err
   }
 
+  if (values.port !== undefined && values['target-port'] !== undefined) {
+    const err = new Error('ใช้ --port หรือ --target-port อย่างใดอย่างหนึ่ง')
+    err.code = 'PORT_INVALID'
+    throw err
+  }
+
+  const portValue = values['target-port'] !== undefined
+    ? values['target-port']
+    : values.port
+  let portOverride = false
+
+  if (portValue !== undefined) {
+    const targetPort = Number(portValue)
+    if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65535) {
+      const err = new Error('--port ต้องเป็นตัวเลขระหว่าง 1 ถึง 65535')
+      err.code = 'PORT_INVALID'
+      throw err
+    }
+
+    // Runtime override only: the config file keeps its own targetPort.
+    config.targetPort = targetPort
+    portOverride = true
+  }
+
   process.stdout.write('\n=== p2pgate server ===\n')
   process.stdout.write(t(`ไฟล์ตั้งค่า: ${configPath}\n`, `Config: ${configPath}\n`))
 
@@ -544,8 +576,8 @@ async function commandServer(values) {
 
   process.stdout.write(t('\n✅ เซิร์ฟเวอร์พร้อมทำงานแล้ว\n', '\n✅ Server is ready\n'))
   process.stdout.write(t(
-    `   ส่งต่อไปยัง: 127.0.0.1:${config.targetPort}\n`,
-    `   Target: 127.0.0.1:${config.targetPort}\n`
+    `   ส่งต่อไปยัง: 127.0.0.1:${config.targetPort}${portOverride ? ' (override รอบนี้ ไม่บันทึก)' : ''}\n`,
+    `   Target: 127.0.0.1:${config.targetPort}${portOverride ? ' (this run only, not saved)' : ''}\n`
   ))
   process.stdout.write(t(
     `   โหมดยืนยันตัวตน: ${server.verificationMode} (${server.authMode})\n`,
@@ -1424,6 +1456,7 @@ async function main(argv) {
       options: {
         config: { type: 'string', short: 'c' },
         port: { type: 'string' },
+        'target-port': { type: 'string' },
         secret: { type: 'string', short: 's' },
         password: { type: 'string', short: 'p' },
         'secret-stdin': { type: 'boolean' },
