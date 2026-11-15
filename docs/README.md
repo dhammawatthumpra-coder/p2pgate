@@ -11,12 +11,15 @@
 | [Phase 5 — Control plane](specs/phase5-v1.4.0.md) | v1.4.0 | Local control socket, doctor, trusted-device expiry enforcement |
 | [Phase 6 — Auditability](specs/phase6-v1.5.0.md) | v1.5.0 | Audit log, encrypted keys, JSON output, control token |
 | [Phase 7 — Zero-setup](specs/phase7-v1.6.0.md) | v1.6.0 | Zero-setup server, password auth, one-line connect |
+| [Phase 8 — `p2phub`](https://github.com/dhammawatthumpra-coder/p2phub/blob/main/docs/spec.md) | draft | Separate repository: optional control plane (inventory, directory, policy, enrollment, secret custody) |
 
 The Phase 4 document was converted from the original `.docx` handoff file to
 Markdown for easier review and diffing.
 
 ## Other documents
 
+- [Session handoff](HANDOFF.md) — current state, invariants, next steps
+- [Release notes v1.6.1](releases/v1.6.1.md)
 - [Release notes v1.6.0](releases/v1.6.0.md)
 - [Release notes v1.5.0](releases/v1.5.0.md)
 - [Release notes v1.4.1](releases/v1.4.1.md)
