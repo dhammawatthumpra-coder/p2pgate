@@ -636,6 +636,18 @@ p2pgate connect -s <secret> -p <password> --socks5 1080
 "socks": { "enabled": true, "allow": ["192.168.1.0/24:*"] }
 ```
 
+กำหนดต่อ client (ไม่บังคับ) — รายการนี้ **แทนที่** รายการกลางสำหรับ key นั้น:
+
+```json
+"socks": {
+  "enabled": true,
+  "allow": ["192.168.1.0/24:8080"],
+  "perClient": {
+    "<clientPublicKeyHex>": ["10.0.0.0/8:443"]
+  }
+}
+```
+
 > การเปิด SOCKS ทำให้ Server เป็น gateway ไปยังปลายทางที่คุณระบุ
 > ควรจำกัด allowlist ให้แคบ — `0.0.0.0/0` เท่ากับ proxy ทั้งอินเทอร์เน็ต
 
@@ -661,6 +673,26 @@ p2pgate connect -s <masterSecret ใหม่> -p <password>
 - บันทึก audit event `master.reset`
 - **ไม่กระทบ** connection password และ trusted device keys
 - ถ้าไม่ใส่ `--yes` จะถามยืนยัน；ใน non-interactive shell ต้องใส่ `--yes`
+
+---
+
+## 9.5) ตรวจ config ก่อนรัน
+
+```sh
+p2pgate config validate        # exit 1 ถ้าไฟล์หายหรือไม่ถูกต้อง
+p2pgate config show            # config ที่ normalize แล้ว โดยปิด secret
+p2pgate config show --json
+```
+
+`config validate` ใช้ normalizer ตัวเดียวกับ daemon — ผ่านที่นี่คือผ่านตอน start
+`config show` แสดงค่าที่ daemon เห็นจริง โดยปิด `masterSecret`, SCRAM verifier
+และ Telegram token
+
+`p2pgate doctor` เพิ่มการตรวจ:
+
+- fingerprint ของ `masterSecret` + เตือนถ้า config ไม่ถูกแก้มา 180 วัน
+- probe ทุก `targets.<name>` บน `127.0.0.1` และเตือนถ้าพอร์ตไม่ตอบ
+- เตือนถ้า SOCKS allowlist เป็น `0.0.0.0/0` (เท่ากับ open proxy)
 
 ---
 
@@ -949,6 +981,8 @@ tail -f ~/.p2pgate/server.log
 | `p2pgate connect --socks5 <port>` | เปิด SOCKS5 gateway ในเครื่อง (allowlist อยู่ที่ Server) |
 | `p2pgate master show [--reveal]` | แสดง fingerprint ของ masterSecret |
 | `p2pgate master reset --yes` | หมุน masterSecret พร้อมสำรอง config |
+| `p2pgate config validate` | ตรวจ config (exit 1 ถ้าผิด) |
+| `p2pgate config show` | แสดง config ที่ normalize แล้วโดยปิด secret |
 | `p2pgate keygen` | สร้าง/แสดงกุญแจ Client |
 | `p2pgate keygen --passphrase` | ตั้ง/เปลี่ยน passphrase สำหรับ client key |
 | `p2pgate keygen --unprotect` | ถอด passphrase (ต้องยืนยันของเดิม) |
@@ -1162,7 +1196,8 @@ p2pgate/
 │   │   ├── v1.8.1.md
 │   │   ├── v1.8.2.md
 │   │   ├── v1.8.3.md
-│   │   └── v1.8.4.md
+│   │   ├── v1.8.4.md
+│   │   └── v1.9.0.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
@@ -1173,6 +1208,7 @@ p2pgate/
 │       ├── phase8-targets.md
 │       ├── phase9-socks5.md
 │       ├── phase10-master.md
+│       ├── phase11-v1.9.0.md
 │       └── project-spec.md
 ├── package.json
 ├── package-lock.json
@@ -1197,6 +1233,7 @@ p2pgate/
     ├── cli.js
     ├── client.js
     ├── config-loader.js
+    ├── config-tools.js
     ├── control.js
     ├── crypto-utils.js
     ├── device-registry.js

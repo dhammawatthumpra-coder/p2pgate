@@ -279,6 +279,18 @@ async function startServer(config, options = {}) {
     }
   })
 
+  const socksPerClient = new Map()
+
+  if (socksEnabled && socksConfig.perClient && typeof socksConfig.perClient === 'object') {
+    for (const [key, entries] of Object.entries(socksConfig.perClient)) {
+      if (!Array.isArray(entries)) continue
+      socksPerClient.set(
+        String(key).toLowerCase(),
+        entries.map((entry) => parseAllowEntry(entry))
+      )
+    }
+  }
+
   if (socksEnabled && socksEntries.length === 0) {
     const err = new Error('socks.enabled requires at least one socks.allow entry')
     err.code = 'CONFIG_INVALID'
@@ -314,7 +326,11 @@ async function startServer(config, options = {}) {
       throw err
     }
 
-    const allowedIp = await resolveAllowedHost(host, port, socksEntries)
+    const allowedIp = await resolveAllowedHost(
+      host,
+      port,
+      socksPerClient.get(remoteHex.toLowerCase()) || socksEntries
+    )
 
     if (!allowedIp) {
       writeLog(`SOCKS DENIED client=${remoteHex} destination=${host}:${port}`)

@@ -652,6 +652,19 @@ Example for a home LAN:
 "socks": { "enabled": true, "allow": ["192.168.1.0/24:*"] }
 ```
 
+Per-client policy (optional) — the list **replaces** the global one for that
+client key:
+
+```json
+"socks": {
+  "enabled": true,
+  "allow": ["192.168.1.0/24:8080"],
+  "perClient": {
+    "<clientPublicKeyHex>": ["10.0.0.0/8:443"]
+  }
+}
+```
+
 > This turns the Server into a gateway for the destinations you list. Keep the
 > allowlist tight — `0.0.0.0/0` would proxy the whole internet.
 
@@ -679,6 +692,27 @@ p2pgate connect -s <new masterSecret> -p <password>
 - the connection password and trusted device keys are **not** affected
 - without `--yes` the command asks for confirmation; in a non-interactive shell
   `--yes` is required
+
+---
+
+## 9.5) Validating a config
+
+```sh
+p2pgate config validate        # exits 1 when the file is missing or invalid
+p2pgate config show            # normalised config, secrets masked
+p2pgate config show --json
+```
+
+`config validate` runs the same normaliser the daemon uses, so a config that
+passes here will load at startup. `config show` prints what the daemon sees,
+with `masterSecret`, the SCRAM verifier and the Telegram token masked.
+
+`p2pgate doctor` additionally:
+
+- prints the `masterSecret` fingerprint and warns when the config has not
+  changed in 180 days
+- probes every `targets.<name>` on `127.0.0.1` and warns when a port is closed
+- warns when a SOCKS allowlist entry is `0.0.0.0/0` (open proxy)
 
 ---
 
@@ -972,6 +1006,8 @@ Messages never contain the PIN or password.
 | `p2pgate connect --socks5 <port>` | Start a local SOCKS5 gateway (server allowlist) |
 | `p2pgate master show [--reveal]` | Print the masterSecret fingerprint |
 | `p2pgate master reset --yes` | Rotate masterSecret with a timestamped backup |
+| `p2pgate config validate` | Validate a config file (exit 1 when invalid) |
+| `p2pgate config show` | Print the normalised config with secrets masked |
 | `p2pgate keygen` | Create/show the Client key |
 | `p2pgate keygen --passphrase` | Protect an existing/new key with a passphrase |
 | `p2pgate keygen --unprotect` | Remove passphrase protection (prompts) |
@@ -1186,7 +1222,8 @@ p2pgate/
 │   │   ├── v1.8.1.md
 │   │   ├── v1.8.2.md
 │   │   ├── v1.8.3.md
-│   │   └── v1.8.4.md
+│   │   ├── v1.8.4.md
+│   │   └── v1.9.0.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
@@ -1197,6 +1234,7 @@ p2pgate/
 │       ├── phase8-targets.md
 │       ├── phase9-socks5.md
 │       ├── phase10-master.md
+│       ├── phase11-v1.9.0.md
 │       └── project-spec.md
 ├── package.json
 ├── package-lock.json
@@ -1221,6 +1259,7 @@ p2pgate/
     ├── cli.js
     ├── client.js
     ├── config-loader.js
+    ├── config-tools.js
     ├── control.js
     ├── crypto-utils.js
     ├── device-registry.js

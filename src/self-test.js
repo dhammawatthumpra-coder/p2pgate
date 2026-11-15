@@ -44,6 +44,7 @@ const { runDoctor } = require('./doctor')
 const { readControlLine, decodeControl, AUTH_STATUS } = require('./auth')
 const { normalizeConfig } = require('./config-loader')
 const { rotateMasterSecret, fingerprint } = require('./master')
+const { redactConfig } = require('./config-tools')
 
 const noop = () => {}
 const quiet = () => {}
@@ -667,6 +668,16 @@ async function main() {
       false
     )
     checks.push('masterSecret rotation can skip the backup on request')
+
+    const redactedConfig = redactConfig(normalizeConfig({
+      mode: 'server',
+      masterSecret,
+      targets: { web: { port: echoPort } },
+      socks: { enabled: true, allow: ['127.0.0.1:8080'] }
+    }))
+    assert.equal(JSON.stringify(redactedConfig).includes(masterSecret), false)
+    assert.ok(String(redactedConfig.masterSecret).startsWith('<redacted'))
+    checks.push('config redaction hides secret material')
 
     bootstrapper = HyperDHT.bootstrapper(bootstrapPort, '127.0.0.1')
     await bootstrapper.fullyBootstrapped()
@@ -1705,6 +1716,78 @@ async function main() {
     checks.push('SOCKS5 denies a destination outside the allowlist')
     await socksClient.close()
     await socksServer.close()
+
+    // A per-client list replaces the global allowlist for that key.
+    const perClientSecret = crypto.randomBytes(32).toString('hex')
+    const perClientServer = await startServer({
+      mode: 'server',
+      masterSecret: perClientSecret,
+      authMode: 'password',
+      targetHost: '127.0.0.1',
+      targetPort: echoPort,
+      socks: {
+        enabled: true,
+        allow: [`127.0.0.1:${echoPort}`],
+        perClient: {
+          [unauthorizedKey.publicKey]: ['127.0.0.1:1']
+        }
+      },
+      localPort: 8022,
+      clientKeyPath: path.join(tempDir, 'sockspc-server-key.json'),
+      allowedClientKeys: [],
+      verificationMode: 'hybrid',
+      trustedDevicesFile: path.join(tempDir, 'sockspc-devices'),
+      auditLog: { enabled: false },
+      customBootstrap: bootstrap,
+      authPin: { enabled: true, unattended: unattendedVerifier },
+      telegramAlert: { enabled: false, botToken: '', chatId: '' }
+    }, {
+      log: quiet,
+      showSessionPin: false,
+      sendStartupAlert: false,
+      failDelayMs: [10, 20],
+      lockoutStatePath: path.join(tempDir, 'sockspc-lockout.json'),
+      authTimeoutMs: 4_000,
+      interactive: false,
+      controlSocketPath: controlPathFor('sockspc'),
+      controlTokenPath: path.join(tempDir, 'control-sockspc.token')
+    })
+    extraServers.push(perClientServer)
+
+    const perClientBase = { ...clientBase, masterSecret: perClientSecret }
+    const restrictedClient = await startTestClient(
+      unauthorizedKeyPath,
+      unattendedPassword,
+      { base: perClientBase, socksPort: 0 }
+    )
+    const restrictedResult = await socksHandshake(
+      restrictedClient.address().port,
+      '127.0.0.1',
+      echoPort
+    )
+    assert.equal(restrictedResult.code, 2)
+    restrictedResult.socket.destroy()
+    await restrictedClient.close()
+
+    const unrestrictedClient = await startTestClient(
+      secondKeyPath,
+      unattendedPassword,
+      { base: perClientBase, socksPort: 0 }
+    )
+    const unrestrictedResult = await socksHandshake(
+      unrestrictedClient.address().port,
+      '127.0.0.1',
+      echoPort
+    )
+    assert.equal(unrestrictedResult.code, 0)
+    assert.deepEqual(
+      await readExactly(unrestrictedResult.socket, echoBanner.length, 15_000),
+      echoBanner
+    )
+    unrestrictedResult.socket.destroy()
+    await unrestrictedClient.close()
+    await perClientServer.close()
+    checks.push('SOCKS per-client allowlist overrides the global list')
 
     const noSocksSecret = crypto.randomBytes(32).toString('hex')
     const noSocksServer = await startServer({

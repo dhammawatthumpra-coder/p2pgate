@@ -14,6 +14,7 @@ const {
   readControlToken,
   sendControlCommand
 } = require('./control')
+const { fingerprint } = require('./master')
 
 const DEFAULT_LOCKOUT_STATE_PATH = path.join(
   os.homedir(),
@@ -227,6 +228,32 @@ async function runDoctor(options = {}) {
     }
   }
 
+  if (config) {
+    const secretFingerprint = fingerprint(config.masterSecret)
+    let configAgeDays = null
+
+    try {
+      const stat = await fsp.stat(configPath)
+      configAgeDays = Math.max(0, Math.floor((Date.now() - stat.mtimeMs) / 86_400_000))
+    } catch {
+      // Age is an optional hint only.
+    }
+
+    if (configAgeDays !== null && configAgeDays >= 180) {
+      report.write(
+        'warn',
+        `masterSecret อาจไม่ได้หมุนมา ${configAgeDays} วัน`,
+        `fingerprint: ${secretFingerprint}\nหมุนด้วย: p2pgate master reset --yes`
+      )
+    } else {
+      report.write(
+        'ok',
+        `masterSecret fingerprint: ${secretFingerprint}`,
+        configAgeDays === null ? undefined : `config แก้ล่าสุด ${configAgeDays} วันก่อน`
+      )
+    }
+  }
+
   if (!config) {
     if (json) {
       output.write(`${JSON.stringify({
@@ -312,6 +339,58 @@ async function runDoctor(options = {}) {
 
   if (allPermissionsOk) {
     report.write('ok', 'ไฟล์สำคัญมีสิทธิ์อยู่ในระดับที่ตรวจสอบได้')
+  }
+
+  // 4b. Targets and SOCKS policy (server only)
+  if (config.mode === 'server') {
+    const targetEntries = config.targets && typeof config.targets === 'object'
+      ? Object.entries(config.targets)
+      : []
+
+    if (targetEntries.length === 0) {
+      report.write('ok', 'ยังไม่ได้ตั้ง targets (ใช้ targetPort เดียว)')
+    } else {
+      for (const [name, target] of targetEntries) {
+        const probe = await probeTcp('127.0.0.1', target.port)
+
+        if (probe.ok) {
+          report.write('ok', `target ${name}: 127.0.0.1:${target.port} เปิดอยู่`)
+        } else {
+          report.write(
+            'warn',
+            `target ${name}: 127.0.0.1:${target.port} ไม่ตอบ`,
+            `code: ${probe.code || 'ERROR'}\nตรวจ service ปลายทางหรือ port ใน config`
+          )
+        }
+      }
+    }
+
+    if (!config.socks || config.socks.enabled !== true) {
+      report.write('ok', 'SOCKS5 ปิดอยู่')
+    } else {
+      const allow = Array.isArray(config.socks.allow) ? config.socks.allow : []
+      const perClient = config.socks.perClient && typeof config.socks.perClient === 'object'
+        ? Object.keys(config.socks.perClient).length
+        : 0
+      const broad = allow.some((entry) => {
+        const text = String(entry)
+        return text.startsWith('0.0.0.0/0:') || text.endsWith('/0:*')
+      })
+
+      if (broad) {
+        report.write(
+          'warn',
+          'SOCKS allowlist กว้างมาก (0.0.0.0/0)',
+          'เท่ากับเปิด proxy ไปทุกปลายทาง — ควรจำกัดให้แคบ'
+        )
+      } else {
+        report.write('ok', `SOCKS allowlist ${allow.length} รายการ`)
+      }
+
+      if (perClient > 0) {
+        report.write('ok', `SOCKS per-client ${perClient} รายการ`)
+      }
+    }
   }
 
   // 5. Device registry

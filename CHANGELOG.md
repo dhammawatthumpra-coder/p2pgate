@@ -7,6 +7,22 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.9.0] - 2026-11-16
+
+### Added
+
+- `p2pgate config validate [--json]` — ตรวจ config ก่อนรัน (exit code 1 เมื่อผิด)
+- `p2pgate config show [--json]` — แสดง config ที่ normalize แล้วโดยปิด secret
+- `socks.perClient` — allowlist แยกตาม client key (override global ไม่ใช่ union)
+- `doctor`: fingerprint/อายุของ masterSecret, ทดสอบว่า target เปิดอยู่จริง,
+  เตือน SOCKS allowlist กว้าง (`0.0.0.0/0`)
+- self-test: config redaction + per-client SOCKS override
+
+### Changed
+
+- prompt ขอ PIN/password: กด Enter ว่างจะถามซ้ำเงียบ ๆ (ไม่ขึ้น error)
+- README/README.th เพิ่มหัวข้อ config commands และ per-client SOCKS
+
 ## [1.8.4] - 2026-11-15
 
 ### Added

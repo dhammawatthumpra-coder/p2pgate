@@ -26,6 +26,7 @@ const {
 const { promptHidden } = require('./auth')
 const { createAuditLog } = require('./audit-log')
 const { rotateMasterSecret, fingerprint } = require('./master')
+const { redactConfig, summarizeConfig } = require('./config-tools')
 const {
   DEFAULT_CLIENT_CONFIG_PATH,
   createServerPasswordConfig,
@@ -93,6 +94,12 @@ const HELP_TEXT = `p2pgate v1.8 — อุโมงค์ TCP แบบ P2P ส�
 
   p2pgate master show [--reveal] [--json]
       แสดง fingerprint ของ masterSecret (--reveal = แสดงค่าเต็ม)
+
+  p2pgate config validate [--json] [--config <path>]
+      ตรวจว่า config โหลดได้ และสรุปค่าหลัก (ไม่แสดง secret)
+
+  p2pgate config show [--json] [--config <path>]
+      แสดง config ที่ normalize แล้ว โดยปิดค่า secret
 
   p2pgate master reset [--yes] [--dry-run] [--json]
       หมุน masterSecret: สำรอง config เดิม แล้วเขียนค่าใหม่
@@ -182,6 +189,9 @@ Usage:
   p2pgate master reset [--yes] [--dry-run] [--json]
       Rotate the masterSecret (backs up the old config, writes a new value)
       --no-backup skips the backup (incident response)
+  p2pgate config validate [--json]
+  p2pgate config show [--json]
+      Validate a config file, or print the normalised config with secrets masked
   p2pgate doctor [--json]
   p2pgate unlock --list|<key>|--all
 
@@ -1436,6 +1446,98 @@ async function commandRevoke(positionals) {
   }
 }
 
+async function commandConfig(values, positionals) {
+  const subcommand = positionals[1]
+  const configPath = resolveConfigPath(values.config)
+
+  if (subcommand !== 'validate' && subcommand !== 'show') {
+    process.stderr.write(t(
+      '❌ การใช้งาน: p2pgate config validate|show [--json]\n',
+      '❌ Usage: p2pgate config validate|show [--json]\n'
+    ))
+    process.exitCode = 1
+    return
+  }
+
+  let config
+
+  try {
+    config = await loadConfig(configPath)
+  } catch (err) {
+    if (values.json) {
+      process.stdout.write(`${JSON.stringify({
+        ok: false,
+        config: configPath,
+        error: err.code || 'CONFIG_INVALID',
+        message: err.message
+      }, null, 2)}\n`)
+    } else {
+      process.stderr.write(t(
+        `\n❌ config ใช้งานไม่ได้: ${err.message}\n`,
+        `\n❌ Config is not usable: ${err.message}\n`
+      ))
+      process.stderr.write(t(
+        `   ไฟล์: ${configPath}\n`,
+        `   File: ${configPath}\n`
+      ))
+    }
+
+    process.exitCode = 1
+    return
+  }
+
+  const summary = summarizeConfig(config)
+
+  if (subcommand === 'validate') {
+    if (values.json) {
+      process.stdout.write(`${JSON.stringify({
+        ok: true,
+        config: configPath,
+        ...summary
+      }, null, 2)}\n`)
+      return
+    }
+
+    process.stdout.write(t('\n✅ config ใช้งานได้\n', '\n✅ Config is valid\n'))
+    process.stdout.write(t(`   ไฟล์: ${configPath}\n`, `   File: ${configPath}\n`))
+    process.stdout.write(t(
+      `   โหมด: ${summary.mode} (authMode=${summary.authMode}, ${summary.verificationMode})\n`,
+      `   Mode: ${summary.mode} (authMode=${summary.authMode}, ${summary.verificationMode})\n`
+    ))
+    process.stdout.write(t(
+      `   masterSecret fingerprint: ${summary.masterSecretFingerprint}\n`,
+      `   masterSecret fingerprint: ${summary.masterSecretFingerprint}\n`
+    ))
+
+    if (summary.mode === 'server') {
+      process.stdout.write(t(
+        `   targets: ${summary.targets.length > 0 ? summary.targets.join(', ') : '-'} (default: ${summary.defaultTarget || '-'})\n`,
+        `   targets: ${summary.targets.length > 0 ? summary.targets.join(', ') : '-'} (default: ${summary.defaultTarget || '-'})\n`
+      ))
+      process.stdout.write(t(
+        `   socks: ${summary.socks.enabled ? `enabled (${summary.socks.allowEntries} allow, ${summary.socks.perClientKeys} per-client)` : 'disabled'}\n`,
+        `   socks: ${summary.socks.enabled ? `enabled (${summary.socks.allowEntries} allow, ${summary.socks.perClientKeys} per-client)` : 'disabled'}\n`
+      ))
+    }
+
+    process.stdout.write('\n')
+    return
+  }
+
+  if (values.json) {
+    process.stdout.write(`${JSON.stringify(redactConfig(config), null, 2)}\n`)
+    return
+  }
+
+  const redacted = redactConfig(config)
+  process.stdout.write(t(`\n=== config: ${configPath} ===\n`, `\n=== config: ${configPath} ===\n`))
+  process.stdout.write(`${JSON.stringify(redacted, null, 2)}\n`)
+  process.stdout.write(t(
+    '\n(ค่า secret ถูกแทนด้วย marker — ใช้ p2pgate master show --reveal ถ้าต้องการค่าเต็ม)\n',
+    '\n(secrets are replaced by markers — use p2pgate master show --reveal for the full value)\n'
+  ))
+}
+
 async function commandDoctor(values) {
   const configPath = resolveConfigPath(values.config)
   const result = await runDoctor({
@@ -1844,6 +1946,9 @@ async function main(argv) {
       return
     case 'master':
       await commandMaster(values, positionals)
+      return
+    case 'config':
+      await commandConfig(values, positionals)
       return
     case 'doctor':
       await commandDoctor(values)

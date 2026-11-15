@@ -392,7 +392,7 @@ function normalizeAuthMode(value, raw) {
  */
 function normalizeSocks(value) {
   if (value === undefined || value === null) {
-    return { enabled: false, allow: [] }
+    return { enabled: false, allow: [], perClient: null }
   }
 
   if (typeof value !== 'object' || Array.isArray(value)) {
@@ -425,7 +425,49 @@ function normalizeSocks(value) {
     throw new ConfigError('socks.enabled requires socks.allow entries', 'CONFIG_INVALID')
   }
 
-  return { enabled, allow }
+  let perClient = null
+
+  if (value.perClient !== undefined && value.perClient !== null) {
+    if (typeof value.perClient !== 'object' || Array.isArray(value.perClient)) {
+      throw new ConfigError(
+        'socks.perClient must be an object of clientKey -> allow entries',
+        'CONFIG_INVALID'
+      )
+    }
+
+    perClient = {}
+
+    for (const [key, entries] of Object.entries(value.perClient)) {
+      let normalizedKey
+      try {
+        normalizedKey = normalizeClientPublicKeyHex(key)
+      } catch (err) {
+        throw new ConfigError(`socks.perClient: ${err.message}`, 'CONFIG_INVALID')
+      }
+
+      if (!Array.isArray(entries) || entries.length === 0) {
+        throw new ConfigError(
+          'socks.perClient entries must be non-empty arrays',
+          'CONFIG_INVALID'
+        )
+      }
+
+      try {
+        perClient[normalizedKey] = entries.map((entry) => parseAllowEntry(entry).text)
+      } catch (err) {
+        throw new ConfigError(err.message, 'CONFIG_INVALID')
+      }
+    }
+
+    if (!enabled) {
+      throw new ConfigError(
+        'socks.perClient requires socks.enabled: true',
+        'CONFIG_INVALID'
+      )
+    }
+  }
+
+  return { enabled, allow, perClient }
 }
 
 function normalizeConfig(raw) {

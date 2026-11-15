@@ -357,6 +357,8 @@ async function startClient(config, options = {}) {
         promptOptions
       )
 
+      if (value === '') continue
+
       try {
         return classifyCredential(value)
       } catch {
