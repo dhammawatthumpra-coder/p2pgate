@@ -17,6 +17,10 @@
     "maxBytes": 5242880
   },
   "customBootstrap": [],
+  "socks": {
+    "enabled": false,
+    "allow": ["127.0.0.1:3000", "192.168.1.0/24:8080"]
+  },
   "authPin": {
     "enabled": true,
     "unattended": null

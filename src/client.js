@@ -18,6 +18,11 @@ const {
 } = require('./crypto-utils')
 const { loadClientKey, DEFAULT_CLIENT_KEY_PATH } = require('./keygen')
 const {
+  REPLY: SOCKS_REPLY,
+  readRequest: readSocksRequest,
+  writeReply: writeSocksReply
+} = require('./socks')
+const {
   AUTH_VERSION,
   AUTH_TIMEOUT_MS,
   MAX_CONTROL_BYTES,
@@ -181,6 +186,22 @@ async function startClient(config, options = {}) {
     err.code = 'CONFIG_INVALID'
     throw err
   }
+
+  const socksPortRaw = options.socksPort !== undefined
+    ? options.socksPort
+    : config.socks5Port
+
+  const socksMode = socksPortRaw !== undefined && socksPortRaw !== null
+
+  if (socksMode && requestedTarget !== null) {
+    const err = new Error('SOCKS5 mode and a target cannot be combined')
+    err.code = 'CONFIG_INVALID'
+    throw err
+  }
+
+  const socksPort = socksMode
+    ? validateLocalPort(Number(socksPortRaw))
+    : null
 
   const log = typeof options.log === 'function'
     ? options.log
@@ -508,6 +529,20 @@ async function startClient(config, options = {}) {
   function throwResultError(result) {
     const error = typeof result.error === 'string' ? result.error : 'AUTH_FAILED'
 
+    if (error === 'SOCKS_DENIED') {
+      throw new AuthError(
+        'ปลายทางนี้ไม่อยู่ใน allowlist ของเซิร์ฟเวอร์',
+        'SOCKS_DENIED'
+      )
+    }
+
+    if (error === 'SOCKS_DISABLED') {
+      throw new AuthError(
+        'เซิร์ฟเวอร์นี้ไม่ได้เปิด SOCKS (ตั้ง socks.enabled)',
+        'SOCKS_DISABLED'
+      )
+    }
+
     if (error === 'TARGET_UNKNOWN') {
       throw new AuthError(
         'เซิร์ฟเวอร์ไม่มี target ชื่อนี้ (ตรวจ `targets` ใน config ฝั่ง Server)',
@@ -563,7 +598,7 @@ async function startClient(config, options = {}) {
     return new AuthError(message, 'AUTH_PROTOCOL')
   }
 
-  async function authenticateEncrypted(encrypted) {
+  async function authenticateEncrypted(encrypted, authOptions = {}) {
     let statusRead
 
     try {
@@ -695,6 +730,13 @@ async function startClient(config, options = {}) {
         proofMessage.target = requestedTarget
       }
 
+      if (authOptions.socks) {
+        proofMessage.socks = {
+          host: authOptions.socks.host,
+          port: authOptions.socks.port
+        }
+      }
+
       encrypted.write(encodeControl(proofMessage))
     } catch {
       throw new AuthError('ไม่สามารถส่งข้อมูลยืนยันตัวตนได้', 'AUTH_PROTOCOL')
@@ -767,7 +809,7 @@ async function startClient(config, options = {}) {
     }
   }
 
-  async function handleLocalSocket(socket) {
+  async function handleLocalSocket(socket, socksRequest = null) {
     if (closed) {
       socket.destroy()
       return
@@ -829,12 +871,19 @@ async function startClient(config, options = {}) {
         entry.stream = encrypted
         pendingStream = null
 
-        const authResult = await authenticateEncrypted(encrypted)
+        const authResult = await authenticateEncrypted(
+          encrypted,
+          socksRequest ? { socks: socksRequest } : {}
+        )
 
         writeLog(
           `TUNNEL established slot=${slot} serverKey=${publicKey.toString('hex')}` +
             `${authResult.target ? ` target=${authResult.target.name}` : ''}`
         )
+
+        if (socksRequest) {
+          writeSocksReply(socket, SOCKS_REPLY.SUCCEEDED)
+        }
 
         pump(encrypted, socket, entry, (finishedEntry) => {
           activeConnections.delete(finishedEntry)
@@ -869,8 +918,48 @@ async function startClient(config, options = {}) {
       writeLog(`tunnel failed after trying slots ${slots.join(', ')}: ${lastError.message}`)
     }
 
+    if (socksRequest) {
+      writeSocksReply(socket, socksReplyFor(lastError))
+    }
+
     activeConnections.delete(entry)
     if (!socket.destroyed) socket.destroy()
+  }
+
+  function socksReplyFor(err) {
+    const code = err && err.code
+
+    if (code === 'SOCKS_DENIED' || code === 'SOCKS_DISABLED' || code === 'TARGET_FORBIDDEN') {
+      return SOCKS_REPLY.NOT_ALLOWED
+    }
+
+    if (code === 'TARGET_UNKNOWN') return SOCKS_REPLY.HOST_UNREACHABLE
+
+    return SOCKS_REPLY.GENERAL_FAILURE
+  }
+
+  async function handleSocksSocket(socket) {
+    if (closed) {
+      socket.destroy()
+      return
+    }
+
+    socket.setNoDelay(true)
+
+    let request
+    try {
+      request = await readSocksRequest(socket)
+    } catch (err) {
+      writeLog(`SOCKS handshake failed: ${err.message}`)
+      writeSocksReply(
+        socket,
+        err && err.replyCode !== undefined ? err.replyCode : SOCKS_REPLY.GENERAL_FAILURE
+      )
+      socket.destroy()
+      return
+    }
+
+    await handleLocalSocket(socket, request)
   }
 
   const dhtOptions = { keyPair }
@@ -891,8 +980,10 @@ async function startClient(config, options = {}) {
   let closed = false
   let listening = false
 
+  const connectionHandler = socksMode ? handleSocksSocket : handleLocalSocket
+
   const server = net.createServer((socket) => {
-    handleLocalSocket(socket).catch((err) => {
+    connectionHandler(socket).catch((err) => {
       writeLog(`unexpected local connection failure: ${err.message}`)
       socket.destroy()
     })
@@ -906,7 +997,7 @@ async function startClient(config, options = {}) {
     await new Promise((resolve, reject) => {
       const onError = (err) => reject(err)
       server.once('error', onError)
-      server.listen({ host: '127.0.0.1', port: localPort }, () => {
+      server.listen({ host: '127.0.0.1', port: socksMode ? socksPort : localPort }, () => {
         server.removeListener('error', onError)
         resolve()
       })
@@ -923,7 +1014,9 @@ async function startClient(config, options = {}) {
 
   const address = server.address()
   writeLog(
-    `LISTENING on 127.0.0.1:${address.port} (connect with: ssh -p ${address.port} localhost)`
+    socksMode
+      ? `SOCKS5 listening on 127.0.0.1:${address.port}`
+      : `LISTENING on 127.0.0.1:${address.port} (connect with: ssh -p ${address.port} localhost)`
   )
 
   async function close() {
@@ -967,6 +1060,12 @@ async function startClient(config, options = {}) {
     server,
     address() {
       return server.address()
+    },
+    get mode() {
+      return socksMode ? 'socks' : 'tcp'
+    },
+    get target() {
+      return requestedTarget
     },
     get activeConnections() {
       return activeConnections.size

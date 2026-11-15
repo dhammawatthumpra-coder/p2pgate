@@ -480,6 +480,20 @@ async function commandKeygen(values) {
   }
 }
 
+function parseSocksFlag(value) {
+  if (value === undefined) return undefined
+
+  const port = Number(value)
+
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    const err = new Error('--socks5 ต้องเป็นตัวเลขระหว่าง 1 ถึง 65535')
+    err.code = 'PORT_INVALID'
+    throw err
+  }
+
+  return port
+}
+
 async function waitForShutdownSignal() {
   return new Promise((resolve) => {
     const signals = ['SIGINT', 'SIGTERM']
@@ -648,6 +662,9 @@ async function commandClient(values) {
     config.localPort = port
   }
 
+  const socksPort = parseSocksFlag(values.socks5)
+  if (socksPort !== undefined) delete config.target
+
   process.stdout.write('\n=== p2pgate client ===\n')
   process.stdout.write(`ไฟล์ตั้งค่า: ${configPath}\n`)
 
@@ -683,14 +700,34 @@ async function commandClient(values) {
   const client = await startClient(config, {
     pinStdin: values['pin-stdin'] === true,
     keyPassphrase,
-    target: values.target === undefined ? undefined : String(values.target)
+    target: values.target === undefined ? undefined : String(values.target),
+    socksPort: parseSocksFlag(values.socks5)
   })
   const address = client.address()
 
-  process.stdout.write('\n✅ อุโมงค์พร้อมใช้งานแล้ว\n')
-  process.stdout.write(`   เปิดพอร์ตเฉพาะ: 127.0.0.1:${address.port}\n`)
-  process.stdout.write(`   วิธีเชื่อมต่อ: ssh -p ${address.port} localhost\n\n`)
-  process.stdout.write('กด Ctrl+C เพื่อหยุดอย่างปลอดภัย\n')
+  if (client.mode === 'socks') {
+    process.stdout.write(t('\n✅ SOCKS5 พร้อมใช้งานแล้ว\n', '\n✅ SOCKS5 is ready\n'))
+    process.stdout.write(t(
+      `   SOCKS5: 127.0.0.1:${address.port}\n`,
+      `   SOCKS5: 127.0.0.1:${address.port}\n`
+    ))
+    process.stdout.write(t(
+      `   ตั้งค่า browser/app ให้ใช้ SOCKS5 127.0.0.1:${address.port}\n\n`,
+      `   Point your browser/app at SOCKS5 127.0.0.1:${address.port}\n\n`
+    ))
+  } else {
+    process.stdout.write(t('\n✅ อุโมงค์พร้อมใช้งานแล้ว\n', '\n✅ Tunnel is ready\n'))
+    process.stdout.write(t(
+      `   เปิดพอร์ตเฉพาะ: 127.0.0.1:${address.port}\n`,
+      `   Local listener: 127.0.0.1:${address.port}\n`
+    ))
+    process.stdout.write(t(
+      `   วิธีเชื่อมต่อ: ssh -p ${address.port} localhost\n\n`,
+      `   Connect with: ssh -p ${address.port} localhost\n\n`
+    ))
+  }
+
+  process.stdout.write(t('กด Ctrl+C เพื่อหยุดอย่างปลอดภัย\n', 'Press Ctrl+C to stop safely\n'))
 
   const signal = await waitForShutdownSignal()
   process.stdout.write(`\nได้รับสัญญาณ ${signal} กำลังปิดอุโมงค์...\n`)
@@ -848,9 +885,12 @@ async function commandConnect(values) {
 
   if (values.port !== undefined) config.localPort = localPort
 
-  const requestedTarget = values.target === undefined
-    ? (existing && typeof existing.target === 'string' ? existing.target : null)
-    : String(values.target).trim()
+  const socksPort = parseSocksFlag(values.socks5)
+  const requestedTarget = socksPort !== undefined
+    ? null
+    : (values.target === undefined
+        ? (existing && typeof existing.target === 'string' ? existing.target : null)
+        : String(values.target).trim())
 
   if (requestedTarget !== null) {
     if (!/^[A-Za-z0-9_-]{1,32}$/.test(requestedTarget)) {
@@ -859,6 +899,14 @@ async function commandConnect(values) {
       throw err
     }
     config.target = requestedTarget
+  } else if (socksPort !== undefined) {
+    delete config.target
+  }
+
+  if (socksPort !== undefined) {
+    config.socks5Port = socksPort
+  } else if (existing && Number.isInteger(existing.socks5Port)) {
+    config.socks5Port = existing.socks5Port
   }
 
   await saveConfig(configPath, config)
@@ -873,19 +921,33 @@ async function commandConnect(values) {
   ))
 
   const client = await startClient(config, {
-    credential: password
+    credential: password,
+    socksPort
   })
   const address = client.address()
 
-  process.stdout.write(t('\n✅ อุโมงค์พร้อมใช้งานแล้ว\n', '\n✅ Tunnel is ready\n'))
-  process.stdout.write(t(
-    `   เปิดพอร์ตเฉพาะ: 127.0.0.1:${address.port}\n`,
-    `   Local listener: 127.0.0.1:${address.port}\n`
-  ))
-  process.stdout.write(t(
-    `   วิธีเชื่อมต่อ: ssh -p ${address.port} localhost\n\n`,
-    `   Connect with: ssh -p ${address.port} localhost\n\n`
-  ))
+  if (client.mode === 'socks') {
+    process.stdout.write(t('\n✅ SOCKS5 พร้อมใช้งานแล้ว\n', '\n✅ SOCKS5 is ready\n'))
+    process.stdout.write(t(
+      `   SOCKS5: 127.0.0.1:${address.port}\n`,
+      `   SOCKS5: 127.0.0.1:${address.port}\n`
+    ))
+    process.stdout.write(t(
+      `   ตั้งค่า browser/app ให้ใช้ SOCKS5 127.0.0.1:${address.port}\n\n`,
+      `   Point your browser/app at SOCKS5 127.0.0.1:${address.port}\n\n`
+    ))
+  } else {
+    process.stdout.write(t('\n✅ อุโมงค์พร้อมใช้งานแล้ว\n', '\n✅ Tunnel is ready\n'))
+    process.stdout.write(t(
+      `   เปิดพอร์ตเฉพาะ: 127.0.0.1:${address.port}\n`,
+      `   Local listener: 127.0.0.1:${address.port}\n`
+    ))
+    process.stdout.write(t(
+      `   วิธีเชื่อมต่อ: ssh -p ${address.port} localhost\n\n`,
+      `   Connect with: ssh -p ${address.port} localhost\n\n`
+    ))
+  }
+
   process.stdout.write(t('กด Ctrl+C เพื่อหยุดอย่างปลอดภัย\n', 'Press Ctrl+C to stop safely\n'))
 
   const signal = await waitForShutdownSignal()
@@ -1505,6 +1567,7 @@ async function main(argv) {
         port: { type: 'string' },
         'target-port': { type: 'string' },
         target: { type: 'string' },
+        socks5: { type: 'string' },
         secret: { type: 'string', short: 's' },
         password: { type: 'string', short: 'p' },
         'secret-stdin': { type: 'boolean' },

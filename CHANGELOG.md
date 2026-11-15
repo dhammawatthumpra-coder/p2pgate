@@ -7,6 +7,28 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.8.0] - 2026-11-15
+
+### Added
+
+- SOCKS5 gateway ฝั่ง client: `p2pgate connect --socks5 <port>`
+- `socks` config ฝั่ง Server พร้อม allowlist แบบ IPv4/CIDR + port
+- Server resolve hostname เองและตรวจ **ทุก IP** ที่ resolve ได้กับ allowlist
+- Client เก็บ `socks5Port` ไว้ใช้รอบถัดไป
+- log `SOCKS ALLOW` / `SOCKS DENIED` และ `target=socks` ใน `AUTH OK`/`FORWARD`
+
+### Security
+
+- SOCKS ปิดโดยค่าเริ่มต้น และต้องมี allow อย่างน้อย 1 รายการ
+- ปฏิเสธ `UDP ASSOCIATE`, `BIND`, และปลายทาง IPv6 (v1.8)
+- ส่ง SOCKS success หลัง auth สำเร็จเท่านั้น → ปลายทางที่ถูกปฏิเสธไม่ดูเป็น open proxy
+- ใช้ `--socks5` ร่วมกับ `--target` ไม่ได้
+
+### Changed
+
+- README/README.th เปลี่ยนหัวเป็น v1.8 พร้อมส่วน SOCKS5
+- เพิ่ม `src/socks.js`, `src/allowlist.js` ใน `npm run check`
+
 ## [1.7.0] - 2026-11-15
 
 ### Added

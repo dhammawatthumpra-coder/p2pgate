@@ -33,6 +33,7 @@ const {
   evaluateDevicePolicy,
   normalizeVerificationMode
 } = require('./device-registry')
+const { parseAllowEntry, resolveAllowedHost } = require('./allowlist')
 const {
   defaultControlSocketPath,
   defaultControlTokenPath,
@@ -265,6 +266,66 @@ async function startServer(config, options = {}) {
   })()
 
   const effectiveTargetPort = targetDefs.get(defaultTargetName).port
+
+  const socksConfig = config.socks && typeof config.socks === 'object' ? config.socks : {}
+  const socksEnabled = socksConfig.enabled === true
+  const socksEntries = (Array.isArray(socksConfig.allow) ? socksConfig.allow : []).map((entry) => {
+    try {
+      return parseAllowEntry(entry)
+    } catch (err) {
+      const wrapped = new Error(err.message)
+      wrapped.code = 'CONFIG_INVALID'
+      throw wrapped
+    }
+  })
+
+  if (socksEnabled && socksEntries.length === 0) {
+    const err = new Error('socks.enabled requires at least one socks.allow entry')
+    err.code = 'CONFIG_INVALID'
+    throw err
+  }
+
+  /**
+   * Resolves a SOCKS5 CONNECT request (host:port) against the server-side
+   * IP/CIDR allowlist. Hostnames are resolved on the server and every resolved
+   * address must match the allowlist, so a hostile DNS answer cannot reach an
+   * unlisted destination.
+   */
+  async function resolveSocksTarget(request, remoteHex) {
+    if (!socksEnabled) {
+      const err = new Error('SOCKS is disabled on this server')
+      err.code = 'SOCKS_DISABLED'
+      throw err
+    }
+
+    if (!request || typeof request !== 'object' || Array.isArray(request)) {
+      const err = new Error('invalid SOCKS request')
+      err.code = 'SOCKS_DENIED'
+      throw err
+    }
+
+    const host = typeof request.host === 'string' ? request.host.trim() : ''
+    const port = Number(request.port)
+
+    if (host === '' || host.length > 253 ||
+      !Number.isInteger(port) || port < 1 || port > 65535) {
+      const err = new Error('invalid SOCKS destination')
+      err.code = 'SOCKS_DENIED'
+      throw err
+    }
+
+    const allowedIp = await resolveAllowedHost(host, port, socksEntries)
+
+    if (!allowedIp) {
+      writeLog(`SOCKS DENIED client=${remoteHex} destination=${host}:${port}`)
+      const err = new Error(`destination not allowed: ${host}:${port}`)
+      err.code = 'SOCKS_DENIED'
+      throw err
+    }
+
+    writeLog(`SOCKS ALLOW client=${remoteHex} ${host}:${port} -> ${allowedIp}`)
+    return { name: 'socks', host: allowedIp, port }
+  }
 
   /**
    * Resolves a client-supplied target name against the server-side allowlist.
@@ -895,7 +956,11 @@ async function startServer(config, options = {}) {
 
       let selectedTarget
       try {
-        selectedTarget = resolveTarget(response && response.target, remoteHex)
+        if (response && response.socks !== undefined) {
+          selectedTarget = await resolveSocksTarget(response.socks, remoteHex)
+        } else {
+          selectedTarget = resolveTarget(response && response.target, remoteHex)
+        }
       } catch (err) {
         writeLog(`AUTH REJECTED client=${remoteHex} reason=${err.code}`)
         void audit.record('auth.declined', {

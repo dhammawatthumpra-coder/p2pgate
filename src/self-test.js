@@ -719,7 +719,8 @@ async function main() {
           output: options.output,
           keyPassphrase: options.keyPassphrase,
           credential,
-          target: options.target
+          target: options.target,
+          socksPort: options.socksPort
         }
       )
       clients.push(client)
@@ -1529,6 +1530,149 @@ async function main() {
     await defaultTargetClient.close()
     await targetServer.close()
     await new Promise((resolve) => webEchoServer.close(resolve))
+
+    // ---------------------------------------------------------------------
+    // 10d-5. SOCKS5 gateway with an IP/CIDR allowlist
+    // ---------------------------------------------------------------------
+    const socksHandshake = async (socksPort, host, destPort) => {
+      const socket = await connectLocal(socksPort)
+      socket.write(Buffer.from([5, 1, 0]))
+      const greeting = await readExactly(socket, 2, 5_000)
+      assert.deepEqual([...greeting], [5, 0])
+
+      const hostBuf = Buffer.from(host)
+      const portBuf = Buffer.alloc(2)
+      portBuf.writeUInt16BE(destPort)
+      socket.write(Buffer.concat([
+        Buffer.from([5, 1, 0, 3, hostBuf.length]),
+        hostBuf,
+        portBuf
+      ]))
+
+      const reply = await readExactly(socket, 10, 5_000)
+      return { socket, code: reply[1] }
+    }
+
+    const socksSecret = crypto.randomBytes(32).toString('hex')
+    const socksServer = await startServer({
+      mode: 'server',
+      masterSecret: socksSecret,
+      authMode: 'password',
+      targetHost: '127.0.0.1',
+      targetPort: echoPort,
+      socks: {
+        enabled: true,
+        allow: [`127.0.0.1:${echoPort}`, `127.0.0.1:${webPort}`]
+      },
+      localPort: 8022,
+      clientKeyPath: path.join(tempDir, 'socks-server-key.json'),
+      allowedClientKeys: [],
+      verificationMode: 'hybrid',
+      trustedDevicesFile: path.join(tempDir, 'socks-devices'),
+      auditLog: { enabled: false },
+      customBootstrap: bootstrap,
+      authPin: { enabled: true, unattended: unattendedVerifier },
+      telegramAlert: { enabled: false, botToken: '', chatId: '' }
+    }, {
+      log: quiet,
+      showSessionPin: false,
+      sendStartupAlert: false,
+      failDelayMs: [10, 20],
+      lockoutStatePath: path.join(tempDir, 'socks-lockout.json'),
+      authTimeoutMs: 4_000,
+      interactive: false,
+      controlSocketPath: controlPathFor('socks'),
+      controlTokenPath: path.join(tempDir, 'control-socks.token')
+    })
+    extraServers.push(socksServer)
+
+    const socksBase = { ...clientBase, masterSecret: socksSecret }
+    const socksClient = await startTestClient(
+      unauthorizedKeyPath,
+      unattendedPassword,
+      { base: socksBase, socksPort: 0 }
+    )
+    assert.equal(socksClient.mode, 'socks')
+
+    const socksOk = await socksHandshake(socksClient.address().port, '127.0.0.1', echoPort)
+    assert.equal(socksOk.code, 0)
+    assert.deepEqual(
+      await readExactly(socksOk.socket, echoBanner.length, 15_000),
+      echoBanner
+    )
+    const socksPayload = crypto.randomBytes(48)
+    socksOk.socket.write(socksPayload)
+    assert.deepEqual(
+      await readExactly(socksOk.socket, socksPayload.length, 15_000),
+      socksPayload
+    )
+    socksOk.socket.destroy()
+    checks.push('SOCKS5 CONNECT reaches an allowlisted destination')
+
+    const socksDomain = await socksHandshake(
+      socksClient.address().port,
+      'localhost',
+      echoPort
+    )
+    assert.equal(socksDomain.code, 0)
+    assert.deepEqual(
+      await readExactly(socksDomain.socket, echoBanner.length, 15_000),
+      echoBanner
+    )
+    socksDomain.socket.destroy()
+    checks.push('SOCKS5 resolves a hostname and checks the resolved IP')
+
+    const socksDenied = await socksHandshake(socksClient.address().port, '127.0.0.1', 1)
+    assert.equal(socksDenied.code, 2)
+    socksDenied.socket.destroy()
+    checks.push('SOCKS5 denies a destination outside the allowlist')
+    await socksClient.close()
+    await socksServer.close()
+
+    const noSocksSecret = crypto.randomBytes(32).toString('hex')
+    const noSocksServer = await startServer({
+      mode: 'server',
+      masterSecret: noSocksSecret,
+      authMode: 'password',
+      targetHost: '127.0.0.1',
+      targetPort: echoPort,
+      localPort: 8022,
+      clientKeyPath: path.join(tempDir, 'nosocks-server-key.json'),
+      allowedClientKeys: [],
+      verificationMode: 'hybrid',
+      trustedDevicesFile: path.join(tempDir, 'nosocks-devices'),
+      auditLog: { enabled: false },
+      customBootstrap: bootstrap,
+      authPin: { enabled: true, unattended: unattendedVerifier },
+      telegramAlert: { enabled: false, botToken: '', chatId: '' }
+    }, {
+      log: quiet,
+      showSessionPin: false,
+      sendStartupAlert: false,
+      failDelayMs: [10, 20],
+      lockoutStatePath: path.join(tempDir, 'nosocks-lockout.json'),
+      authTimeoutMs: 4_000,
+      interactive: false,
+      controlSocketPath: controlPathFor('nosocks'),
+      controlTokenPath: path.join(tempDir, 'control-nosocks.token')
+    })
+    extraServers.push(noSocksServer)
+
+    const noSocksClient = await startTestClient(
+      unauthorizedKeyPath,
+      unattendedPassword,
+      { base: { ...clientBase, masterSecret: noSocksSecret }, socksPort: 0 }
+    )
+    const noSocksResult = await socksHandshake(
+      noSocksClient.address().port,
+      '127.0.0.1',
+      echoPort
+    )
+    assert.equal(noSocksResult.code, 2)
+    noSocksResult.socket.destroy()
+    checks.push('SOCKS5 is refused when the server has it disabled')
+    await noSocksClient.close()
+    await noSocksServer.close()
 
     // ---------------------------------------------------------------------
     // 10e. Doctor and trusted-device expiry enforcement

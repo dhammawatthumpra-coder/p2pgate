@@ -1,4 +1,4 @@
-# p2pgate (v1.6)
+# p2pgate (v1.8)
 
 **English** | [ไทย](README.th.md)
 
@@ -6,16 +6,18 @@
 [![license](https://img.shields.io/npm/l/p2pgate.svg)](LICENSE)
 [![Node.js](https://img.shields.io/node/v/p2pgate.svg)](package.json)
 
-A small peer-to-peer TCP tunnel for reaching SSH on a device behind CGNAT or a
-firewall without exposing an inbound port. It combines **mutual SCRAM**,
-**verification policy modes**, a **dual-source device registry**, and a
-**local control plane**.
+A small peer-to-peer TCP tunnel for reaching SSH and other loopback services on
+a device behind CGNAT or a firewall without exposing an inbound port. It
+combines **mutual SCRAM**, **verification policy modes**, a **dual-source device
+registry**, a **local control plane**, **multi-target routing**, and an optional
+**SOCKS5 gateway**.
 
 Works on Termux/Android, Linux, macOS, and Windows with Node.js 20 or newer.
 
-> Version 1.6 adds **zero-setup server startup**, a **connection-password auth
-> mode**, `p2pgate connect` (including a one-line `-s`/`-p` form), and
-> `P2PGATE_LANG=en|th` localization for the setup/quickstart flow.
+> Version 1.8 adds a **SOCKS5 gateway** with a server-side IP/CIDR allowlist.
+> Version 1.7 added **multi-target routing** (`targets` + `--target`), and 1.6
+> added **zero-setup startup**, a **connection-password mode**, and
+> `p2pgate connect`.
 >
 > **Install:** `npm install -g p2pgate`
 >
@@ -614,6 +616,47 @@ Rules:
 
 ---
 
+## 9.3) SOCKS5 gateway (optional)
+
+Server config:
+
+```json
+"socks": {
+  "enabled": true,
+  "allow": ["192.168.1.0/24:8080", "127.0.0.1:3000", "10.0.0.0/8:*"]
+}
+```
+
+Client:
+
+```sh
+p2pgate connect -s <secret> -p <password> --socks5 1080
+```
+
+Then point a browser or app at `SOCKS5 127.0.0.1:1080`.
+
+Rules:
+
+- off by default; `socks.enabled` requires at least one allow entry
+- entries are IPv4/CIDR plus port (`*` = any port)
+- the client sends the destination; the server resolves it and checks **every**
+  resolved IP against the allowlist, so a hostile DNS answer cannot escape it
+- only TCP `CONNECT`; `UDP ASSOCIATE` and `BIND` are rejected
+- IPv6 destinations are rejected in v1.8
+- denied destinations return a SOCKS "not allowed" reply and log `SOCKS DENIED`
+- `--socks5` cannot be combined with `--target`
+
+Example for a home LAN:
+
+```json
+"socks": { "enabled": true, "allow": ["192.168.1.0/24:*"] }
+```
+
+> This turns the Server into a gateway for the destinations you list. Keep the
+> allowlist tight — `0.0.0.0/0` would proxy the whole internet.
+
+---
+
 ## 10) Requirements
 
 - Android phone + Termux + Termux:Boot (F-Droid), optional
@@ -901,6 +944,7 @@ Messages never contain the PIN or password.
 | `p2pgate connect` | Connect from a Client with masterSecret + password |
 | `p2pgate connect -s <secret> -p <password>` | One-line client connect |
 | `p2pgate connect --target <name>` | Connect to a named target declared on the Server |
+| `p2pgate connect --socks5 <port>` | Start a local SOCKS5 gateway (server allowlist) |
 | `p2pgate keygen` | Create/show the Client key |
 | `p2pgate keygen --passphrase` | Protect an existing/new key with a passphrase |
 | `p2pgate keygen --unprotect` | Remove passphrase protection (prompts) |

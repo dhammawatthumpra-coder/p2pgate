@@ -1,4 +1,4 @@
-# p2pgate (v1.6)
+# p2pgate (v1.8)
 
 [English](README.md) | **ไทย**
 
@@ -6,14 +6,16 @@
 [![license](https://img.shields.io/npm/l/p2pgate.svg)](LICENSE)
 [![Node.js](https://img.shields.io/node/v/p2pgate.svg)](package.json)
 
-อุโมงค์ TCP แบบ P2P ขนาดเล็ก สำหรับเข้าถึง SSH บนเครื่องที่อยู่หลัง CGNAT/ไฟร์วอลล์
-โดยไม่ต้องเปิดพอร์ตออกสู่อินเทอร์เน็ต พร้อม **Mutual SCRAM**, **Verification Policy Modes**,
-**Dual-Source Device Registry**, **Local Control Plane** และ **Zero-setup mode**
+อุโมงค์ TCP แบบ P2P ขนาดเล็ก สำหรับเข้าถึง SSH และ service อื่น ๆ บนเครื่องที่อยู่หลัง
+CGNAT/ไฟร์วอลล์ โดยไม่ต้องเปิดพอร์ตออกสู่อินเทอร์เน็ต พร้อม **Mutual SCRAM**,
+**Verification Policy Modes**, **Dual-Source Device Registry**, **Local Control Plane**,
+**Multi-target routing** และ **SOCKS5 gateway** (ไม่บังคับ)
 
 ใช้ได้กับ Termux/Android, Linux, macOS และ Windows ที่มี Node.js 20 ขึ้นไป
 
-> เวอร์ชัน 1.6 เพิ่ม **zero-setup server**, **connection-password auth**,
-> `p2pgate connect` (รวมแบบบรรทัดเดียว `-s`/`-p`) และ `P2PGATE_LANG=en|th`
+> เวอร์ชัน 1.8 เพิ่ม **SOCKS5 gateway** พร้อม allowlist แบบ IP/CIDR ฝั่ง Server
+> เวอร์ชัน 1.7 เพิ่ม **multi-target routing** (`targets` + `--target`)
+> เวอร์ชัน 1.6 เพิ่ม **zero-setup**, **connection-password mode** และ `p2pgate connect`
 >
 > **ติดตั้ง:** `npm install -g p2pgate`
 >
@@ -598,6 +600,47 @@ p2pgate connect -s <secret> -p <password> --target web --port 8080
 
 ---
 
+## 9.3) SOCKS5 gateway (ไม่บังคับ)
+
+config ฝั่ง Server:
+
+```json
+"socks": {
+  "enabled": true,
+  "allow": ["192.168.1.0/24:8080", "127.0.0.1:3000", "10.0.0.0/8:*"]
+}
+```
+
+ฝั่ง Client:
+
+```sh
+p2pgate connect -s <secret> -p <password> --socks5 1080
+```
+
+แล้วตั้ง browser/app ให้ใช้ `SOCKS5 127.0.0.1:1080`
+
+กติกา:
+
+- ปิดไว้โดยค่าเริ่มต้น; `socks.enabled` ต้องมี allow อย่างน้อย 1 รายการ
+- entry เป็น IPv4/CIDR + port (`*` = ทุกพอร์ต)
+- client ส่งปลายทางมา, server resolve เอง แล้วตรวจ **ทุก IP ที่ resolve ได้**
+  กับ allowlist → DNS rebinding หลุดไม่ได้
+- รองรับเฉพาะ TCP `CONNECT`; `UDP ASSOCIATE` และ `BIND` ถูกปฏิเสธ
+- ปลายทาง IPv6 ถูกปฏิเสธใน v1.8
+- ปลายทางที่ไม่อยู่ใน allowlist จะได้ reply "not allowed" และ log `SOCKS DENIED`
+- ใช้ `--socks5` ร่วมกับ `--target` ไม่ได้
+
+ตัวอย่างสำหรับ LAN ในบ้าน:
+
+```json
+"socks": { "enabled": true, "allow": ["192.168.1.0/24:*"] }
+```
+
+> การเปิด SOCKS ทำให้ Server เป็น gateway ไปยังปลายทางที่คุณระบุ
+> ควรจำกัด allowlist ให้แคบ — `0.0.0.0/0` เท่ากับ proxy ทั้งอินเทอร์เน็ต
+
+---
+
 ## 10) สิ่งที่ต้องมี
 
 - มือถือ Android + Termux + Termux:Boot (F-Droid)
@@ -880,6 +923,7 @@ tail -f ~/.p2pgate/server.log
 | `p2pgate connect` | เชื่อมต่อด้วย masterSecret + password |
 | `p2pgate connect -s <secret> -p <password>` | เชื่อมต่อแบบบรรทัดเดียว |
 | `p2pgate connect --target <name>` | เชื่อมต่อ target ที่ประกาศไว้บน Server |
+| `p2pgate connect --socks5 <port>` | เปิด SOCKS5 gateway ในเครื่อง (allowlist อยู่ที่ Server) |
 | `p2pgate keygen` | สร้าง/แสดงกุญแจ Client |
 | `p2pgate keygen --passphrase` | ตั้ง/เปลี่ยน passphrase สำหรับ client key |
 | `p2pgate keygen --unprotect` | ถอด passphrase (ต้องยืนยันของเดิม) |

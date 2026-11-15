@@ -17,6 +17,7 @@ const {
   DEFAULT_AUDIT_LOG_PATH,
   DEFAULT_AUDIT_MAX_BYTES
 } = require('./audit-log')
+const { parseAllowEntry } = require('./allowlist')
 
 const DEFAULT_CONFIG_DIR = path.join(os.homedir(), '.p2pgate')
 const DEFAULT_CONFIG_PATH = path.join(DEFAULT_CONFIG_DIR, 'config.json')
@@ -168,6 +169,11 @@ function defaultConfig() {
       maxBytes: DEFAULT_AUDIT_MAX_BYTES
     },
     customBootstrap: [],
+    socks: {
+      enabled: false,
+      allow: []
+    },
+    socks5Port: null,
     authPin: {
       enabled: true,
       unattended: null
@@ -384,6 +390,44 @@ function normalizeAuthMode(value, raw) {
 /**
  * Merges a raw configuration object with defaults and validates every field.
  */
+function normalizeSocks(value) {
+  if (value === undefined || value === null) {
+    return { enabled: false, allow: [] }
+  }
+
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new ConfigError('socks must be an object', 'CONFIG_INVALID')
+  }
+
+  if (value.enabled !== undefined && typeof value.enabled !== 'boolean') {
+    throw new ConfigError('socks.enabled must be true or false', 'CONFIG_INVALID')
+  }
+
+  const enabled = value.enabled === true
+  let allow = []
+
+  if (value.allow !== undefined) {
+    if (!Array.isArray(value.allow) || value.allow.length === 0) {
+      throw new ConfigError(
+        'socks.allow must be a non-empty array of "ip:port" or "cidr:port" entries',
+        'CONFIG_INVALID'
+      )
+    }
+
+    try {
+      allow = value.allow.map((entry) => parseAllowEntry(entry).text)
+    } catch (err) {
+      throw new ConfigError(err.message, 'CONFIG_INVALID')
+    }
+  }
+
+  if (enabled && allow.length === 0) {
+    throw new ConfigError('socks.enabled requires socks.allow entries', 'CONFIG_INVALID')
+  }
+
+  return { enabled, allow }
+}
+
 function normalizeConfig(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new ConfigError('configuration must be a JSON object', 'CONFIG_INVALID')
@@ -456,6 +500,10 @@ function normalizeConfig(raw) {
     }
   }
 
+  const socks5Port = raw.socks5Port === undefined || raw.socks5Port === null
+    ? null
+    : parsePort(raw.socks5Port, 'socks5Port')
+
   return {
     mode,
     masterSecret,
@@ -465,6 +513,8 @@ function normalizeConfig(raw) {
     targets,
     defaultTarget,
     target,
+    socks: normalizeSocks(raw.socks),
+    socks5Port,
     localPort: parsePort(
       raw.localPort === undefined ? base.localPort : raw.localPort,
       'localPort',
