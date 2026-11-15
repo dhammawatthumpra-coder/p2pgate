@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-15
-สถานะ: **v1.7.0 prepared** (feature: multi-target routing; npm ยังเป็น 1.6.4 จนกว่าจะ publish)
+สถานะ: **v1.7.0 released** (npm + GitHub Release)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -47,11 +47,11 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | รายการ | ค่า |
 |---|---|
 | Version | `1.7.0` (feature: `targets`, พร้อม publish) |
-| npm `latest` | `1.6.4` — ยังไม่อัปเดตจนกว่า `npm publish` |
+| npm `latest` | `1.7.0` |
 | Git branch | `main` |
 | Commit | `10630a8 feat(targets): multi-service routing` |
 | Tag | `v1.7.0` |
-| GitHub Release | `v1.6.4` = Latest; `v1.7.0` ยังไม่สร้าง |
+| GitHub Release | `v1.7.0` = Latest |
 | Working tree | clean |
 | Tests | `npm test` → **41 checks PASSED** (Windows + Termux) |
 | src | 16 ไฟล์, `src/self-test.js` ~1,331 บรรทัด |
