@@ -49,7 +49,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | Version | `1.7.0` (feature: `targets`, พร้อม publish) |
 | npm `latest` | `1.6.4` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `__COMMIT__` |
+| Commit | `10630a8 feat(targets): multi-service routing` |
 | Tag | `v1.7.0` |
 | GitHub Release | `v1.6.4` = Latest; `v1.7.0` ยังไม่สร้าง |
 | Working tree | clean |
