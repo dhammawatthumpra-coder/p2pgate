@@ -49,7 +49,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | Version | `1.7.0` (feature: `server --port`, พร้อม publish) |
 | npm `latest` | `1.6.3` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `__COMMIT__` |
+| Commit | `ed6284e feat(server): allow --port/--target-port override` |
 | Tag | `v1.7.0` |
 | GitHub Release | `v1.6.3` = Latest; `v1.7.0` ยังไม่สร้าง |
 | Working tree | clean |
