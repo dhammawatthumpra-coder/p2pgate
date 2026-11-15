@@ -49,7 +49,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | Version | `1.6.2` (wording patch, พร้อม publish) |
 | npm `latest` | `1.6.1` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `__COMMIT__` |
+| Commit | `2235e80 fix(ux): neutral credential prompt wording for password mode` |
 | Tag | `v1.6.2` |
 | GitHub Release | `v1.6.1` = Latest; `v1.6.2` ยังไม่สร้าง |
 | Working tree | clean |
