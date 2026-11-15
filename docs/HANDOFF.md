@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-15
-สถานะ: **v1.6.4 prepared** (patch: server --port; npm ยังเป็น 1.6.3 จนกว่าจะ publish)
+สถานะ: **v1.6.4 released** (npm + GitHub Release)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -47,11 +47,11 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | รายการ | ค่า |
 |---|---|
 | Version | `1.6.4` (patch: `server --port`, พร้อม publish) |
-| npm `latest` | `1.6.3` — ยังไม่อัปเดตจนกว่า `npm publish` |
+| npm `latest` | `1.6.4` |
 | Git branch | `main` |
 | Commit | `c09e1ec chore(release): re-cut server --port as v1.6.4` |
 | Tag | `v1.6.4` |
-| GitHub Release | `v1.6.3` = Latest; `v1.6.4` ยังไม่สร้าง |
+| GitHub Release | `v1.6.4` = Latest |
 | Working tree | clean |
 | Tests | `npm test` → **37 checks PASSED** (Windows + Termux) |
 | src | 16 ไฟล์, `src/self-test.js` ~1,331 บรรทัด |
