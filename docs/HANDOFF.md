@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-15
-สถานะ: **v1.8.4 prepared** (feature: `--no-backup` + incident guide; npm ยังเป็น 1.8.3)
+สถานะ: **v1.8.4 released** (npm + GitHub Release)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -47,11 +47,11 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | รายการ | ค่า |
 |---|---|
 | Version | `1.8.4` (feature: `--no-backup`, พร้อม publish) |
-| npm `latest` | `1.8.3` — ยังไม่อัปเดตจนกว่า `npm publish` |
+| npm `latest` | `1.8.4` |
 | Git branch | `main` |
 | Commit | `6891be5 feat(master): add --no-backup and incident response guide` |
 | Tag | `v1.8.4` |
-| GitHub Release | `v1.8.3` = Latest; `v1.8.4` ยังไม่สร้าง |
+| GitHub Release | `v1.8.4` = Latest |
 | Working tree | clean |
 | Tests | `npm test` → **48 checks PASSED** (Windows + Termux) |
 | src | 18 ไฟล์, `src/self-test.js` ~1,600 บรรทัด |
