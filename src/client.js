@@ -275,6 +275,9 @@ async function startClient(config, options = {}) {
   const suppliedCredential = typeof options.credential === 'string'
     ? options.credential
     : null
+  const credentialProvider = typeof options.credential === 'function'
+    ? options.credential
+    : null
   const pinStdin = options.pinStdin === true
 
   // Precedence: --pin-stdin > P2PGATE_PIN > hidden prompt. If --pin-stdin is
@@ -329,6 +332,13 @@ async function startClient(config, options = {}) {
 
     if (credentialPromise === null) {
       credentialPromise = (async () => {
+        if (credentialProvider !== null) {
+          const value = await credentialProvider()
+          credentialClass = classifyOrThrow(value)
+          credentialSource = 'provider'
+          return credentialClass
+        }
+
         if (pinStdin && suppliedCredential === null) {
           const value = await readPinStdinLine()
           credentialClass = classifyOrThrow(value)
@@ -506,6 +516,22 @@ async function startClient(config, options = {}) {
     )
   }
 
+  function authStreamError(message, stream) {
+    const gone = !stream ||
+      stream.destroyed === true ||
+      stream.readableEnded === true ||
+      stream.writableEnded === true
+
+    if (gone) {
+      return new AuthError(
+        'การเชื่อมต่อขาดระหว่างรอการยืนยันตัวตน (ลองใหม่ได้)',
+        'AUTH_STREAM_CLOSED'
+      )
+    }
+
+    return new AuthError(message, 'AUTH_PROTOCOL')
+  }
+
   async function authenticateEncrypted(encrypted) {
     let statusRead
 
@@ -544,18 +570,20 @@ async function startClient(config, options = {}) {
       throw new AuthError('สถานะจากเซิร์ฟเวอร์ไม่รู้จัก', 'AUTH_PROTOCOL')
     }
 
-    // Interactive input is deferred until the server confirms that a two-step
-    // challenge is actually required.
-    const classified = await getCredential()
-    const mode = classified.mode
-
+    // Announce readiness before asking for input. The server replies with the
+    // challenge immediately, so a human typing the password delays the proof,
+    // not the READY step that the strict auth timeout guards.
     try {
+      if (encrypted.destroyed) {
+        throw new AuthError('stream closed', 'AUTH_STREAM_CLOSED')
+      }
       encrypted.write(encodeControl({
         v: AUTH_VERSION,
         status: AUTH_STATUS.READY
       }))
-    } catch {
-      throw new AuthError('ไม่สามารถแจ้งเซิร์ฟเวอร์ว่าพร้อมยืนยันตัวตนได้', 'AUTH_PROTOCOL')
+    } catch (err) {
+      if (err instanceof AuthError && err.code === 'AUTH_STREAM_CLOSED') throw err
+      throw authStreamError('ไม่สามารถแจ้งเซิร์ฟเวอร์ว่าพร้อมยืนยันตัวตนได้', encrypted)
     }
 
     let challengeRead
@@ -565,7 +593,7 @@ async function startClient(config, options = {}) {
         maxBytes: MAX_CONTROL_BYTES
       })
     } catch {
-      throw new AuthError('ไม่ได้รับข้อความท้าทายจากเซิร์ฟเวอร์', 'AUTH_PROTOCOL')
+      throw authStreamError('ไม่ได้รับข้อความท้าทายจากเซิร์ฟเวอร์', encrypted)
     }
 
     let challenge
@@ -592,6 +620,11 @@ async function startClient(config, options = {}) {
     ) {
       throw new AuthError('พารามิเตอร์การยืนยันตัวตนไม่ถูกต้อง', 'AUTH_PROTOCOL')
     }
+
+    // The challenge is already in hand and the server is waiting for the proof,
+    // so a slow human answer can no longer collide with connection setup.
+    const classified = await getCredential()
+    const mode = classified.mode
 
     if (mode === 'pwd' && challenge.pwdSalt === null) {
       return sendInvalidPasswordAttempt(encrypted)
@@ -637,8 +670,12 @@ async function startClient(config, options = {}) {
         maxBytes: MAX_CONTROL_BYTES
       })
     } catch {
-      clearCredentialOnFailure(saltHex)
-      throw new AuthError('ไม่ได้รับผลการยืนยันตัวตนจากเซิร์ฟเวอร์', 'AUTH_PROTOCOL')
+      const streamErr = authStreamError(
+        'ไม่ได้รับผลการยืนยันตัวตนจากเซิร์ฟเวอร์',
+        encrypted
+      )
+      if (streamErr.code !== 'AUTH_STREAM_CLOSED') clearCredentialOnFailure(saltHex)
+      throw streamErr
     }
 
     let result
@@ -706,10 +743,14 @@ async function startClient(config, options = {}) {
 
     const baseSlot = getSlot(nowMs())
     const slots = [baseSlot, baseSlot - 1]
+    const attempts = slots.map((slot) => ({ slot, retried: false }))
     let lastError = null
 
-    for (const slot of slots) {
+    while (attempts.length > 0) {
       if (aborted || closed) break
+
+      const attempt = attempts.shift()
+      const slot = attempt.slot
 
       let publicKey
       try {
@@ -752,6 +793,16 @@ async function startClient(config, options = {}) {
         lastError = err
 
         if (err instanceof AuthError) {
+          if (err.code === 'AUTH_STREAM_CLOSED' && !aborted && !attempt.retried) {
+            writeLog(
+              `auth stream closed before completion (slot=${slot}); retrying once`
+            )
+            if (encrypted && !encrypted.destroyed) encrypted.destroy()
+            encrypted = null
+            attempts.unshift({ slot, retried: true })
+            continue
+          }
+
           writeLog(`authentication failed: ${err.message}`)
           if (encrypted && !encrypted.destroyed) encrypted.destroy()
           encrypted = null

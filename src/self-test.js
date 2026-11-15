@@ -1297,6 +1297,122 @@ async function main() {
     await passwordServer.close()
 
     // ---------------------------------------------------------------------
+    // 10d-2. a slow credential answer must not break authentication
+    // ---------------------------------------------------------------------
+    const slowSecret = crypto.randomBytes(32).toString('hex')
+    const slowControlPath = controlPathFor('slow')
+    const slowServer = await startServer({
+      mode: 'server',
+      masterSecret: slowSecret,
+      authMode: 'password',
+      targetHost: '127.0.0.1',
+      targetPort: echoPort,
+      localPort: 8022,
+      clientKeyPath: path.join(tempDir, 'slow-server-key.json'),
+      allowedClientKeys: [],
+      verificationMode: 'hybrid',
+      trustedDevicesFile: path.join(tempDir, 'slow-devices'),
+      auditLog: { enabled: false },
+      customBootstrap: bootstrap,
+      authPin: { enabled: true, unattended: unattendedVerifier },
+      telegramAlert: { enabled: false, botToken: '', chatId: '' }
+    }, {
+      log: quiet,
+      showSessionPin: false,
+      sendStartupAlert: false,
+      failDelayMs: [10, 20],
+      lockoutStatePath: path.join(tempDir, 'slow-lockout.json'),
+      // The READY step must be fast, so keep its window tight. The human then
+      // has the wider proof window to type the password.
+      authTimeoutMs: 3_000,
+      preAuthTimeoutMs: 500,
+      interactive: false,
+      controlSocketPath: slowControlPath,
+      controlTokenPath: path.join(tempDir, 'control-slow.token')
+    })
+    extraServers.push(slowServer)
+
+    const slowClientBase = { ...clientBase, masterSecret: slowSecret }
+    const slowClient = await startTestClient(
+      unauthorizedKeyPath,
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 900))
+        return unattendedPassword
+      },
+      { base: slowClientBase }
+    )
+    const slowPayload = crypto.randomBytes(64)
+    assert.deepEqual(
+      await echoThrough(slowClient, slowPayload),
+      slowPayload,
+      'a slow password entry must still authenticate'
+    )
+    checks.push('slow credential entry does not break authentication')
+    await slowClient.close()
+    await slowServer.close()
+
+    // ---------------------------------------------------------------------
+    // 10d-3. the client retries once when the auth stream dies mid-handshake
+    // ---------------------------------------------------------------------
+    const retrySecret = crypto.randomBytes(32).toString('hex')
+    const retryControlPath = controlPathFor('retry')
+    const retryConfig = {
+      mode: 'server',
+      masterSecret: retrySecret,
+      authMode: 'password',
+      targetHost: '127.0.0.1',
+      targetPort: echoPort,
+      localPort: 8022,
+      clientKeyPath: path.join(tempDir, 'retry-server-key.json'),
+      allowedClientKeys: [],
+      verificationMode: 'hybrid',
+      trustedDevicesFile: path.join(tempDir, 'retry-devices'),
+      auditLog: { enabled: false },
+      customBootstrap: bootstrap,
+      authPin: { enabled: true, unattended: unattendedVerifier },
+      telegramAlert: { enabled: false, botToken: '', chatId: '' }
+    }
+    const retryOptions = {
+      log: quiet,
+      showSessionPin: false,
+      sendStartupAlert: false,
+      failDelayMs: [10, 20],
+      lockoutStatePath: path.join(tempDir, 'retry-lockout.json'),
+      authTimeoutMs: 4_000,
+      interactive: false,
+      controlSocketPath: retryControlPath,
+      controlTokenPath: path.join(tempDir, 'control-retry.token')
+    }
+
+    let retryServer = await startServer(retryConfig, retryOptions)
+    extraServers.push(retryServer)
+    let restartedOnce = false
+
+    const retryClient = await startTestClient(
+      unauthorizedKeyPath,
+      async () => {
+        if (!restartedOnce) {
+          restartedOnce = true
+          await retryServer.close()
+          retryServer = await startServer(retryConfig, retryOptions)
+          extraServers.push(retryServer)
+        }
+        return unattendedPassword
+      },
+      { base: { ...clientBase, masterSecret: retrySecret } }
+    )
+
+    const retryPayload = crypto.randomBytes(64)
+    assert.deepEqual(
+      await echoThrough(retryClient, retryPayload),
+      retryPayload,
+      'the client must retry once after the auth stream closes'
+    )
+    checks.push('client retries once when the auth stream closes mid-handshake')
+    await retryClient.close()
+    await retryServer.close()
+
+    // ---------------------------------------------------------------------
     // 10e. Doctor and trusted-device expiry enforcement
     // ---------------------------------------------------------------------
     const doctorConfigPath = path.join(tempDir, 'doctor-server.json')

@@ -7,6 +7,26 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.6.1] - 2026-11-15
+
+### Fixed
+
+- Client ส่ง `READY` ทันทีหลังได้ `CHALLENGE_REQUIRED` แล้วจึงถาม PIN/password
+  ทำให้การพิมพ์ช้าไม่ชนกับ timeout ของ transport อีก
+- Server รอ proof ด้วย `max(authTimeoutMs, preAuthTimeoutMs)` เพราะผู้ใช้ต้องพิมพ์
+  รหัสหลังได้รับ challenge
+- ถ้า stream ปิดระหว่างยืนยันตัวตน Client จะ retry slot เดิมหนึ่งครั้งอัตโนมัติ
+  และรายงานว่า `การเชื่อมต่อขาดระหว่างรอการยืนยันตัวตน (ลองใหม่ได้)`
+  แทน `authentication failed`
+- Server log `AUTH TIMEOUT ... stage=ready|proof` เพื่อวินิจฉัยสาเหตุ
+- Timeout ตอนรอ proof ไม่ถูกนับเป็น auth failure (ไม่ทำให้ lockout เพิ่มขึ้น)
+
+### Added
+
+- `startClient({ credential })` รองรับฟังก์ชัน async ที่คืนค่า credential
+  (ใช้กับ embedding และ self-test)
+- Self-test เพิ่ม 2 เคส: พิมพ์รหัสช้า และ retry เมื่อ stream ปิดกลาง handshake
+
 ## [1.6.0] - 2026-11-15
 
 ### Added

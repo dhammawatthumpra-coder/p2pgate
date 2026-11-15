@@ -643,6 +643,7 @@ async function startServer(config, options = {}) {
         maxBytes: MAX_CONTROL_BYTES
       })
     } catch {
+      if (!closed) writeLog(`AUTH TIMEOUT client=${remoteHex} stage=ready`)
       return { ok: false }
     }
 
@@ -740,12 +741,18 @@ async function startServer(config, options = {}) {
       let read
       try {
         read = await readControlLine(stream, {
-          timeoutMs: authTimeoutMs,
+          // The challenge is sent before this read, so a human typing the
+          // password is inside this window. Allow the pre-auth budget rather
+          // than the strict auth timeout; the strict timeout still guards the
+          // READY step above.
+          timeoutMs: Math.max(authTimeoutMs, preAuthTimeoutMs),
           maxBytes: MAX_CONTROL_BYTES
         })
       } catch {
         if (closed) return { ok: false }
-        return handleAuthFailure(stream, remoteHex, 'unknown', pinGenerationAtStart)
+        writeLog(`AUTH TIMEOUT client=${remoteHex} stage=proof`)
+        endAuthStream(stream)
+        return { ok: false }
       }
 
       let response = null
