@@ -42,6 +42,7 @@ const {
 const { AuditLog } = require('./audit-log')
 const { runDoctor } = require('./doctor')
 const { readControlLine, decodeControl, AUTH_STATUS } = require('./auth')
+const { normalizeConfig } = require('./config-loader')
 
 const noop = () => {}
 const quiet = () => {}
@@ -590,6 +591,34 @@ async function main() {
 
     const echoPort = echoServer.address().port
     const bootstrapPort = await getFreeUdpPort()
+
+    // A config written by saveConfig() must be loadable again. Regression guard
+    // for `targets.*.allow: null` and an empty `socks.allow` list.
+    const roundTripServer = normalizeConfig({
+      mode: 'server',
+      masterSecret,
+      targets: { web: { port: echoPort } },
+      socks: { enabled: true, allow: ['127.0.0.1:8080'] }
+    })
+    const roundTripServerAgain = normalizeConfig(
+      JSON.parse(JSON.stringify(roundTripServer))
+    )
+    assert.equal(roundTripServerAgain.defaultTarget, 'web')
+    assert.equal(roundTripServerAgain.targets.web.port, echoPort)
+    assert.deepEqual(roundTripServerAgain.socks.allow, ['127.0.0.1:8080'])
+
+    const roundTripClient = normalizeConfig({
+      mode: 'client',
+      masterSecret,
+      target: 'web',
+      targets: { default: { port: 8022, allow: null } }
+    })
+    const roundTripClientAgain = normalizeConfig(
+      JSON.parse(JSON.stringify(roundTripClient))
+    )
+    assert.equal(roundTripClientAgain.target, 'web')
+    assert.equal(roundTripClientAgain.targets, undefined)
+    checks.push('config survives a save/load round-trip (targets, socks)')
 
     bootstrapper = HyperDHT.bootstrapper(bootstrapPort, '127.0.0.1')
     await bootstrapper.fullyBootstrapped()

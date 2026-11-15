@@ -7,6 +7,18 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.8.2] - 2026-11-15
+
+### Fixed
+
+- `saveConfig()` เขียน `targets.<name>.allow: null` และ `socks.allow: []`
+  ลงไฟล์ แต่ loader ไม่ยอมรับค่าที่ตัวเองเขียน → เปิด config เดิมไม่ได้
+  (`targets.default.allow must be a non-empty array...`)
+- รับ `allow: null` เป็น "ไม่จำกัด" และยอมให้ `socks.allow: []` เมื่อ `socks.enabled: false`
+- config โหมด client ไม่เก็บ `targets`/`defaultTarget`/`socks` อีกต่อไป
+  (client ไม่ได้ใช้ — เดิมทำให้ไฟล์ client พังหลัง save)
+- เพิ่ม self-test กันการถอยหลัง: config ต้องผ่าน save → load round-trip
+
 ## [1.8.1] - 2026-11-15
 
 ### Fixed

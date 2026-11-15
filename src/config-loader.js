@@ -81,7 +81,7 @@ function normalizeTargets(raw, fallbackPort) {
     const port = parsePort(entry.port, `targets.${name}.port`)
 
     let allow = null
-    if (entry.allow !== undefined) {
+    if (entry.allow !== undefined && entry.allow !== null) {
       if (!Array.isArray(entry.allow) || entry.allow.length === 0) {
         throw new ConfigError(
           `targets.${name}.allow must be a non-empty array of client keys or "*"`,
@@ -406,10 +406,10 @@ function normalizeSocks(value) {
   const enabled = value.enabled === true
   let allow = []
 
-  if (value.allow !== undefined) {
-    if (!Array.isArray(value.allow) || value.allow.length === 0) {
+  if (value.allow !== undefined && value.allow !== null) {
+    if (!Array.isArray(value.allow)) {
       throw new ConfigError(
-        'socks.allow must be a non-empty array of "ip:port" or "cidr:port" entries',
+        'socks.allow must be an array of "ip:port" or "cidr:port" entries',
         'CONFIG_INVALID'
       )
     }
@@ -487,10 +487,19 @@ function normalizeConfig(raw) {
     raw.targetPort === undefined ? base.targetPort : raw.targetPort,
     'targetPort'
   )
-  const { targets, defaultTarget } = normalizeTargets(raw, declaredTargetPort)
-  const targetPort = raw.targets === undefined
-    ? declaredTargetPort
-    : targets[defaultTarget].port
+
+  let targets
+  let defaultTarget
+  let targetPort = declaredTargetPort
+
+  if (mode === 'server') {
+    const normalizedTargets = normalizeTargets(raw, declaredTargetPort)
+    targets = normalizedTargets.targets
+    defaultTarget = normalizedTargets.defaultTarget
+    targetPort = raw.targets === undefined || raw.targets === null
+      ? declaredTargetPort
+      : targets[defaultTarget].port
+  }
 
   let target = null
   if (raw.target !== undefined && raw.target !== null && String(raw.target).trim() !== '') {
@@ -510,10 +519,10 @@ function normalizeConfig(raw) {
     authMode,
     targetHost,
     targetPort,
-    targets,
-    defaultTarget,
+    targets: mode === 'server' ? targets : undefined,
+    defaultTarget: mode === 'server' ? defaultTarget : undefined,
     target,
-    socks: normalizeSocks(raw.socks),
+    socks: mode === 'server' ? normalizeSocks(raw.socks) : undefined,
     socks5Port,
     localPort: parsePort(
       raw.localPort === undefined ? base.localPort : raw.localPort,
