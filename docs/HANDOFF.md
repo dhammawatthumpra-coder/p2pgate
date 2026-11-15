@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-15
-สถานะ: **v1.6.0 released** (npm + GitHub Release)
+สถานะ: **v1.6.1 committed** (patch: auth stream race; npm ยังเป็น 1.6.0 จนกว่าจะ publish)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -13,7 +13,7 @@
 วางข้อความนี้ใน session ใหม่:
 
 ```text
-โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.6.0)
+โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.6.1)
 อ่าน docs/HANDOFF.md ก่อน แล้วสรุปสถานะปัจจุบันและรอคำสั่ง
 ```
 
@@ -46,14 +46,14 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.6.0` |
-| npm `latest` | `1.6.0` |
+| Version | `1.6.1` (patch, พร้อม publish) |
+| npm `latest` | `1.6.0` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `912cebe feat(release): v1.6.0 zero-setup password mode` |
-| Tag | `v1.6.0` |
-| GitHub Release | `v1.6.0` = Latest |
-| Working tree | มี `M docs/README.md` (แก้สารบัญให้ชี้ `p2phub`) |
-| Tests | `npm test` → **35 checks PASSED** (Windows + Termux) |
+| Commit | `6d484cc fix(auth): retry once when the auth stream closes mid-handshake` |
+| Tag | `v1.6.1` |
+| GitHub Release | `v1.6.0` = Latest; `v1.6.1` ยังไม่สร้าง |
+| Working tree | clean |
+| Tests | `npm test` → **37 checks PASSED** (Windows + Termux) |
 | src | 16 ไฟล์, `src/self-test.js` ~1,331 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
@@ -68,7 +68,17 @@ npm view p2pgate version
 
 ---
 
-## 3. v1.6.0 ทำอะไรไปแล้ว
+## 3. v1.6.0 / v1.6.1 ทำอะไรไปแล้ว
+
+### v1.6.1 (patch)
+
+- client ส่ง `READY` ทันทีหลังได้ `CHALLENGE_REQUIRED` แล้วจึงถาม PIN/password
+  → พิมพ์ช้าไม่ทำให้ stream ตายก่อนตอบ
+- server รอ proof ด้วย `max(authTimeoutMs, preAuthTimeoutMs)`
+- client retry slot เดิม 1 ครั้งเมื่อ stream ปิดกลาง handshake
+- log `AUTH TIMEOUT ... stage=ready|proof`, ข้อความ `การเชื่อมต่อขาดระหว่างรอการยืนยันตัวตน (ลองใหม่ได้)`
+- proof timeout ไม่ถูกนับเป็น auth failure (ไม่เพิ่ม lockout)
+- `startClient({ credential })` รับฟังก์ชัน async ได้
 
 ### Zero-setup server
 
@@ -128,9 +138,10 @@ p2pgate connect -s <masterSecret> -p <password>
 | `src/keygen.js` | client key + passphrase protection |
 | `src/setup-wizard.js` | advanced setup + `--easy` + i18n |
 | `src/i18n.js` | `P2PGATE_LANG` / `--lang` / `t(th, en)` |
-| `src/self-test.js` | 35 checks รวม password mode |
+| `src/self-test.js` | 37 checks รวม password mode, slow credential, stream-close retry |
 
-Docs: `docs/specs/phase7-v1.6.0.md` (spec), `docs/releases/v1.6.0.md` (release notes),
+Docs: `docs/specs/phase7-v1.6.0.md` (spec), `docs/releases/v1.6.1.md` (patch notes),
+`docs/releases/v1.6.0.md` (release notes),
 `TESTING.md` (คู่มือทดสอบภาษาไทย), `README.md` / `README.th.md`
 
 ---
@@ -139,7 +150,7 @@ Docs: `docs/specs/phase7-v1.6.0.md` (spec), `docs/releases/v1.6.0.md` (release n
 
 ```powershell
 # dev
-npm test                 # check + 35 self-test checks
+npm test                 # check + 37 self-test checks
 npm run check            # syntax check ทุกไฟล์
 npm run self-test
 
@@ -323,7 +334,7 @@ client config: C:\Users\csuti\.p2pgate\client.json
 ssh: watthumpra@100.76.100.90 -p 8022   (ผ่าน Tailscale)
 key: %USERPROFILE%\.ssh\id_ed25519
 known_hosts: $env:TEMP\p2pgate_known_hosts
-node 24, p2pgate 1.6.0 ติดตั้งแบบ global
+node 24, p2pgate 1.6.1 ติดตั้งแบบ global
 ```
 
 คำสั่งตรวจ Termux:
@@ -342,6 +353,7 @@ ssh -p 8022 -o BatchMode=yes -o StrictHostKeyChecking=no `
 | อาการ | สาเหตุ/วิธีแก้ |
 |---|---|
 | `PEER_NOT_FOUND` | `p2pgate server` ไม่ได้รัน / secret ไม่ตรง / เวลาเครื่องต่างกัน > 1 ชม. / UDP ถูกบล็อก |
+| `authentication failed: ไม่ได้รับข้อความท้าทาย...` แล้วรอบถัดไปต่อได้ | stream ตายระหว่างพิมพ์ (server restart หรือเกิน 120 วิ) — v1.6.1 retry ให้เองและ log `auth stream closed ... retrying once` |
 | `ssh: Connection closed by 127.0.0.1` | tunnel ต่อ Server ไม่ได้ (มักเป็นข้อบน) |
 | client ค้างโดยไม่ถาม password | ใช้ `p2pgate client` (advanced) ซึ่งไม่บังคับ credential — ต้องมี `-p` หรือ prompt ถ้าใช้ `connect` |
 | trusted ไม่ fastpath | ยังไม่ `devices add --mode trusted`, หมดอายุ, หรือไฟล์สิทธิ์ไม่ใช่ 0600 |
@@ -370,8 +382,8 @@ ssh -p 8022 -o BatchMode=yes -o StrictHostKeyChecking=no `
 cd D:\tunnel\p2pgate
 git status --short          # ต้องรู้ว่ามีไฟล์ค้างไหม
 git log --oneline -3
-npm test                    # ต้องได้ 35 checks (หรือมากกว่า)
-npm view p2pgate version    # ต้องเป็น 1.6.0
+npm test                    # ต้องได้ 37 checks (หรือมากกว่า)
+npm view p2pgate version    # ต้องเป็น 1.6.1 หลัง publish
 ```
 
 ถ้าทุกอย่างตรงกับเอกสารนี้ แปลว่า handoff ครบ — เริ่มงานต่อได้เลย
