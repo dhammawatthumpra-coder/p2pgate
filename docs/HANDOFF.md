@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-15
-สถานะ: **v1.8.0 prepared** (feature: SOCKS5 gateway; npm ยังเป็น 1.7.0 จนกว่าจะ publish)
+สถานะ: **v1.8.1 prepared** (docs: README structure; npm ยังเป็น 1.8.0 จนกว่าจะ publish)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -13,7 +13,7 @@
 วางข้อความนี้ใน session ใหม่:
 
 ```text
-โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.8.0)
+โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.8.1)
 อ่าน docs/HANDOFF.md ก่อน แล้วสรุปสถานะปัจจุบันและรอคำสั่ง
 ```
 
@@ -38,7 +38,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 |---|---|
 | Repo | https://github.com/dhammawatthumpra-coder/p2pgate |
 | npm | https://www.npmjs.com/package/p2pgate |
-| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.8.0 |
+| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.8.1 |
 
 ---
 
@@ -46,12 +46,12 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.8.0` (feature: SOCKS5 gateway, พร้อม publish) |
-| npm `latest` | `1.7.0` — ยังไม่อัปเดตจนกว่า `npm publish` |
+| Version | `1.8.1` (docs: README structure, พร้อม publish) |
+| npm `latest` | `1.8.0` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `596b3a7 feat(socks): SOCKS5 gateway with server-side allowlist` |
-| Tag | `v1.8.0` |
-| GitHub Release | `v1.7.0` = Latest; `v1.8.0` ยังไม่สร้าง |
+| Commit | `__COMMIT__` |
+| Tag | `v1.8.1` |
+| GitHub Release | `v1.8.0` = Latest; `v1.8.1` ยังไม่สร้าง |
 | Working tree | clean |
 | Tests | `npm test` → **45 checks PASSED** (Windows + Termux) |
 | src | 18 ไฟล์, `src/self-test.js` ~1,600 บรรทัด |
@@ -69,6 +69,11 @@ npm view p2pgate version
 ---
 
 ## 3. v1.6.0 / v1.6.1 ทำอะไรไปแล้ว
+
+### v1.8.1 (docs)
+
+- แก้ project structure ใน README/README.th ให้ครบและเรียงตามรุ่น
+  (releases v1.4.0→v1.8.1, specs phase8/phase9, scripts, src ใหม่)
 
 ### v1.8.0 (feature)
 

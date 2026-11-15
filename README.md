@@ -1142,12 +1142,21 @@ p2pgate/
 ├── TESTING.md
 ├── config.example.json
 ├── docs/
+│   ├── HANDOFF.md
 │   ├── README.md
+│   ├── SERVICE.md
 │   ├── releases/
 │   │   ├── v1.4.0.md
 │   │   ├── v1.4.1.md
 │   │   ├── v1.5.0.md
-│   │   └── v1.6.0.md
+│   │   ├── v1.6.0.md
+│   │   ├── v1.6.1.md
+│   │   ├── v1.6.2.md
+│   │   ├── v1.6.3.md
+│   │   ├── v1.6.4.md
+│   │   ├── v1.7.0.md
+│   │   ├── v1.8.0.md
+│   │   └── v1.8.1.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
@@ -1155,28 +1164,43 @@ p2pgate/
 │       ├── phase5-v1.4.0.md
 │       ├── phase6-v1.5.0.md
 │       ├── phase7-v1.6.0.md
+│       ├── phase8-targets.md
+│       ├── phase9-socks5.md
 │       └── project-spec.md
 ├── package.json
 ├── package-lock.json
 ├── scripts/
-│   └── termux-boot.sh
+│   ├── systemd/
+│   │   ├── p2pgate-client.service
+│   │   └── p2pgate-server.service
+│   ├── termux/
+│   │   └── service/
+│   │       └── p2pgate/
+│   │           ├── run
+│   │           └── log/
+│   │               └── run
+│   ├── termux-boot.sh
+│   └── windows/
+│       └── install-task.ps1
 └── src/
-    ├── cli.js
-    ├── auth.js
-    ├── auth-guard.js
-    ├── device-registry.js
+    ├── allowlist.js
     ├── audit-log.js
-    ├── i18n.js
-    ├── quickstart.js
-    ├── control.js
-    ├── doctor.js
-    ├── config-loader.js
-    ├── crypto-utils.js
-    ├── keygen.js
-    ├── setup-wizard.js
-    ├── server.js
+    ├── auth-guard.js
+    ├── auth.js
+    ├── cli.js
     ├── client.js
-    └── self-test.js
+    ├── config-loader.js
+    ├── control.js
+    ├── crypto-utils.js
+    ├── device-registry.js
+    ├── doctor.js
+    ├── i18n.js
+    ├── keygen.js
+    ├── quickstart.js
+    ├── self-test.js
+    ├── server.js
+    ├── setup-wizard.js
+    └── socks.js
 ```
 
 ### Development and CI

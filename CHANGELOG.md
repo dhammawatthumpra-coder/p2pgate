@@ -7,6 +7,18 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.8.1] - 2026-11-15
+
+### Fixed
+
+- README/README.th: โครงสร้างโปรเจกต์ (`## 21) Project structure`) แสดงไฟล์ไม่ครบ
+  และข้ามรุ่น — อัปเดตให้ตรงกับ repo จริง
+  - release notes ครบ `v1.4.0` → `v1.8.1`
+  - specs เพิ่ม `phase8-targets.md`, `phase9-socks5.md`
+  - `docs/HANDOFF.md`, `docs/SERVICE.md`
+  - `scripts/systemd`, `scripts/termux/service`, `scripts/windows`
+  - `src/allowlist.js`, `src/socks.js`
+
 ## [1.8.0] - 2026-11-15
 
 ### Added
