@@ -136,7 +136,7 @@ Passphrase ของ client key:
   - หลีกเลี่ยงการใส่ password ด้วย -p ใน shell history; ใช้ prompt หรือ env
   - Session PIN มี 10 ตัวอักษร แสดงเป็น XXXXX-XXXXX และเปลี่ยนเมื่อมี
     การพยายามผิดหลายครั้ง
-  - รหัสผ่านสำรองต้องยาวอย่างน้อย 12 ตัวอักษรและตัวพิมพ์เล็ก-ใหญ่มีความหมาย
+  - รหัสผ่านต้องยาวอย่างน้อย 12 ตัวอักษรและตัวพิมพ์เล็ก-ใหญ่มีความหมาย
   - ไม่มี flag --pin เพื่อไม่ให้รหัสผ่านไปปรากฏใน ps หรือ shell history
   - อุโมงค์ผูกกับ 127.0.0.1 เท่านั้น
 `
@@ -283,7 +283,7 @@ function printError(err) {
       break
     case 'CREDENTIAL_INVALID':
       process.stderr.write(
-        '👉 PIN ต้องมี 10 ตัวอักษร หรือรหัสผ่านสำรองต้องยาวอย่างน้อย 12 ตัวอักษร\n'
+        '👉 ต้องเป็น PIN 10 ตัวอักษร หรือรหัสผ่านอย่างน้อย 12 ตัวอักษร\n'
       )
       process.stderr.write('   PIN อาจอยู่ในรูป XXXXX-XXXXX\n')
       break
@@ -291,11 +291,11 @@ function printError(err) {
       process.stderr.write('👉 ยกเลิกการใส่ PIN แล้ว\n')
       break
     case 'AUTH_PASSWORD_WEAK':
-      process.stderr.write('👉 รหัสผ่านสำรองต้องยาวอย่างน้อย 12 ตัวอักษร\n')
+      process.stderr.write('👉 รหัสผ่านต้องยาวอย่างน้อย 12 ตัวอักษร\n')
       break
     case 'AUTH_HASH_INVALID':
       process.stderr.write(
-        '👉 ค่า verifier รหัสผ่านสำรองใน config ไม่ถูกต้อง กรุณารัน p2pgate setup ใหม่\n'
+        '👉 ค่า verifier รหัสผ่านใน config ไม่ถูกต้อง กรุณารัน p2pgate setup ใหม่\n'
       )
       break
     case 'EADDRINUSE':

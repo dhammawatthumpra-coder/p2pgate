@@ -51,7 +51,7 @@ function classifyOrThrow(value) {
     return classifyCredential(value)
   } catch {
     throw new AuthError(
-      'PIN ต้องมี 10 ตัวอักษร หรือรหัสผ่านสำรองต้องยาวอย่างน้อย 12 ตัวอักษร',
+      'ต้องเป็น PIN 10 ตัวอักษร หรือรหัสผ่านอย่างน้อย 12 ตัวอักษร',
       'CREDENTIAL_INVALID'
     )
   }
@@ -315,14 +315,14 @@ async function startClient(config, options = {}) {
   async function promptForCredential() {
     while (true) {
       const value = await promptHidden(
-        '🔐 PIN (10 ตัว) หรือรหัสผ่านสำรอง (>=12 ตัว): ',
+        '🔐 PIN (10 ตัว) หรือรหัสผ่าน (12 ตัวขึ้นไป): ',
         promptOptions
       )
 
       try {
         return classifyCredential(value)
       } catch {
-        writeLog('PIN ต้องมี 10 ตัวอักษร หรือรหัสผ่านสำรองต้องยาวอย่างน้อย 12 ตัวอักษร')
+        writeLog('ต้องเป็น PIN 10 ตัวอักษร หรือรหัสผ่านอย่างน้อย 12 ตัวอักษร')
       }
     }
   }

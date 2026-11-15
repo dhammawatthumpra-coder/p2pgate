@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-15
-สถานะ: **v1.6.1 released** (npm + GitHub Release)
+สถานะ: **v1.6.2 prepared** (wording patch; npm ยังเป็น 1.6.1 จนกว่าจะ publish)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -13,7 +13,7 @@
 วางข้อความนี้ใน session ใหม่:
 
 ```text
-โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.6.1)
+โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.6.2)
 อ่าน docs/HANDOFF.md ก่อน แล้วสรุปสถานะปัจจุบันและรอคำสั่ง
 ```
 
@@ -38,7 +38,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 |---|---|
 | Repo | https://github.com/dhammawatthumpra-coder/p2pgate |
 | npm | https://www.npmjs.com/package/p2pgate |
-| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.6.1 |
+| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.6.2 |
 
 ---
 
@@ -46,12 +46,12 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.6.1` (patch, พร้อม publish) |
-| npm `latest` | `1.6.0` — ยังไม่อัปเดตจนกว่า `npm publish` |
+| Version | `1.6.2` (wording patch, พร้อม publish) |
+| npm `latest` | `1.6.1` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `6d484cc fix(auth): retry once when the auth stream closes mid-handshake` |
-| Tag | `v1.6.1` |
-| GitHub Release | `v1.6.1` = Latest |
+| Commit | `__COMMIT__` |
+| Tag | `v1.6.2` |
+| GitHub Release | `v1.6.1` = Latest; `v1.6.2` ยังไม่สร้าง |
 | Working tree | clean |
 | Tests | `npm test` → **37 checks PASSED** (Windows + Termux) |
 | src | 16 ไฟล์, `src/self-test.js` ~1,331 บรรทัด |
@@ -69,6 +69,12 @@ npm view p2pgate version
 ---
 
 ## 3. v1.6.0 / v1.6.1 ทำอะไรไปแล้ว
+
+### v1.6.2 (patch)
+
+- ปรับข้อความ prompt เป็น `🔐 PIN (10 ตัว) หรือรหัสผ่าน (12 ตัวขึ้นไป):`
+- ปรับข้อความแจ้ง credential ผิดรูปแบบให้เป็นกลาง (เลิกใช้คำว่า "รหัสผ่านสำรอง")
+- ไม่กระทบ protocol/config/พฤติกรรม
 
 ### v1.6.1 (patch)
 
