@@ -43,6 +43,7 @@ const { AuditLog } = require('./audit-log')
 const { runDoctor } = require('./doctor')
 const { readControlLine, decodeControl, AUTH_STATUS } = require('./auth')
 const { normalizeConfig } = require('./config-loader')
+const { rotateMasterSecret, fingerprint } = require('./master')
 
 const noop = () => {}
 const quiet = () => {}
@@ -619,6 +620,33 @@ async function main() {
     assert.equal(roundTripClientAgain.target, 'web')
     assert.equal(roundTripClientAgain.targets, undefined)
     checks.push('config survives a save/load round-trip (targets, socks)')
+
+    // masterSecret rotation must back up the old config and keep other fields.
+    const rotateConfigPath = path.join(tempDir, 'rotate-config.json')
+    const rotateSource = normalizeConfig({
+      mode: 'server',
+      masterSecret,
+      targets: { web: { port: echoPort } }
+    })
+    await fs.writeFile(
+      rotateConfigPath,
+      `${JSON.stringify(rotateSource, null, 2)}\n`,
+      { mode: 0o600 }
+    )
+
+    const rotated = await rotateMasterSecret(rotateConfigPath)
+    assert.notEqual(rotated.masterSecret, masterSecret)
+    assert.equal(rotated.previousFingerprint, fingerprint(masterSecret))
+
+    const rotatedReloaded = normalizeConfig(
+      JSON.parse(await fs.readFile(rotateConfigPath, 'utf8'))
+    )
+    assert.equal(rotatedReloaded.masterSecret, rotated.masterSecret)
+    assert.equal(rotatedReloaded.targets.web.port, echoPort)
+
+    const backupStat = await fs.stat(rotated.backupPath)
+    assert.equal(backupStat.isFile(), true)
+    checks.push('masterSecret rotation writes a backup and keeps other fields')
 
     bootstrapper = HyperDHT.bootstrapper(bootstrapPort, '127.0.0.1')
     await bootstrapper.fullyBootstrapped()

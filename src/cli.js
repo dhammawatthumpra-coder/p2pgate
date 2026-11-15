@@ -25,6 +25,7 @@ const {
 } = require('./control')
 const { promptHidden } = require('./auth')
 const { createAuditLog } = require('./audit-log')
+const { rotateMasterSecret, fingerprint } = require('./master')
 const {
   DEFAULT_CLIENT_CONFIG_PATH,
   createServerPasswordConfig,
@@ -49,7 +50,7 @@ const {
 } = require('./keygen')
 const { version } = require('../package.json')
 
-const HELP_TEXT = `p2pgate v1.6 — อุโมงค์ TCP แบบ P2P สำหรับ SSH (HyperDHT)
+const HELP_TEXT = `p2pgate v1.8 — อุโมงค์ TCP แบบ P2P สำหรับ SSH และ service บน loopback (HyperDHT)
 
 การใช้งาน:
   p2pgate server [--config <path>] [--port <targetPort>]
@@ -89,6 +90,14 @@ const HELP_TEXT = `p2pgate v1.6 — อุโมงค์ TCP แบบ P2P ส�
 
   p2pgate password reset [--config <path>]
       สร้าง connection password ใหม่และแสดงค่าใหม่
+
+  p2pgate master show [--reveal] [--json]
+      แสดง fingerprint ของ masterSecret (--reveal = แสดงค่าเต็ม)
+
+  p2pgate master reset [--yes] [--dry-run] [--json]
+      หมุน masterSecret: สำรอง config เดิม แล้วเขียนค่าใหม่
+      ต้องรีสตาร์ต Server และอัปเดต client ทุกเครื่อง
+      --yes = ยืนยันโดยไม่ถาม (จำเป็นเมื่อไม่มี TTY)
 
   p2pgate revoke <clientPublicKeyHex> [--config <path>]
       เพิกถอนคีย์ถาวรและตัด connection ที่เปิดอยู่ทันที
@@ -144,7 +153,7 @@ Passphrase ของ client key:
   - อุโมงค์ผูกกับ 127.0.0.1 เท่านั้น
 `
 
-const HELP_TEXT_EN = `p2pgate v1.6 — P2P TCP tunnel for SSH (HyperDHT)
+const HELP_TEXT_EN = `p2pgate v1.8 — P2P TCP tunnel for SSH and loopback services (HyperDHT)
 
 Usage:
   p2pgate server [--config <path>] [--port <targetPort>]
@@ -168,6 +177,9 @@ Usage:
   p2pgate pin
   p2pgate revoke <key>
   p2pgate password reset
+  p2pgate master show [--reveal] [--json]
+  p2pgate master reset [--yes] [--dry-run] [--json]
+      Rotate the masterSecret (backs up the old config, writes a new value)
   p2pgate doctor [--json]
   p2pgate unlock --list|<key>|--all
 
@@ -228,6 +240,18 @@ function printError(err) {
       process.stderr.write(t(
         '👉 --port ต้องเป็นตัวเลข 1-65535 และใช้ --port หรือ --target-port อย่างใดอย่างหนึ่ง\n',
         '👉 --port must be 1-65535; use either --port or --target-port\n'
+      ))
+      break
+    case 'CONFIRM_REQUIRED':
+      process.stderr.write(t(
+        '👉 ต้องยืนยันด้วย --yes เมื่อไม่ได้รันใน terminal\n',
+        '👉 pass --yes when running without a terminal\n'
+      ))
+      break
+    case 'MASTER_SECRET_UNCHANGED':
+      process.stderr.write(t(
+        '👉 ค่าใหม่ต้องต่างจากค่าเดิม\n',
+        '👉 the new value must differ from the current one\n'
       ))
       break
     case 'CONFIG_NOT_FOUND':
@@ -1421,6 +1445,147 @@ async function commandDoctor(values) {
   }
 }
 
+async function commandMaster(values, positionals) {
+  const subcommand = positionals[1]
+  const configPath = resolveConfigPath(values.config)
+
+  if (subcommand === 'show') {
+    const config = await loadConfig(configPath)
+    const print = values.reveal ? config.masterSecret : fingerprint(config.masterSecret)
+
+    if (values.json) {
+      process.stdout.write(`${JSON.stringify({
+        config: configPath,
+        mode: config.mode,
+        fingerprint: fingerprint(config.masterSecret),
+        masterSecret: values.reveal ? config.masterSecret : undefined
+      }, null, 2)}\n`)
+      return
+    }
+
+    process.stdout.write(t(`ไฟล์ตั้งค่า: ${configPath}\n`, `Config: ${configPath}\n`))
+    process.stdout.write(t(
+      `โหมด: ${config.mode}\n`,
+      `Mode: ${config.mode}\n`
+    ))
+
+    if (values.reveal) {
+      process.stdout.write(`masterSecret: ${print}\n`)
+    } else {
+      process.stdout.write(t(
+        `masterSecret fingerprint: ${print}\n`,
+        `masterSecret fingerprint: ${print}\n`
+      ))
+      process.stdout.write(t(
+        '   ใช้ --reveal เพื่อแสดงค่าเต็ม\n',
+        '   Use --reveal to print the full value\n'
+      ))
+    }
+
+    return
+  }
+
+  if (subcommand !== 'reset') {
+    process.stderr.write(t(
+      '❌ การใช้งาน: p2pgate master reset|show\n',
+      '❌ Usage: p2pgate master reset|show\n'
+    ))
+    process.exitCode = 1
+    return
+  }
+
+  const config = await loadConfig(configPath)
+  const dryRun = values['dry-run'] === true
+
+  if (!dryRun && values.yes !== true) {
+    const readline = require('node:readline/promises')
+
+    if (!process.stdin.isTTY) {
+      const err = new Error(
+        'rotating masterSecret needs --yes in a non-interactive shell'
+      )
+      err.code = 'CONFIRM_REQUIRED'
+      throw err
+    }
+
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    })
+
+    let answer = ''
+    try {
+      answer = (await rl.question(t(
+        `เปลี่ยน masterSecret ของ ${config.mode} นี้? พิมพ์ "yes": `,
+        `Rotate the masterSecret of this ${config.mode}? Type "yes": `
+      ))).trim().toLowerCase()
+    } finally {
+      rl.close()
+    }
+
+    if (answer !== 'yes' && answer !== 'y') {
+      process.stdout.write(t('ยกเลิกแล้ว ไม่มีการเปลี่ยนแปลง\n', 'Cancelled; nothing changed\n'))
+      return
+    }
+  }
+
+  const result = await rotateMasterSecret(configPath, { dryRun })
+
+  if (values.json) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
+  } else {
+    process.stdout.write(t('\n=== p2pgate master reset ===\n', '\n=== p2pgate master reset ===\n'))
+    process.stdout.write(t(`ไฟล์ตั้งค่า: ${result.configPath}\n`, `Config: ${result.configPath}\n`))
+    process.stdout.write(t(`โหมด: ${result.mode}\n`, `Mode: ${result.mode}\n`))
+    process.stdout.write(t(
+      `fingerprint เดิม: ${result.previousFingerprint}\n`,
+      `Previous fingerprint: ${result.previousFingerprint}\n`
+    ))
+    process.stdout.write(t(
+      `fingerprint ใหม่: ${result.fingerprint}\n`,
+      `New fingerprint: ${result.fingerprint}\n`
+    ))
+
+    if (dryRun) {
+      process.stdout.write(t(
+        '\n(dry-run) ยังไม่เขียนไฟล์ใด ๆ\n',
+        '\n(dry-run) nothing was written\n'
+      ))
+      return
+    }
+
+    process.stdout.write(t(
+      `\nmasterSecret ใหม่:\n  ${result.masterSecret}\n\n`,
+      `\nNew masterSecret:\n  ${result.masterSecret}\n\n`
+    ))
+    process.stdout.write(t(
+      `สำรองไฟล์เดิมไว้ที่: ${result.backupPath}\n\n`,
+      `Previous config backed up to: ${result.backupPath}\n\n`
+    ))
+
+    if (result.mode === 'server') {
+      process.stdout.write(t(
+        'ขั้นตอนถัดไป:\n  1) รีสตาร์ต p2pgate server\n  2) อัปเดต client ทุกเครื่องด้วย p2pgate connect -s <ค่าใหม่>\n  3) ลบค่าเก่าออกจาก shell history / ไฟล์ที่เคยจดไว้\n\n',
+        'Next steps:\n  1) Restart p2pgate server\n  2) Update every client with p2pgate connect -s <new value>\n  3) Remove the old value from shell history / notes\n\n'
+      ))
+    } else {
+      process.stdout.write(t(
+        'ขั้นตอนถัดไป:\n  1) การเชื่อมต่อครั้งถัดไปจะใช้ค่าใหม่ทันที (ไม่ต้องรีสตาร์ต)\n  2) ตรวจว่า Server ใช้ค่าเดียวกัน\n\n',
+        'Next steps:\n  1) The next connection uses the new value (no restart needed)\n  2) Make sure the Server uses the same value\n\n'
+      ))
+    }
+  }
+
+  const audit = await openCliAudit(config)
+  await audit.record('master.reset', {
+    source: 'cli',
+    mode: result.mode,
+    previousFingerprint: result.previousFingerprint,
+    fingerprint: result.fingerprint
+  })
+  await audit.close()
+}
+
 async function commandPassword(values, positionals) {
   if (positionals[1] !== 'reset') {
     process.stderr.write(t(
@@ -1568,6 +1733,9 @@ async function main(argv) {
         'target-port': { type: 'string' },
         target: { type: 'string' },
         socks5: { type: 'string' },
+        yes: { type: 'boolean' },
+        reveal: { type: 'boolean' },
+        'dry-run': { type: 'boolean' },
         secret: { type: 'string', short: 's' },
         password: { type: 'string', short: 'p' },
         'secret-stdin': { type: 'boolean' },
@@ -1656,6 +1824,9 @@ async function main(argv) {
       return
     case 'password':
       await commandPassword(values, positionals)
+      return
+    case 'master':
+      await commandMaster(values, positionals)
       return
     case 'doctor':
       await commandDoctor(values)

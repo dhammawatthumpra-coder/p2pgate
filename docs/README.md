@@ -14,6 +14,7 @@
 | [Phase 8 — `p2phub`](https://github.com/dhammawatthumpra-coder/p2phub/blob/main/docs/spec.md) | draft | Separate repository: optional control plane (inventory, directory, policy, enrollment, secret custody) |
 | [Phase 8 — Multi-target](specs/phase8-targets.md) | v1.7.0 | `targets` map, `--target`, per-target allowlist |
 | [Phase 9 — SOCKS5](specs/phase9-socks5.md) | v1.8.0 | SOCKS5 gateway with an IP/CIDR allowlist |
+| [Phase 10 — masterSecret rotation](specs/phase10-master.md) | v1.8.3 | `master show` / `master reset` with backup |
 
 The Phase 4 document was converted from the original `.docx` handoff file to
 Markdown for easier review and diffing.
@@ -22,6 +23,7 @@ Markdown for easier review and diffing.
 
 - [Session handoff](HANDOFF.md) — current state, invariants, next steps
 - [Running as a service](SERVICE.md) — Termux, systemd, Windows
+- [Release notes v1.8.3](releases/v1.8.3.md)
 - [Release notes v1.8.2](releases/v1.8.2.md)
 - [Release notes v1.8.1](releases/v1.8.1.md)
 - [Release notes v1.8.0](releases/v1.8.0.md)

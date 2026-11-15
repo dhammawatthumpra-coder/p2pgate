@@ -657,6 +657,29 @@ Example for a home LAN:
 
 ---
 
+## 9.4) Rotating masterSecret
+
+`masterSecret` derives the Server's DHT identity. Rotating it changes the
+Server's public key, so every Client must be updated.
+
+```sh
+# Server
+p2pgate master show            # fingerprint (--reveal prints the full value)
+p2pgate master reset --yes     # backup + new value, then restart the server
+
+# Each Client
+p2pgate connect -s <new masterSecret> -p <password>
+```
+
+- `p2pgate master reset --dry-run` shows what would change without writing
+- the previous config is copied to `config.json.bak-<timestamp>` (mode `0600`)
+- rotations are recorded in the audit log as `master.reset`
+- the connection password and trusted device keys are **not** affected
+- without `--yes` the command asks for confirmation; in a non-interactive shell
+  `--yes` is required
+
+---
+
 ## 10) Requirements
 
 - Android phone + Termux + Termux:Boot (F-Droid), optional
@@ -945,6 +968,8 @@ Messages never contain the PIN or password.
 | `p2pgate connect -s <secret> -p <password>` | One-line client connect |
 | `p2pgate connect --target <name>` | Connect to a named target declared on the Server |
 | `p2pgate connect --socks5 <port>` | Start a local SOCKS5 gateway (server allowlist) |
+| `p2pgate master show [--reveal]` | Print the masterSecret fingerprint |
+| `p2pgate master reset --yes` | Rotate masterSecret with a timestamped backup |
 | `p2pgate keygen` | Create/show the Client key |
 | `p2pgate keygen --passphrase` | Protect an existing/new key with a passphrase |
 | `p2pgate keygen --unprotect` | Remove passphrase protection (prompts) |
@@ -1157,7 +1182,8 @@ p2pgate/
 │   │   ├── v1.7.0.md
 │   │   ├── v1.8.0.md
 │   │   ├── v1.8.1.md
-│   │   └── v1.8.2.md
+│   │   ├── v1.8.2.md
+│   │   └── v1.8.3.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
@@ -1167,6 +1193,7 @@ p2pgate/
 │       ├── phase7-v1.6.0.md
 │       ├── phase8-targets.md
 │       ├── phase9-socks5.md
+│       ├── phase10-master.md
 │       └── project-spec.md
 ├── package.json
 ├── package-lock.json
@@ -1197,6 +1224,7 @@ p2pgate/
     ├── doctor.js
     ├── i18n.js
     ├── keygen.js
+    ├── master.js
     ├── quickstart.js
     ├── self-test.js
     ├── server.js

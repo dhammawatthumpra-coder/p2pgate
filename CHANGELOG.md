@@ -7,6 +7,21 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.8.3] - 2026-11-15
+
+### Added
+
+- `p2pgate master show [--reveal] [--json]` — แสดง fingerprint หรือค่าเต็มของ masterSecret
+- `p2pgate master reset [--yes] [--dry-run] [--json]` — หมุน masterSecret
+  พร้อมสำรอง config เดิม (`config.json.bak-<timestamp>` โหมด 0600)
+- audit event `master.reset` (เก็บเฉพาะ fingerprint ไม่เก็บค่า secret)
+- self-test: หมุน masterSecret แล้ว backup ถูกสร้างและ field อื่นยังอยู่
+
+### Changed
+
+- help เป็น v1.8 และเพิ่มหัวข้อ master commands
+- README/README.th เพิ่มหัวข้อ 9.4 การหมุน masterSecret
+
 ## [1.8.2] - 2026-11-15
 
 ### Fixed

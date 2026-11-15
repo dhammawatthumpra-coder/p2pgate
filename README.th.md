@@ -641,6 +641,28 @@ p2pgate connect -s <secret> -p <password> --socks5 1080
 
 ---
 
+## 9.4) การหมุน masterSecret
+
+`masterSecret` ใช้สร้าง DHT identity ของ Server เมื่อหมุนแล้ว public key จะเปลี่ยน
+ทำให้ client ทุกเครื่องต้องอัปเดตตาม
+
+```sh
+# Server
+p2pgate master show            # ดู fingerprint (--reveal = ค่าเต็ม)
+p2pgate master reset --yes     # สำรอง config แล้วเขียนค่าใหม่ จากนั้นรีสตาร์ต
+
+# Client ทุกเครื่อง
+p2pgate connect -s <masterSecret ใหม่> -p <password>
+```
+
+- `p2pgate master reset --dry-run` ดูว่าจะเปลี่ยนอะไรโดยไม่เขียนไฟล์
+- config เดิมถูกคัดลอกเป็น `config.json.bak-<timestamp>` (โหมด `0600`)
+- บันทึก audit event `master.reset`
+- **ไม่กระทบ** connection password และ trusted device keys
+- ถ้าไม่ใส่ `--yes` จะถามยืนยัน；ใน non-interactive shell ต้องใส่ `--yes`
+
+---
+
 ## 10) สิ่งที่ต้องมี
 
 - มือถือ Android + Termux + Termux:Boot (F-Droid)
@@ -924,6 +946,8 @@ tail -f ~/.p2pgate/server.log
 | `p2pgate connect -s <secret> -p <password>` | เชื่อมต่อแบบบรรทัดเดียว |
 | `p2pgate connect --target <name>` | เชื่อมต่อ target ที่ประกาศไว้บน Server |
 | `p2pgate connect --socks5 <port>` | เปิด SOCKS5 gateway ในเครื่อง (allowlist อยู่ที่ Server) |
+| `p2pgate master show [--reveal]` | แสดง fingerprint ของ masterSecret |
+| `p2pgate master reset --yes` | หมุน masterSecret พร้อมสำรอง config |
 | `p2pgate keygen` | สร้าง/แสดงกุญแจ Client |
 | `p2pgate keygen --passphrase` | ตั้ง/เปลี่ยน passphrase สำหรับ client key |
 | `p2pgate keygen --unprotect` | ถอด passphrase (ต้องยืนยันของเดิม) |
@@ -1135,7 +1159,8 @@ p2pgate/
 │   │   ├── v1.7.0.md
 │   │   ├── v1.8.0.md
 │   │   ├── v1.8.1.md
-│   │   └── v1.8.2.md
+│   │   ├── v1.8.2.md
+│   │   └── v1.8.3.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
@@ -1145,6 +1170,7 @@ p2pgate/
 │       ├── phase7-v1.6.0.md
 │       ├── phase8-targets.md
 │       ├── phase9-socks5.md
+│       ├── phase10-master.md
 │       └── project-spec.md
 ├── package.json
 ├── package-lock.json
@@ -1175,6 +1201,7 @@ p2pgate/
     ├── doctor.js
     ├── i18n.js
     ├── keygen.js
+    ├── master.js
     ├── quickstart.js
     ├── self-test.js
     ├── server.js
