@@ -584,6 +584,36 @@ Set `"auditLog": { "enabled": false }` to disable it.
 
 ---
 
+## 9.2) Multi-target routing
+
+Declare several loopback services on the Server and let each Client pick one by
+name. No `ssh -L`, no `sshd` required for services that have no shell.
+
+```json
+"targets": {
+  "ssh": { "host": "127.0.0.1", "port": 2222 },
+  "web": { "host": "127.0.0.1", "port": 8080 },
+  "db":  { "host": "127.0.0.1", "port": 5432, "allow": ["<clientKeyHex>"] }
+},
+"defaultTarget": "ssh"
+```
+
+```sh
+p2pgate connect -s <secret> -p <password> --target web --port 8080
+# 127.0.0.1:8080 on the client  ->  127.0.0.1:8080 on the server
+```
+
+Rules:
+
+- clients send a target **name**, never `host:port`
+- `host` must be `127.0.0.1` (p2pgate never forwards to a remote host)
+- `allow` is optional; `"*"` means any authenticated client
+- a config without `targets` behaves exactly like v1.6
+- clients that omit `--target` use `defaultTarget`
+- unknown/forbidden targets are rejected without contacting the service
+
+---
+
 ## 10) Requirements
 
 - Android phone + Termux + Termux:Boot (F-Droid), optional
@@ -870,6 +900,7 @@ Messages never contain the PIN or password.
 | `p2pgate server --port <targetPort>` | Start the Server with a target-port override for this run only |
 | `p2pgate connect` | Connect from a Client with masterSecret + password |
 | `p2pgate connect -s <secret> -p <password>` | One-line client connect |
+| `p2pgate connect --target <name>` | Connect to a named target declared on the Server |
 | `p2pgate keygen` | Create/show the Client key |
 | `p2pgate keygen --passphrase` | Protect an existing/new key with a passphrase |
 | `p2pgate keygen --unprotect` | Remove passphrase protection (prompts) |

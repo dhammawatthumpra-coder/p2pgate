@@ -169,6 +169,19 @@ async function startClient(config, options = {}) {
     config.localPort === undefined ? 8022 : config.localPort
   )
 
+  const configTarget = typeof config.target === 'string' && config.target.trim() !== ''
+    ? config.target.trim()
+    : null
+  const requestedTarget = typeof options.target === 'string' && options.target.trim() !== ''
+    ? options.target.trim()
+    : configTarget
+
+  if (requestedTarget !== null && !/^[A-Za-z0-9_-]{1,32}$/.test(requestedTarget)) {
+    const err = new Error('target must be 1-32 chars: A-Z a-z 0-9 _ -')
+    err.code = 'CONFIG_INVALID'
+    throw err
+  }
+
   const log = typeof options.log === 'function'
     ? options.log
     : (line) => console.log(line)
@@ -495,6 +508,20 @@ async function startClient(config, options = {}) {
   function throwResultError(result) {
     const error = typeof result.error === 'string' ? result.error : 'AUTH_FAILED'
 
+    if (error === 'TARGET_UNKNOWN') {
+      throw new AuthError(
+        'เซิร์ฟเวอร์ไม่มี target ชื่อนี้ (ตรวจ `targets` ใน config ฝั่ง Server)',
+        'TARGET_UNKNOWN'
+      )
+    }
+
+    if (error === 'TARGET_FORBIDDEN') {
+      throw new AuthError(
+        'target นี้ไม่อนุญาตให้ client key นี้ (ตรวจ `allow` ของ target ฝั่ง Server)',
+        'TARGET_FORBIDDEN'
+      )
+    }
+
     if (error === 'LOCKED_OUT') {
       const minutes = Number.isFinite(result.retryAfterMs)
         ? Math.max(1, Math.ceil(result.retryAfterMs / 60_000))
@@ -657,12 +684,18 @@ async function startClient(config, options = {}) {
     const proof = computeScramProof(verifier.clientKey, verifier.storedKey, authMessage)
 
     try {
-      encrypted.write(encodeControl({
+      const proofMessage = {
         v: AUTH_VERSION,
         mode,
         clientNonce: clientNonceHex,
         proof: proof.toString('hex')
-      }))
+      }
+
+      if (requestedTarget !== null) {
+        proofMessage.target = requestedTarget
+      }
+
+      encrypted.write(encodeControl(proofMessage))
     } catch {
       throw new AuthError('ไม่สามารถส่งข้อมูลยืนยันตัวตนได้', 'AUTH_PROTOCOL')
     }
@@ -711,12 +744,26 @@ async function startClient(config, options = {}) {
       )
     }
 
+    let serverTarget = null
+
+    if (result.target && typeof result.target === 'object') {
+      const name = typeof result.target.name === 'string' ? result.target.name : ''
+      const port = Number(result.target.port)
+
+      if (/^[A-Za-z0-9_-]{1,32}$/.test(name) &&
+        Number.isInteger(port) && port >= 1 && port <= 65535) {
+        serverTarget = { name, host: '127.0.0.1', port }
+        writeLog(`TARGET ${serverTarget.name} -> ${serverTarget.host}:${serverTarget.port}`)
+      }
+    }
+
     return {
       leftover: Buffer.concat([
         statusRead.leftover,
         challengeRead.leftover,
         resultRead.leftover
-      ])
+      ]),
+      target: serverTarget
     }
   }
 
@@ -785,7 +832,8 @@ async function startClient(config, options = {}) {
         const authResult = await authenticateEncrypted(encrypted)
 
         writeLog(
-          `TUNNEL established slot=${slot} serverKey=${publicKey.toString('hex')}`
+          `TUNNEL established slot=${slot} serverKey=${publicKey.toString('hex')}` +
+            `${authResult.target ? ` target=${authResult.target.name}` : ''}`
         )
 
         pump(encrypted, socket, entry, (finishedEntry) => {

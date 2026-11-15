@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-15
-สถานะ: **v1.6.4 released** (npm + GitHub Release)
+สถานะ: **v1.7.0 prepared** (feature: multi-target routing; npm ยังเป็น 1.6.4 จนกว่าจะ publish)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -13,7 +13,7 @@
 วางข้อความนี้ใน session ใหม่:
 
 ```text
-โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.6.4)
+โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.7.0)
 อ่าน docs/HANDOFF.md ก่อน แล้วสรุปสถานะปัจจุบันและรอคำสั่ง
 ```
 
@@ -38,7 +38,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 |---|---|
 | Repo | https://github.com/dhammawatthumpra-coder/p2pgate |
 | npm | https://www.npmjs.com/package/p2pgate |
-| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.6.4 |
+| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.7.0 |
 
 ---
 
@@ -46,14 +46,14 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.6.4` (patch: `server --port`, พร้อม publish) |
-| npm `latest` | `1.6.4` |
+| Version | `1.7.0` (feature: `targets`, พร้อม publish) |
+| npm `latest` | `1.6.4` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `c09e1ec chore(release): re-cut server --port as v1.6.4` |
-| Tag | `v1.6.4` |
-| GitHub Release | `v1.6.4` = Latest |
+| Commit | `__COMMIT__` |
+| Tag | `v1.7.0` |
+| GitHub Release | `v1.6.4` = Latest; `v1.7.0` ยังไม่สร้าง |
 | Working tree | clean |
-| Tests | `npm test` → **37 checks PASSED** (Windows + Termux) |
+| Tests | `npm test` → **41 checks PASSED** (Windows + Termux) |
 | src | 16 ไฟล์, `src/self-test.js` ~1,331 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
@@ -69,6 +69,14 @@ npm view p2pgate version
 ---
 
 ## 3. v1.6.0 / v1.6.1 ทำอะไรไปแล้ว
+
+### v1.7.0 (feature)
+
+- `targets` map: Server expose หลาย service (`ssh`, `web`, `db`)
+- `connect --target <name>` / `client --target <name>`
+- per-target `allow` list, `defaultTarget` สำหรับ client รุ่นเก่า
+- Client log `TARGET <name> -> 127.0.0.1:<port>`; `status --json` มี `targets`
+- client ส่งได้เฉพาะชื่อ target (กัน SSRF), host ต้องเป็น 127.0.0.1
 
 ### v1.6.4 (patch)
 
@@ -157,7 +165,7 @@ p2pgate connect -s <masterSecret> -p <password>
 | `src/keygen.js` | client key + passphrase protection |
 | `src/setup-wizard.js` | advanced setup + `--easy` + i18n |
 | `src/i18n.js` | `P2PGATE_LANG` / `--lang` / `t(th, en)` |
-| `src/self-test.js` | 37 checks รวม password mode, slow credential, stream-close retry |
+| `src/self-test.js` | 41 checks รวม password mode, slow credential, retry, targets |
 
 Docs: `docs/specs/phase7-v1.6.0.md` (spec), `docs/releases/v1.6.3.md` (patch notes),
 `docs/SERVICE.md` (service/Termux/systemd/Windows runbook),
@@ -170,7 +178,7 @@ Docs: `docs/specs/phase7-v1.6.0.md` (spec), `docs/releases/v1.6.3.md` (patch not
 
 ```powershell
 # dev
-npm test                 # check + 37 self-test checks
+npm test                 # check + 41 self-test checks
 npm run check            # syntax check ทุกไฟล์
 npm run self-test
 
@@ -211,6 +219,8 @@ p2pgate unlock --list
    storedKey|serverKey|token|privateKey|key`
 9. **ไม่เพิ่ม dependency ภายนอก** นอกจาก `hyperdht`
 10. **`p2pgate server` ต้องรันก่อน** `p2pgate connect` (ไม่ใช่บั๊ก)
+11. **target ต้องเป็นชื่อจาก `targets` ของ Server เท่านั้น** — client ห้ามส่ง
+    `host:port` และ `host` ต้องเป็น `127.0.0.1` (กัน SSRF)
 
 ---
 
@@ -267,8 +277,7 @@ p2pgate unlock --list
 1. **Soak + multi-client** — รัน 24 ชม., หลาย client พร้อมกัน, เก็บ log
 2. **Network switching** — ปิด/เปิด Wi-Fi, สลับ 4G, ดูว่า reconnect เองได้
 3. **เปิด CI** — แก้ billing หรือย้ายไป CI อื่น (workflow มีอยู่แต่ disable)
-4. **v1.7.0 `targets` (multi-port)** — `targets: { ssh: 22, web: 443 }`
-   และ `connect --target web`
+4. **v1.8.0 SOCKS5** — `connect --socks5 <port>` + allowlist ฝั่ง server
 5. **แปล legacy CLI/doctor ให้ครบ en/th**
 6. **เตรียม core สำหรับ p2phub** — `p2pgate enroll`, `p2pgate agent`,
    client config `serverPublicKey`, `connect --name` (ดูข้อ 10)
@@ -309,14 +318,14 @@ npm test
 git status --short
 
 # 2. เลขรุ่น + docs
-npm version 1.7.0 --no-git-tag-version --ignore-scripts
-# แก้ CHANGELOG.md, README.md, README.th.md, docs/releases/v1.7.0.md,
+npm version 1.8.0 --no-git-tag-version --ignore-scripts
+# แก้ CHANGELOG.md, README.md, README.th.md, docs/releases/v1.8.0.md,
 # docs/specs/phaseX-v1.7.0.md, TESTING.md (จำนวน checks)
 
 # 3. commit + tag + push
 git add -A
-git commit -m "feat(release): v1.7.0 <summary>"
-git tag -a v1.7.0 -m "p2pgate v1.7.0"
+git commit -m "feat(release): v1.8.0 <summary>"
+git tag -a v1.8.0 -m "p2pgate v1.8.0"
 git push origin main
 git push origin v1.7.0
 
@@ -324,8 +333,8 @@ git push origin v1.7.0
 npm publish
 
 # 5. GitHub Release
-gh release create v1.7.0 --draft --title "p2pgate v1.7.0" --notes-file docs/releases/v1.7.0.md
-gh release edit v1.7.0 --draft=false --latest --notes-file docs/releases/v1.7.0.md
+gh release create v1.8.0 --draft --title "p2pgate v1.8.0" --notes-file docs/releases/v1.8.0.md
+gh release edit v1.8.0 --draft=false --latest --notes-file docs/releases/v1.8.0.md
 
 # 6. ตรวจ
 npm view p2pgate version
@@ -403,7 +412,7 @@ ssh -p 8022 -o BatchMode=yes -o StrictHostKeyChecking=no `
 cd D:\tunnel\p2pgate
 git status --short          # ต้องรู้ว่ามีไฟล์ค้างไหม
 git log --oneline -3
-npm test                    # ต้องได้ 37 checks (หรือมากกว่า)
+npm test                    # ต้องได้ 41 checks (หรือมากกว่า)
 npm view p2pgate version    # ต้องเป็น 1.6.1
 ```
 

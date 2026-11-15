@@ -213,6 +213,93 @@ async function startServer(config, options = {}) {
   const targetPort = validateTargetPort(config.targetPort === undefined ? 8022 : config.targetPort)
   const telegram = validateTelegramConfig(config.telegramAlert)
 
+  const targetDefs = new Map()
+
+  if (config.targets && typeof config.targets === 'object' && !Array.isArray(config.targets)) {
+    for (const name of Object.keys(config.targets)) {
+      if (!/^[A-Za-z0-9_-]{1,32}$/.test(name)) {
+        const err = new Error(`invalid target name "${name}"`)
+        err.code = 'CONFIG_INVALID'
+        throw err
+      }
+
+      const entry = config.targets[name]
+
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        const err = new Error(`targets.${name} must be an object`)
+        err.code = 'CONFIG_INVALID'
+        throw err
+      }
+
+      const host = entry.host === undefined ? '127.0.0.1' : String(entry.host)
+
+      if (host !== '127.0.0.1') {
+        const err = new Error(`targets.${name}.host must be 127.0.0.1`)
+        err.code = 'CONFIG_INVALID'
+        throw err
+      }
+
+      const port = validateTargetPort(entry.port)
+      const allow = Array.isArray(entry.allow)
+        ? entry.allow.map((value) => String(value))
+        : null
+
+      targetDefs.set(name, { name, host, port, allow })
+    }
+  }
+
+  if (targetDefs.size === 0) {
+    targetDefs.set('default', {
+      name: 'default',
+      host: '127.0.0.1',
+      port: targetPort,
+      allow: null
+    })
+  }
+
+  const defaultTargetName = (() => {
+    const requested = typeof config.defaultTarget === 'string' ? config.defaultTarget.trim() : ''
+    if (requested !== '' && targetDefs.has(requested)) return requested
+    if (targetDefs.has('default')) return 'default'
+    return targetDefs.keys().next().value
+  })()
+
+  const effectiveTargetPort = targetDefs.get(defaultTargetName).port
+
+  /**
+   * Resolves a client-supplied target name against the server-side allowlist.
+   * Clients never send host:port; only a name from the config is accepted.
+   */
+  function resolveTarget(requestedName, remoteHex) {
+    const name = typeof requestedName === 'string' && requestedName.trim() !== ''
+      ? requestedName.trim()
+      : defaultTargetName
+
+    if (!/^[A-Za-z0-9_-]{1,32}$/.test(name) || !targetDefs.has(name)) {
+      const err = new Error(`unknown target "${name}"`)
+      err.code = 'TARGET_UNKNOWN'
+      throw err
+    }
+
+    const target = targetDefs.get(name)
+
+    if (Array.isArray(target.allow)) {
+      const wanted = String(remoteHex).toLowerCase()
+      const allowed = target.allow.some((entry) => {
+        return entry === '*' || entry.toLowerCase() === wanted
+      })
+
+      if (!allowed) {
+        const err = new Error(`target "${name}" is not allowed for this client`)
+        err.code = 'TARGET_FORBIDDEN'
+        throw err
+      }
+    }
+
+    return target
+  }
+
+
   if (config.authPin && config.authPin.unattendedPasswordHash !== undefined) {
     const err = new Error(
       'v1.1 authPin format detected; run p2pgate setup to migrate the credential'
@@ -531,7 +618,7 @@ async function startServer(config, options = {}) {
           return
         }
 
-        forwardToTarget(stream, entry, remoteHex, slot, result.leftover)
+        forwardToTarget(stream, entry, remoteHex, slot, result.leftover, result.target)
       })
       .catch((err) => {
         writeLog(`AUTH ERROR client=${remoteHex}: ${err.message}`)
@@ -806,6 +893,25 @@ async function startServer(config, options = {}) {
         return handleAuthFailure(stream, remoteHex, mode, pinGenerationAtStart)
       }
 
+      let selectedTarget
+      try {
+        selectedTarget = resolveTarget(response && response.target, remoteHex)
+      } catch (err) {
+        writeLog(`AUTH REJECTED client=${remoteHex} reason=${err.code}`)
+        void audit.record('auth.declined', {
+          source: 'server',
+          key: remoteHex,
+          reason: err.code
+        })
+        writeAuthMessage(stream, {
+          v: AUTH_VERSION,
+          ok: false,
+          error: err.code
+        })
+        endAuthStream(stream)
+        return { ok: false }
+      }
+
       try {
         await authGuard.recordSuccess(remoteHex)
       } catch (err) {
@@ -813,25 +919,40 @@ async function startServer(config, options = {}) {
       }
 
       const serverSig = computeServerSignature(verifier.serverKey, authMessage).toString('hex')
-      writeAuthMessage(stream, { v: AUTH_VERSION, ok: true, serverSig })
-      writeLog(`AUTH OK client=${remoteHex} method=${mode}`)
+      writeAuthMessage(stream, {
+        v: AUTH_VERSION,
+        ok: true,
+        serverSig,
+        target: {
+          name: selectedTarget.name,
+          host: selectedTarget.host,
+          port: selectedTarget.port
+        }
+      })
+      writeLog(`AUTH OK client=${remoteHex} method=${mode} target=${selectedTarget.name}`)
       void audit.record('auth.success', {
         source: 'server',
         key: remoteHex,
-        mode
+        mode,
+        target: selectedTarget.name
       })
 
       return {
         ok: true,
-        leftover: Buffer.concat([readyRead.leftover, read.leftover])
+        leftover: Buffer.concat([readyRead.leftover, read.leftover]),
+        target: selectedTarget
       }
     } finally {
       gate.release()
     }
   }
 
-  function forwardToTarget(stream, entry, remoteHex, slot, leftover) {
-    const socket = net.createConnection({ host: '127.0.0.1', port: targetPort })
+  function forwardToTarget(stream, entry, remoteHex, slot, leftover, target) {
+    const forwardTarget = target || targetDefs.get(defaultTargetName)
+    const socket = net.createConnection({
+      host: forwardTarget.host,
+      port: forwardTarget.port
+    })
     entry.socket = socket
     socket.setKeepAlive(true, 30_000)
     socket.setNoDelay(true)
@@ -868,7 +989,9 @@ async function startServer(config, options = {}) {
       }
 
       socket.setKeepAlive(true, 30_000)
-      writeLog(`FORWARD client=${remoteHex} slot=${slot} -> 127.0.0.1:${targetPort}`)
+      writeLog(
+        `FORWARD client=${remoteHex} slot=${slot} target=${forwardTarget.name} -> 127.0.0.1:${forwardTarget.port}`
+      )
 
       if (leftover && leftover.length > 0) {
         try {
@@ -1076,6 +1199,9 @@ async function startServer(config, options = {}) {
         mode: 'server',
         verificationMode,
         authMode,
+        targetPort: effectiveTargetPort,
+        targets: [...targetDefs.keys()].sort(),
+        defaultTarget: defaultTargetName,
         currentSlot,
         listeningSlots: [...listeners.keys()].sort((a, b) => a - b),
         sessionGeneration: authGuard.pinGeneration,
@@ -1176,7 +1302,7 @@ async function startServer(config, options = {}) {
     const text = [
       '✅ p2pgate server เริ่มทำงานแล้ว',
       `เวลา: ${nowIso()}`,
-      `พอร์ตปลายทาง: 127.0.0.1:${targetPort}`,
+      `พอร์ตปลายทาง: 127.0.0.1:${effectiveTargetPort}`,
       `โหมดยืนยันตัวตน: ${verificationMode}`,
       `อุปกรณ์ที่ลงทะเบียน: ${registry.size}`
     ].join('\n')

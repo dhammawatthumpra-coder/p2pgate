@@ -58,7 +58,9 @@ const HELP_TEXT = `p2pgate v1.6 — อุโมงค์ TCP แบบ P2P ส�
       --port: เปลี่ยนพอร์ตปลายทางเฉพาะรอบนี้ (ไม่บันทึก)
 
   p2pgate connect [-s <masterSecret>] [-p <password>] [--port <localPort>]
+      [--target <name>]
       เชื่อมต่อจาก Client และสร้าง client key อัตโนมัติ
+      --target: เลือก service ที่ประกาศไว้ใน targets ของ Server
 
   p2pgate setup [--easy] [--mode server|client] [--config <path>]
       ตั้งค่าแบบ advanced
@@ -69,7 +71,7 @@ const HELP_TEXT = `p2pgate v1.6 — อุโมงค์ TCP แบบ P2P ส�
       --passphrase: ตั้ง/เปลี่ยน passphrase สำหรับ client key
 
   p2pgate client [--config <path>] [--port <localPort>] [--pin-stdin]
-      [--key-passphrase-stdin]
+      [--key-passphrase-stdin] [--target <name>]
       เริ่มอุโมงค์แบบ advanced (ใช้ config ที่ตั้งไว้แล้ว)
 
   p2pgate devices list [--config <path>]
@@ -151,9 +153,12 @@ Usage:
       --port: override the target port for this run only (not saved)
 
   p2pgate connect [-s <masterSecret>] [-p <password>] [--port <localPort>]
+      [--target <name>]
       Connect from a Client. Generates a client key automatically.
+      --target: pick a service declared in the Server targets map
 
   p2pgate client [--config <path>] [--port <localPort>] [--pin-stdin]
+      [--target <name>]
   p2pgate setup [--easy] [--mode server|client] [--config <path>]
       Advanced configuration.
 
@@ -530,6 +535,21 @@ async function commandServer(values) {
 
     // Runtime override only: the config file keeps its own targetPort.
     config.targetPort = targetPort
+
+    if (config.targets && typeof config.targets === 'object') {
+      const name = config.defaultTarget && config.targets[config.defaultTarget]
+        ? config.defaultTarget
+        : Object.keys(config.targets)[0]
+
+      if (name) {
+        const current = config.targets[name] || {}
+        config.targets = {
+          ...config.targets,
+          [name]: { ...current, port: targetPort }
+        }
+      }
+    }
+
     portOverride = true
   }
 
@@ -575,10 +595,22 @@ async function commandServer(values) {
   const address = server.currentPublicKeyHex()
 
   process.stdout.write(t('\n✅ เซิร์ฟเวอร์พร้อมทำงานแล้ว\n', '\n✅ Server is ready\n'))
+  const targetList = config.targets && typeof config.targets === 'object'
+    ? Object.keys(config.targets)
+      .map((name) => `${name}=${config.targets[name].port}`)
+      .join(', ')
+    : ''
+
   process.stdout.write(t(
-    `   ส่งต่อไปยัง: 127.0.0.1:${config.targetPort}${portOverride ? ' (override รอบนี้ ไม่บันทึก)' : ''}\n`,
-    `   Target: 127.0.0.1:${config.targetPort}${portOverride ? ' (this run only, not saved)' : ''}\n`
+    `   Targets: ${targetList}${portOverride ? ' (default overridden for this run)' : ''}\n`,
+    `   Targets: ${targetList}${portOverride ? ' (default overridden for this run)' : ''}\n`
   ))
+  if (config.defaultTarget) {
+    process.stdout.write(t(
+      `   Default target: ${config.defaultTarget}\n`,
+      `   Default target: ${config.defaultTarget}\n`
+    ))
+  }
   process.stdout.write(t(
     `   โหมดยืนยันตัวตน: ${server.verificationMode} (${server.authMode})\n`,
     `   Verification: ${server.verificationMode} (${server.authMode})\n`
@@ -650,7 +682,8 @@ async function commandClient(values) {
 
   const client = await startClient(config, {
     pinStdin: values['pin-stdin'] === true,
-    keyPassphrase
+    keyPassphrase,
+    target: values.target === undefined ? undefined : String(values.target)
   })
   const address = client.address()
 
@@ -814,6 +847,20 @@ async function commandConnect(values) {
   })
 
   if (values.port !== undefined) config.localPort = localPort
+
+  const requestedTarget = values.target === undefined
+    ? (existing && typeof existing.target === 'string' ? existing.target : null)
+    : String(values.target).trim()
+
+  if (requestedTarget !== null) {
+    if (!/^[A-Za-z0-9_-]{1,32}$/.test(requestedTarget)) {
+      const err = new Error('--target ต้องเป็น 1-32 ตัวอักษร: A-Z a-z 0-9 _ -')
+      err.code = 'CONFIG_INVALID'
+      throw err
+    }
+    config.target = requestedTarget
+  }
+
   await saveConfig(configPath, config)
 
   process.stdout.write(t(
@@ -1457,6 +1504,7 @@ async function main(argv) {
         config: { type: 'string', short: 'c' },
         port: { type: 'string' },
         'target-port': { type: 'string' },
+        target: { type: 'string' },
         secret: { type: 'string', short: 's' },
         password: { type: 'string', short: 'p' },
         'secret-stdin': { type: 'boolean' },

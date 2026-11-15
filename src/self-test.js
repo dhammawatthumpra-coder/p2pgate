@@ -718,7 +718,8 @@ async function main() {
           input: options.input,
           output: options.output,
           keyPassphrase: options.keyPassphrase,
-          credential
+          credential,
+          target: options.target
         }
       )
       clients.push(client)
@@ -1411,6 +1412,123 @@ async function main() {
     checks.push('client retries once when the auth stream closes mid-handshake')
     await retryClient.close()
     await retryServer.close()
+
+    // ---------------------------------------------------------------------
+    // 10d-4. multi-target routing and per-target allowlists
+    // ---------------------------------------------------------------------
+    const webBanner = Buffer.from('P2PGATE-WEB-BANNER\n')
+    let webConnections = 0
+
+    const webEchoServer = net.createServer((socket) => {
+      webConnections += 1
+      socket.on('error', noop)
+      socket.write(webBanner)
+      socket.pipe(socket)
+    })
+
+    await new Promise((resolve, reject) => {
+      webEchoServer.once('error', reject)
+      webEchoServer.listen(0, '127.0.0.1', resolve)
+    })
+
+    const webPort = webEchoServer.address().port
+    const targetSecret = crypto.randomBytes(32).toString('hex')
+
+    const targetServer = await startServer({
+      mode: 'server',
+      masterSecret: targetSecret,
+      authMode: 'password',
+      targetHost: '127.0.0.1',
+      targetPort: echoPort,
+      targets: {
+        default: { host: '127.0.0.1', port: echoPort },
+        web: { host: '127.0.0.1', port: webPort },
+        locked: { host: '127.0.0.1', port: webPort, allow: [second.publicKey] }
+      },
+      defaultTarget: 'default',
+      localPort: 8022,
+      clientKeyPath: path.join(tempDir, 'target-server-key.json'),
+      allowedClientKeys: [],
+      verificationMode: 'hybrid',
+      trustedDevicesFile: path.join(tempDir, 'target-devices'),
+      auditLog: { enabled: false },
+      customBootstrap: bootstrap,
+      authPin: { enabled: true, unattended: unattendedVerifier },
+      telegramAlert: { enabled: false, botToken: '', chatId: '' }
+    }, {
+      log: quiet,
+      showSessionPin: false,
+      sendStartupAlert: false,
+      failDelayMs: [10, 20],
+      lockoutStatePath: path.join(tempDir, 'target-lockout.json'),
+      authTimeoutMs: 4_000,
+      interactive: false,
+      controlSocketPath: controlPathFor('target'),
+      controlTokenPath: path.join(tempDir, 'control-target.token')
+    })
+    extraServers.push(targetServer)
+
+    const targetClientBase = { ...clientBase, masterSecret: targetSecret }
+
+    const webTargetClient = await startTestClient(
+      unauthorizedKeyPath,
+      unattendedPassword,
+      { base: targetClientBase, target: 'web' }
+    )
+    const webSocket = await connectLocal(webTargetClient.address().port)
+    const webBannerRead = await readExactly(webSocket, webBanner.length, 15_000)
+    assert.deepEqual(webBannerRead, webBanner)
+    webSocket.destroy()
+    checks.push('multi-target routing reaches the selected service')
+    await webTargetClient.close()
+
+    const unknownTargetClient = await startTestClient(
+      unauthorizedKeyPath,
+      unattendedPassword,
+      { base: targetClientBase, target: 'nope' }
+    )
+    const targetBeforeUnknown = targetConnections
+    const unknownTargetResult = await sendAndExpectNoEcho(
+      unknownTargetClient.address().port,
+      Buffer.from('unknown-target')
+    )
+    assert.equal(unknownTargetResult.closed, true)
+    assert.equal(unknownTargetResult.received, 0)
+    assert.equal(targetConnections, targetBeforeUnknown)
+    checks.push('unknown target is rejected without touching the default target')
+    await unknownTargetClient.close()
+
+    const forbiddenTargetClient = await startTestClient(
+      unauthorizedKeyPath,
+      unattendedPassword,
+      { base: targetClientBase, target: 'locked' }
+    )
+    const webBeforeForbidden = webConnections
+    const forbiddenTargetResult = await sendAndExpectNoEcho(
+      forbiddenTargetClient.address().port,
+      Buffer.from('forbidden-target')
+    )
+    assert.equal(forbiddenTargetResult.closed, true)
+    assert.equal(forbiddenTargetResult.received, 0)
+    assert.equal(webConnections, webBeforeForbidden)
+    checks.push('per-target allowlist rejects a client key')
+
+    const defaultTargetClient = await startTestClient(
+      unauthorizedKeyPath,
+      unattendedPassword,
+      { base: targetClientBase }
+    )
+    const defaultTargetPayload = crypto.randomBytes(64)
+    assert.deepEqual(
+      await echoThrough(defaultTargetClient, defaultTargetPayload),
+      defaultTargetPayload
+    )
+    checks.push('a client without a target still uses the default target')
+
+    await forbiddenTargetClient.close()
+    await defaultTargetClient.close()
+    await targetServer.close()
+    await new Promise((resolve) => webEchoServer.close(resolve))
 
     // ---------------------------------------------------------------------
     // 10e. Doctor and trusted-device expiry enforcement

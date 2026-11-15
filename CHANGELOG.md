@@ -7,6 +7,31 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.7.0] - 2026-11-15
+
+### Added
+
+- `targets` config: Server expose หลาย service พร้อมกัน
+  `{ "web": { "host": "127.0.0.1", "port": 8080 } }`
+- `defaultTarget` สำหรับ client รุ่นเก่าที่ไม่ส่ง target
+- `p2pgate connect --target <name>` / `p2pgate client --target <name>`
+- per-target `allow` list (คีย์ client หรือ `"*"`)
+- Client log `TARGET <name> -> 127.0.0.1:<port>` และ `target=` ใน `TUNNEL established`
+- `status --json` เพิ่ม `targets` และ `defaultTarget`
+
+### Changed
+
+- Server banner แสดงรายการ targets + default target
+- `server --port` override ค่า default target เฉพาะรอบ
+- `FORWARD` log ระบุ `target=<name>`
+
+### Security
+
+- Client ส่งได้เฉพาะ **ชื่อ target** — ไม่มีทางส่ง `host:port` ดิบ (กัน SSRF)
+- target ต้องเป็น `127.0.0.1` เท่านั้น
+- target ที่ไม่รู้จัก/ไม่อยู่ใน allowlist ถูกปฏิเสธโดยไม่แตะ service ปลายทาง
+  และไม่นับเป็น auth failure (ไม่เพิ่ม lockout)
+
 ## [1.6.4] - 2026-11-15
 
 ### Added

@@ -568,6 +568,36 @@ Server และ CLI เขียนเหตุการณ์ด้านค�
 
 ---
 
+## 9.2) Multi-target routing
+
+ประกาศ service หลายตัวบน Server แล้วให้ Client เลือกเป็นชื่อ ไม่ต้องใช้
+`ssh -L` และไม่ต้องมี `sshd` สำหรับ service ที่ไม่มี shell
+
+```json
+"targets": {
+  "ssh": { "host": "127.0.0.1", "port": 2222 },
+  "web": { "host": "127.0.0.1", "port": 8080 },
+  "db":  { "host": "127.0.0.1", "port": 5432, "allow": ["<clientKeyHex>"] }
+},
+"defaultTarget": "ssh"
+```
+
+```sh
+p2pgate connect -s <secret> -p <password> --target web --port 8080
+# 127.0.0.1:8080 ฝั่ง client  ->  127.0.0.1:8080 ฝั่ง server
+```
+
+กติกา:
+
+- client ส่งได้เฉพาะ **ชื่อ target** ไม่ใช่ `host:port`
+- `host` ต้องเป็น `127.0.0.1` (p2pgate ไม่ forward ออกนอกเครื่อง)
+- `allow` ไม่บังคับ; `"*"` = client ที่ผ่าน auth ทุกตัว
+- config ที่ไม่มี `targets` ทำงานเหมือน v1.6 ทุกประการ
+- client ที่ไม่ระบุ `--target` ใช้ `defaultTarget`
+- target ที่ไม่รู้จัก/ไม่อยู่ใน allowlist ถูกปฏิเสธโดยไม่แตะ service
+
+---
+
 ## 10) สิ่งที่ต้องมี
 
 - มือถือ Android + Termux + Termux:Boot (F-Droid)
@@ -849,6 +879,7 @@ tail -f ~/.p2pgate/server.log
 | `p2pgate server --port <targetPort>` | เริ่ม Server โดย override พอร์ตปลายทางเฉพาะรอบนี้ |
 | `p2pgate connect` | เชื่อมต่อด้วย masterSecret + password |
 | `p2pgate connect -s <secret> -p <password>` | เชื่อมต่อแบบบรรทัดเดียว |
+| `p2pgate connect --target <name>` | เชื่อมต่อ target ที่ประกาศไว้บน Server |
 | `p2pgate keygen` | สร้าง/แสดงกุญแจ Client |
 | `p2pgate keygen --passphrase` | ตั้ง/เปลี่ยน passphrase สำหรับ client key |
 | `p2pgate keygen --unprotect` | ถอด passphrase (ต้องยืนยันของเดิม) |

@@ -23,8 +23,110 @@ const DEFAULT_CONFIG_PATH = path.join(DEFAULT_CONFIG_DIR, 'config.json')
 const DEFAULT_CLIENT_KEY_PATH = path.join(DEFAULT_CONFIG_DIR, 'client-key.json')
 
 const TARGET_HOST = '127.0.0.1'
+const TARGET_NAME_RE = /^[A-Za-z0-9_-]{1,32}$/
+const RESERVED_TARGET_NAMES = new Set(['__proto__', 'prototype', 'constructor'])
 const VALID_MODES = new Set(['server', 'client'])
 const AUTH_MODES = Object.freeze(['password', 'registry'])
+
+function isValidTargetName(name) {
+  return typeof name === 'string' &&
+    TARGET_NAME_RE.test(name) &&
+    !RESERVED_TARGET_NAMES.has(name.toLowerCase())
+}
+
+/**
+ * Normalizes the optional multi-target map. A config without `targets` keeps
+ * the v1.6 single-target behaviour via a synthetic "default" entry.
+ */
+function normalizeTargets(raw, fallbackPort) {
+  const rawTargets = raw.targets
+
+  if (rawTargets === undefined || rawTargets === null) {
+    const targets = Object.create(null)
+    targets.default = { host: TARGET_HOST, port: fallbackPort, allow: null }
+    return { targets, defaultTarget: 'default' }
+  }
+
+  if (typeof rawTargets !== 'object' || Array.isArray(rawTargets)) {
+    throw new ConfigError('targets must be an object of name -> { port }', 'CONFIG_INVALID')
+  }
+
+  const names = Object.keys(rawTargets)
+  const targets = Object.create(null)
+
+  for (const name of names) {
+    if (!isValidTargetName(name)) {
+      throw new ConfigError(
+        `targets.${name} is not a valid name (1-32 chars: A-Z a-z 0-9 _ -)`,
+        'CONFIG_INVALID'
+      )
+    }
+
+    const entry = rawTargets[name]
+
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new ConfigError(`targets.${name} must be an object`, 'CONFIG_INVALID')
+    }
+
+    const host = entry.host === undefined ? TARGET_HOST : String(entry.host).trim()
+
+    if (host !== TARGET_HOST) {
+      throw new ConfigError(
+        `targets.${name}.host must be ${TARGET_HOST} (p2pgate never forwards to a remote host)`,
+        'CONFIG_INVALID'
+      )
+    }
+
+    const port = parsePort(entry.port, `targets.${name}.port`)
+
+    let allow = null
+    if (entry.allow !== undefined) {
+      if (!Array.isArray(entry.allow) || entry.allow.length === 0) {
+        throw new ConfigError(
+          `targets.${name}.allow must be a non-empty array of client keys or "*"`,
+          'CONFIG_INVALID'
+        )
+      }
+
+      allow = entry.allow.map((value, index) => {
+        if (value === '*') return '*'
+        try {
+          return normalizeClientPublicKeyHex(value)
+        } catch (err) {
+          throw new ConfigError(
+            `targets.${name}.allow[${index}]: ${err.message}`,
+            'CONFIG_INVALID'
+          )
+        }
+      })
+    }
+
+    targets[name] = { host, port, allow }
+  }
+
+  if (Object.keys(targets).length === 0) {
+    targets.default = { host: TARGET_HOST, port: fallbackPort, allow: null }
+  }
+
+  let defaultTarget = raw.defaultTarget === undefined || raw.defaultTarget === null
+    ? null
+    : String(raw.defaultTarget).trim()
+
+  if (defaultTarget === null || defaultTarget === '') {
+    defaultTarget = Object.prototype.hasOwnProperty.call(targets, 'default')
+      ? 'default'
+      : Object.keys(targets)[0]
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(targets, defaultTarget)) {
+    throw new ConfigError(
+      `defaultTarget "${defaultTarget}" is not defined in targets`,
+      'CONFIG_INVALID'
+    )
+  }
+
+  return { targets, defaultTarget }
+}
 
 class ConfigError extends Error {
   constructor(message, code) {
@@ -337,12 +439,32 @@ function normalizeConfig(raw) {
 
   const authMode = normalizeAuthMode(raw.authMode, raw)
 
+  const declaredTargetPort = parsePort(
+    raw.targetPort === undefined ? base.targetPort : raw.targetPort,
+    'targetPort'
+  )
+  const { targets, defaultTarget } = normalizeTargets(raw, declaredTargetPort)
+  const targetPort = raw.targets === undefined
+    ? declaredTargetPort
+    : targets[defaultTarget].port
+
+  let target = null
+  if (raw.target !== undefined && raw.target !== null && String(raw.target).trim() !== '') {
+    target = String(raw.target).trim()
+    if (!isValidTargetName(target)) {
+      throw new ConfigError('target must be 1-32 chars: A-Z a-z 0-9 _ -', 'CONFIG_INVALID')
+    }
+  }
+
   return {
     mode,
     masterSecret,
     authMode,
     targetHost,
-    targetPort: parsePort(raw.targetPort === undefined ? base.targetPort : raw.targetPort, 'targetPort'),
+    targetPort,
+    targets,
+    defaultTarget,
+    target,
     localPort: parsePort(
       raw.localPort === undefined ? base.localPort : raw.localPort,
       'localPort',
