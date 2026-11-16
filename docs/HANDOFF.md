@@ -49,7 +49,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | Version | `1.12.0` (mux: carrier เดียว หลาย channels, opt-in `--mux`) |
 | npm `latest` | `1.11.4` (1.12.0 ยังไม่ publish) |
 | Git branch | `main` |
-| Commit | `15283ff feat(mux): multiplexed carrier for SOCKS5 and target mode` |
+| Commit | `15283ff` mux, `d22aa2f` help fix (HEAD อาจใหม่กว่า — ดู `git log --oneline -1`) |
 | Tag | `v1.12.0` |
 | GitHub Release | ยังไม่สร้าง (รอ publish) |
 | Working tree | clean (หลัง commit HANDOFF) |
