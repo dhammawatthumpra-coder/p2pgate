@@ -35,6 +35,35 @@
 
 ---
 
+## 1.1) mux บนอุปกรณ์จริง — 2026-11-16
+
+ทดสอบ `--mux` ข้ามเครื่อง (Windows → Termux) ด้วย server ชั่วคราว (password mode,
+target = sshd 8022) เพื่อไม่แตะ config หลัก
+
+| รายการ | ค่า |
+|---|---|
+| Server | Termux (Redmi 14C), p2pgate 1.12.0, node v24.22.3 |
+| Client | Windows, p2pgate 1.12.0 (repo), node v24 |
+| auth | password mode (challenged) |
+| carrier | 1 session, `maxChannels=128` |
+
+ผลลัพธ์:
+
+| เกณฑ์ | ผล |
+|---|---|
+| carrier establish | ✅ ครั้งเดียว (`AUTH OK ... target=mux`) |
+| 3 connections ผ่าน carrier | ✅ channel 1, 2, 3 (`MUX OPEN ... -> 127.0.0.1:8022`) |
+| banner SSH ครบทุก connection | ✅ `SSH-2.0-OpenSSH_10.6` |
+| เวลา connection แรก | 2,623 ms (รวม DHT + carrier) |
+| เวลา connection ถัดไป | 100 ms, 101 ms |
+| self-test บน Termux (`npm test` ใน `npm root -g/p2pgate`) | ✅ 60 checks |
+
+หมายเหตุ: ตัวเลข 100 ms คือ channel open + RTT; ไม่มี DHT lookup ซ้ำ
+การทดสอบนี้ใช้ server ชั่วคราวแล้วลบทิ้ง; server หลักบน Termux อัปเกรดเป็น
+1.12.0 และรีสตาร์ตแล้ว (trusted device ยังใช้ fastpath → mux fallback ตามดีไซน์)
+
+---
+
 ## 2. วิธีเก็บตัวเลขสำหรับรอบถัดไป
 
 ### Client (Windows)

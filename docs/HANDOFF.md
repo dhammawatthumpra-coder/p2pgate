@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-16
-สถานะ: **v1.12.0 พร้อม publish** (โค้ด + docs + tag แล้ว, รอ `npm publish`)
+สถานะ: **v1.12.0 released** (npm + GitHub Release; Termux อัปเกรดและทดสอบแล้ว)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -47,13 +47,13 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | รายการ | ค่า |
 |---|---|
 | Version | `1.12.0` (mux: carrier เดียว หลาย channels, opt-in `--mux`) |
-| npm `latest` | `1.11.4` (1.12.0 ยังไม่ publish) |
+| npm `latest` | `1.12.0` |
 | Git branch | `main` |
 | Commit | `15283ff` mux, `d22aa2f` help fix (HEAD อาจใหม่กว่า — ดู `git log --oneline -1`) |
 | Tag | `v1.12.0` |
-| GitHub Release | ยังไม่สร้าง (รอ publish) |
-| Working tree | clean (หลัง commit HANDOFF) |
-| Tests | `npm test` → **60 checks PASSED** (Windows; Termux ยังไม่รันรอบนี้) |
+| GitHub Release | `v1.12.0` = Latest |
+| Working tree | clean หลัง commit docs ล่าสุด |
+| Tests | `npm test` → **60 checks PASSED** (Windows + Termux 1.12.0) |
 | src | 22 ไฟล์ (`src/mux.js` ใหม่), `src/self-test.js` ~1,900 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
@@ -366,7 +366,7 @@ p2pgate unlock --list
 | Multi-client พร้อมกัน | ยังไม่ stress |
 | Wi-Fi ↔ 4G switching | ยังไม่ทดสอบ |
 | NAT บางรูปแบบ | ยังไม่ครอบคลุม |
-| mux บน Termux (จริง) | ยังไม่ทดสอบ (self-test ผ่านบน Windows) |
+| mux บนอุปกรณ์จริง | ✅ ทดสอบ 2026-11-16 (Windows→Termux, 1 carrier/3 channels, 100 ms ต่อ connection — ดู `docs/SOAK.md` §1.1) ยังไม่มี soak 24 ชม. |
 | mux กับ trusted/fastpath | ใช้ไม่ได้โดยออกแบบ — fallback per-connection |
 | TUN / subnet routing | ไม่รองรับ (Termux ทำไม่ได้ถ้าไม่ root) |
 | i18n legacy commands | แปลไม่ครบ (setup/server/connect/help แปลแล้ว) |
@@ -377,16 +377,16 @@ p2pgate unlock --list
 
 เรียงตามความคุ้ม:
 
-1. **Publish v1.12.0 + ทดสอบ mux จริง** — `npm publish` (OTP), GitHub Release,
-   ติดตั้งบน Termux แล้วทดสอบ `--socks5 --mux` หลาย request + วัดเวลาเทียบ 1.11
-2. **Soak + multi-client** — รอบแรกผ่าน (overnight, ดู `docs/SOAK.md`)
-   รอบถัดไปเก็บ reconnect count + memory, ทดสอบหลาย client พร้อมกัน, และ soak mux
-3. **Network switching** — ปิด/เปิด Wi-Fi, สลับ 4G, ดูว่า reconnect เองได้
-4. **เปิด `--mux` เป็น default ของ `--socks5`** — หลัง soak mux ผ่าน (1.12.x)
-5. **เปิด CI** — แก้ billing หรือย้ายไป CI อื่น (workflow มีอยู่แต่ disable)
-6. **SOCKS5 ส่วนขยาย** — IPv6 destinations, UDP ASSOCIATE
-7. **แปล legacy CLI/doctor ให้ครบ en/th**
-8. **เตรียม core สำหรับ p2phub** — `p2pgate enroll`, `p2pgate agent`,
+1. **Soak mux 24 ชม. + multi-client** — รอบแรก (non-mux) ผ่าน overnight
+   (ดู `docs/SOAK.md` §1) และ mux ทดสอบจริงแล้ว (§1.1)
+   รอบถัดไป: เปิด `--socks5 --mux` ทิ้งไว้ เก็บ reconnect count + memory
+2. **Network switching** — ปิด/เปิด Wi-Fi, สลับ 4G, ดูว่า reconnect เองได้
+   (รวมถึงพฤติกรรมของ carrier เมื่อเน็ตขาด: carrier ตาย → client สร้างใหม่)
+3. **เปิด `--mux` เป็น default ของ `--socks5`** — หลัง soak mux ผ่าน (1.12.x)
+4. **เปิด CI** — แก้ billing หรือย้ายไป CI อื่น (workflow มีอยู่แต่ disable)
+5. **SOCKS5 ส่วนขยาย** — IPv6 destinations, UDP ASSOCIATE
+6. **แปล legacy CLI/doctor ให้ครบ en/th**
+7. **เตรียม core สำหรับ p2phub** — `p2pgate enroll`, `p2pgate agent`,
    client config `serverPublicKey`, `connect --name` (ดูข้อ 10)
 
 ---
@@ -471,7 +471,9 @@ client config: C:\Users\csuti\.p2pgate\client.json
 ssh: watthumpra@100.76.100.90 -p 8022   (ผ่าน Tailscale)
 key: %USERPROFILE%\.ssh\id_ed25519
 known_hosts: $env:TEMP\p2pgate_known_hosts
-node 24, p2pgate 1.11.4 ติดตั้งแบบ global (ยังไม่ทดสอบ 1.12.0 บนเครื่องนี้)
+node 24 (v24.22.3), p2pgate 1.12.0 ติดตั้งแบบ global
+server รันด้วย `setsid nohup p2pgate server > ~/p2pgate-server.log 2>&1` (headless, ไม่มี TTY)
+→ ไม่มี Session PIN; ใช้ password mode / trusted device
 ```
 
 คำสั่งตรวจ Termux:
