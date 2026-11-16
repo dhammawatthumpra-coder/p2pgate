@@ -7,6 +7,18 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.11.4] - 2026-11-16
+
+### Added
+
+- `--save <alias>` ตอน `connect` → เก็บ host ไว้ใน `~/.p2pgate/hosts.json` (0600)
+- `p2pgate connect @alias` / `p2pgate ping @alias` / `p2pgate ping --all`
+- `p2pgate hosts list|remove <alias>`
+- `p2pgate audit [--tail N] [--failures] [--since 1h] [--json]` อ่าน audit.log
+  แบบ tail จากท้ายไฟล์
+- `p2pgate server --ttl 30m`, `--idle 15m`, `--once` (ปิดตัวเอง, timer ใน memory)
+- self-test: hosts round-trip, audit filter/tail, ttl shutdown (57 checks)
+
 ## [1.11.3] - 2026-11-16
 
 ### Fixed

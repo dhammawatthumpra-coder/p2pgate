@@ -1,6 +1,6 @@
 {
   "name": "p2pgate",
-  "version": "1.11.3",
+  "version": "1.11.4",
   "description": "Lightweight P2P TCP gateway for SSH over HyperDHT (single dependency)",
   "license": "Apache-2.0",
   "author": "dhammawatthumpra-coder",
@@ -51,7 +51,7 @@
     "prepublishOnly": "npm test",
     "docs:check": "node scripts/check-docs.js",
     "self-test": "node src/self-test.js",
-    "check": "node --check src/cli.js && node --check src/config-loader.js && node --check src/crypto-utils.js && node --check src/auth.js && node --check src/auth-guard.js && node --check src/device-registry.js && node --check src/audit-log.js && node --check src/control.js && node --check src/doctor.js && node --check src/i18n.js && node --check src/quickstart.js && node --check src/keygen.js && node --check src/setup-wizard.js && node --check src/socks.js && node --check src/allowlist.js && node --check src/master.js && node --check src/config-tools.js && node --check src/udp.js && node --check src/server.js && node --check src/client.js && node --check src/self-test.js && node scripts/check-docs.js"
+    "check": "node --check src/cli.js && node --check src/config-loader.js && node --check src/crypto-utils.js && node --check src/auth.js && node --check src/auth-guard.js && node --check src/device-registry.js && node --check src/audit-log.js && node --check src/control.js && node --check src/doctor.js && node --check src/i18n.js && node --check src/quickstart.js && node --check src/keygen.js && node --check src/setup-wizard.js && node --check src/socks.js && node --check src/allowlist.js && node --check src/master.js && node --check src/config-tools.js && node --check src/udp.js && node --check src/hosts.js && node --check src/audit-view.js && node --check src/server.js && node --check src/client.js && node --check src/self-test.js && node scripts/check-docs.js"
   },
   "dependencies": {
     "hyperdht": "6.36.0"

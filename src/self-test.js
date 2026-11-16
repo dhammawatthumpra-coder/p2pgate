@@ -45,6 +45,8 @@ const { readControlLine, decodeControl, AUTH_STATUS } = require('./auth')
 const { normalizeConfig } = require('./config-loader')
 const { rotateMasterSecret, fingerprint } = require('./master')
 const { redactConfig } = require('./config-tools')
+const { setHost, getHost, listHosts, deleteHost } = require('./hosts')
+const { readAuditEvents } = require('./audit-view')
 
 const noop = () => {}
 const quiet = () => {}
@@ -678,6 +680,39 @@ async function main() {
     assert.equal(JSON.stringify(redactedConfig).includes(masterSecret), false)
     assert.ok(String(redactedConfig.masterSecret).startsWith('<redacted'))
     checks.push('config redaction hides secret material')
+
+    // hosts.json round-trip
+    const hostsPath = path.join(tempDir, 'hosts.json')
+    await setHost('lab', {
+      masterSecret,
+      target: 'web',
+      localPort: 18022,
+      socks5Port: null,
+      targetPort: 8022
+    }, hostsPath)
+    const labHost = await getHost('lab', hostsPath)
+    assert.equal(labHost.target, 'web')
+    assert.equal(labHost.localPort, 18022)
+    assert.equal((await listHosts(hostsPath)).length, 1)
+    await deleteHost('lab', hostsPath)
+    assert.equal((await listHosts(hostsPath)).length, 0)
+    checks.push('hosts.json stores and removes aliases')
+
+    // audit viewer filters failures and honours --tail
+    const auditViewPath = path.join(tempDir, 'audit-view.jsonl')
+    await fs.writeFile(auditViewPath, [
+      JSON.stringify({ ts: new Date(Date.now() - 5_000).toISOString(), event: 'auth.success', key: 'a'.repeat(64) }),
+      JSON.stringify({ ts: new Date(Date.now() - 4_000).toISOString(), event: 'auth.failure', key: 'b'.repeat(64), attempts: 2 }),
+      JSON.stringify({ ts: new Date(Date.now() - 3_000).toISOString(), event: 'auth.success', key: 'c'.repeat(64) })
+    ].join('\n') + '\n')
+
+    const failures = await readAuditEvents(auditViewPath, { limit: 10, failuresOnly: true })
+    assert.equal(failures.length, 1)
+    assert.equal(failures[0].event, 'auth.failure')
+
+    const recent = await readAuditEvents(auditViewPath, { limit: 2 })
+    assert.equal(recent.length, 2)
+    checks.push('audit viewer filters by failure and tail limit')
 
     bootstrapper = HyperDHT.bootstrapper(bootstrapPort, '127.0.0.1')
     await bootstrapper.fullyBootstrapped()
@@ -2085,6 +2120,41 @@ async function main() {
     assert.equal(auditRaw.includes(unattendedPassword), false)
     assert.equal(auditRaw.includes(gateway.sessionPin), false)
     checks.push('audit log records auth/control events without secrets')
+
+    // --ttl closes the server on its own
+    const ttlSecret = crypto.randomBytes(32).toString('hex')
+    const ttlControlPath = controlPathFor('ttl')
+    await startServer({
+      mode: 'server',
+      masterSecret: ttlSecret,
+      authMode: 'password',
+      targetHost: '127.0.0.1',
+      targetPort: echoPort,
+      localPort: 8022,
+      clientKeyPath: path.join(tempDir, 'ttl-server-key.json'),
+      allowedClientKeys: [],
+      verificationMode: 'hybrid',
+      trustedDevicesFile: path.join(tempDir, 'ttl-devices'),
+      auditLog: { enabled: false },
+      customBootstrap: bootstrap,
+      authPin: { enabled: true, unattended: unattendedVerifier },
+      telegramAlert: { enabled: false, botToken: '', chatId: '' }
+    }, {
+      log: quiet,
+      showSessionPin: false,
+      sendStartupAlert: false,
+      failDelayMs: [10, 20],
+      lockoutStatePath: path.join(tempDir, 'ttl-lockout.json'),
+      interactive: false,
+      ttlMs: 400,
+      controlSocketPath: ttlControlPath,
+      controlTokenPath: path.join(tempDir, 'control-ttl.token')
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 1_500))
+    const ttlSocketExists = await fs.stat(ttlControlPath).then(() => true).catch(() => false)
+    assert.equal(ttlSocketExists, false)
+    checks.push('server --ttl closes itself and removes the control socket')
   } finally {
     if (originalSocket) {
       try {

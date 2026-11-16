@@ -784,6 +784,46 @@ on restart and are never written to disk.
 
 ---
 
+## 9.8) Host aliases
+
+```sh
+p2pgate connect -s <secret> -p <password> --save home-pi
+p2pgate connect @home-pi
+p2pgate hosts list
+p2pgate hosts remove home-pi
+p2pgate ping @home-pi
+p2pgate ping --all
+```
+
+- stored in `~/.p2pgate/hosts.json` (mode `0600`)
+- the file contains `masterSecret` values — keep it private
+- `ping --all` prints one line per host with connect/auth timings or the error
+
+## 9.9) Audit viewer
+
+```sh
+p2pgate audit --tail 20
+p2pgate audit --failures --since 24h
+p2pgate audit --json
+```
+
+- reads from the end of `audit.log` (no full-file load)
+- `--failures` keeps failure/declined/revoke/lockout/timeout events
+- secrets are already stripped by the audit writer
+
+## 9.10) Self-stopping server
+
+```sh
+p2pgate server --ttl 30m     # stop 30 minutes after start
+p2pgate server --idle 15m    # stop after 15 minutes without connections
+p2pgate server --once        # stop after the first session ends
+```
+
+Shutdown stops accepting new connections and waits up to 60 s for active
+sessions. Timers are in memory only.
+
+---
+
 ## 10) Requirements
 
 - Android phone + Termux + Termux:Boot (F-Droid), optional
@@ -1078,6 +1118,12 @@ Messages never contain the PIN or password.
 | `p2pgate config show` | Print the normalised config with secrets masked |
 | `p2pgate udp --target <name> --listen <port>` | Forward local UDP to a Server udpTarget |
 | `p2pgate ping [--count <n>]` | Measure auth time and RTT, then exit |
+| `p2pgate ping --all` | Ping every host in `hosts.json` |
+| `p2pgate connect @alias` | Connect using a saved host alias |
+| `p2pgate connect --save <alias>` | Save the current target as an alias |
+| `p2pgate hosts list` | List saved host aliases |
+| `p2pgate audit --tail 20` | Read the audit log as a short table |
+| `p2pgate server --ttl 30m` | Stop the Server automatically after 30 minutes |
 | `p2pgate status --watch` | Refresh status (traffic) every second |
 | `p2pgate keygen` | Create/show the Client key |
 | `p2pgate keygen --passphrase` | Protect an existing/new key with a passphrase |
@@ -1300,7 +1346,8 @@ p2pgate/
 │   │   ├── v1.11.0.md
 │   │   ├── v1.11.1.md
 │   │   ├── v1.11.2.md
-│   │   └── v1.11.3.md
+│   │   ├── v1.11.3.md
+│   │   └── v1.11.4.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
@@ -1333,6 +1380,7 @@ p2pgate/
 └── src/
     ├── allowlist.js
     ├── audit-log.js
+    ├── audit-view.js
     ├── auth-guard.js
     ├── auth.js
     ├── cli.js
@@ -1343,6 +1391,7 @@ p2pgate/
     ├── crypto-utils.js
     ├── device-registry.js
     ├── doctor.js
+    ├── hosts.js
     ├── i18n.js
     ├── keygen.js
     ├── master.js

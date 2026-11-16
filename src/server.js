@@ -466,6 +466,9 @@ async function startServer(config, options = {}) {
   const udpIdleTimeoutMs = Number.isInteger(options.udpIdleTimeoutMs)
     ? options.udpIdleTimeoutMs
     : 60_000
+  const ttlMs = Number.isInteger(options.ttlMs) && options.ttlMs > 0 ? options.ttlMs : null
+  const idleMs = Number.isInteger(options.idleMs) && options.idleMs > 0 ? options.idleMs : null
+  const onceMode = options.once === true
 
   const startedAt = Date.now()
   const log = typeof options.log === 'function'
@@ -649,6 +652,10 @@ async function startServer(config, options = {}) {
   let blockedCount = 0
   let closed = false
   let rotationTimer = null
+  let lifecycleTimer = null
+  let shutdownStarted = false
+  let hadConnection = false
+  let idleSince = Date.now()
   let control = null
   let controlTokenPath = null
 
@@ -1359,6 +1366,51 @@ async function startServer(config, options = {}) {
     }
   }
 
+  async function gracefulShutdown(reason, graceMs = 60_000) {
+    if (shutdownStarted || closed) return
+    shutdownStarted = true
+    writeLog(`SHUTDOWN reason=${reason} active=${activeConnections.size}`)
+
+    const deadline = Date.now() + graceMs
+
+    while (activeConnections.size > 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250))
+    }
+
+    await close().catch(noop)
+  }
+
+  function scheduleLifecycle() {
+    if (ttlMs !== null) {
+      setTimeout(() => {
+        gracefulShutdown('ttl').catch(noop)
+      }, ttlMs).unref()
+    }
+
+    if (idleMs !== null || onceMode) {
+      lifecycleTimer = setInterval(() => {
+        if (closed || shutdownStarted) return
+
+        if (activeConnections.size > 0) {
+          hadConnection = true
+          idleSince = Date.now()
+          return
+        }
+
+        if (onceMode && hadConnection) {
+          gracefulShutdown('once').catch(noop)
+          return
+        }
+
+        if (idleMs !== null && Date.now() - idleSince >= idleMs) {
+          gracefulShutdown('idle').catch(noop)
+        }
+      }, 500)
+
+      lifecycleTimer.unref()
+    }
+  }
+
   async function close() {
     if (closed) return
     closed = true
@@ -1366,6 +1418,11 @@ async function startServer(config, options = {}) {
     if (rotationTimer !== null) {
       clearInterval(rotationTimer)
       rotationTimer = null
+    }
+
+    if (lifecycleTimer !== null) {
+      clearInterval(lifecycleTimer)
+      lifecycleTimer = null
     }
 
     for (const entry of listeners.values()) {
@@ -1593,6 +1650,8 @@ async function startServer(config, options = {}) {
     targetPort,
     slots: [...listeners.keys()].sort((a, b) => a - b)
   })
+
+  scheduleLifecycle()
 
   return {
     dht,

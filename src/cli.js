@@ -6,6 +6,7 @@ const readline = require('node:readline/promises')
 const { parseArgs } = require('node:util')
 const {
   DEFAULT_CLIENT_KEY_PATH,
+  DEFAULT_CONFIG_DIR,
   expandHome,
   loadConfig,
   readConfigRaw,
@@ -28,6 +29,8 @@ const fs = require('node:fs')
 const { createAuditLog } = require('./audit-log')
 const { rotateMasterSecret, fingerprint } = require('./master')
 const { redactConfig, summarizeConfig } = require('./config-tools')
+const { listHosts, getHost, setHost, deleteHost } = require('./hosts')
+const { readAuditEvents } = require('./audit-view')
 const {
   DEFAULT_CLIENT_CONFIG_PATH,
   createServerPasswordConfig,
@@ -110,6 +113,15 @@ const HELP_TEXT = `p2pgate v1.11 — อุโมงค์ TCP/UDP แบบ P2P
   p2pgate ping [--count <n>] [--json] [--config <path>]
       วัด RTT ระดับโปรโตคอล (auth + ping) แล้วจบ ไม่เปิดพอร์ตค้าง
       --count: จำนวน ping ต่อ slot (1-10, ค่าเริ่มต้น 3)
+
+  p2pgate hosts list|remove <alias>
+      จัดการรายชื่อ host ใน ~/.p2pgate/hosts.json (0600)
+
+  p2pgate audit [--tail 20] [--failures] [--since 1h] [--json]
+      อ่าน audit.log แบบอ่านง่าย (tail จากท้ายไฟล์)
+
+  p2pgate server --ttl 30m | --idle 15m | --once
+      ปิด Server อัตโนมัติ: ครบเวลา / ไม่มี connection ตามเวลา / หลัง session แรกจบ
 
   p2pgate master reset [--yes] [--dry-run] [--json]
       หมุน masterSecret: สำรอง config เดิม แล้วเขียนค่าใหม่
@@ -206,6 +218,12 @@ Usage:
       Open a local UDP listener and forward datagrams to a Server udpTarget
   p2pgate ping [--count <n>] [--json]
       Measure protocol-level RTT (auth + ping) without opening a listener
+  p2pgate hosts list|remove <alias>
+      Manage ~/.p2pgate/hosts.json (0600)
+  p2pgate audit [--tail 20] [--failures] [--since 1h] [--json]
+      Read audit.log as a short table
+  p2pgate server --ttl 30m | --idle 15m | --once
+      Auto-stop: after the TTL, after idle time, or after the first session
   p2pgate doctor [--json]
   p2pgate unlock --list|<key>|--all
 
@@ -401,6 +419,41 @@ function resolveClientConfigPath(explicitPath) {
   if (fs.existsSync(DEFAULT_CLIENT_CONFIG_PATH)) return DEFAULT_CLIENT_CONFIG_PATH
 
   return serverPath
+}
+
+function parseDurationMs(value, flag) {
+  if (value === undefined || value === null) return null
+
+  const text = String(value).trim().toLowerCase()
+  const match = /^(\d+)([smhd])?$/.exec(text)
+
+  if (!match) {
+    const err = new Error(`${flag} must look like 30m, 2h, 45s or 1d`)
+    err.code = 'CONFIG_INVALID'
+    throw err
+  }
+
+  const amount = Number(match[1])
+  const unit = match[2] || 'm'
+  const factor = unit === 's'
+    ? 1_000
+    : unit === 'm'
+      ? 60_000
+      : unit === 'h'
+        ? 3_600_000
+        : 86_400_000
+
+  return amount * factor
+}
+
+function aliasFromPositionals(positionals) {
+  const candidate = Array.isArray(positionals) ? positionals[1] : undefined
+
+  if (typeof candidate === 'string' && candidate.startsWith('@')) {
+    return candidate.slice(1)
+  }
+
+  return null
 }
 
 async function resolveKeyPath(configPath) {
@@ -684,7 +737,11 @@ async function commandServer(values) {
     ))
   }
 
-  const server = await startServer(config)
+  const ttlMs = parseDurationMs(values.ttl, '--ttl')
+  const idleMs = parseDurationMs(values.idle, '--idle')
+  const once = values.once === true
+
+  const server = await startServer(config, { ttlMs, idleMs, once })
   const address = server.currentPublicKeyHex()
 
   process.stdout.write(t('\n✅ เซิร์ฟเวอร์พร้อมทำงานแล้ว\n', '\n✅ Server is ready\n'))
@@ -829,7 +886,9 @@ async function openCliAudit(config) {
   return audit
 }
 
-async function commandConnect(values) {
+async function commandConnect(values, positionals) {
+  const alias = aliasFromPositionals(positionals)
+  const hostRecord = alias ? await getHost(alias) : null
   if (values['secret-stdin'] && values['password-stdin']) {
     const err = new Error(
       'ใช้ --secret-stdin และ --password-stdin พร้อมกันไม่ได้'
@@ -872,6 +931,9 @@ async function commandConnect(values) {
   }
   if (!masterSecret && existing && existing.masterSecret) {
     masterSecret = existing.masterSecret
+  }
+  if (!masterSecret && hostRecord && hostRecord.masterSecret) {
+    masterSecret = hostRecord.masterSecret
   }
   if (!masterSecret) {
     try {
@@ -939,6 +1001,9 @@ async function commandConnect(values) {
   } else if (existing && Number.isInteger(existing.localPort)) {
     localPort = existing.localPort
   }
+  if (hostRecord && Number.isInteger(hostRecord.localPort) && values.port === undefined) {
+    localPort = hostRecord.localPort
+  }
 
   const clientKeyPath = existing && existing.clientKeyPath
     ? existing.clientKeyPath
@@ -968,7 +1033,8 @@ async function commandConnect(values) {
   const requestedTarget = socksPort !== undefined
     ? null
     : (values.target === undefined
-        ? (existing && typeof existing.target === 'string' ? existing.target : null)
+        ? ((hostRecord && typeof hostRecord.target === 'string' && hostRecord.target) ||
+            (existing && typeof existing.target === 'string' ? existing.target : null))
         : String(values.target).trim())
 
   if (requestedTarget !== null) {
@@ -987,8 +1053,30 @@ async function commandConnect(values) {
   } else if (existing && Number.isInteger(existing.socks5Port)) {
     config.socks5Port = existing.socks5Port
   }
+  if (hostRecord && Number.isInteger(hostRecord.socks5Port) && values.socks5 === undefined) {
+    config.socks5Port = hostRecord.socks5Port
+  }
 
   await saveConfig(configPath, config)
+
+  if (values.save !== undefined) {
+    const record = await setHost(values.save, {
+      masterSecret: config.masterSecret,
+      target: config.target || null,
+      localPort: config.localPort,
+      socks5Port: config.socks5Port,
+      targetPort: config.targetPort
+    })
+
+    process.stdout.write(t(
+      `\n💾 บันทึก host @${record.alias} ไว้ใน hosts.json แล้ว\n`,
+      `\n💾 Saved host @${record.alias} to hosts.json\n`
+    ))
+    process.stdout.write(t(
+      '   (ไฟล์มี masterSecret — เก็บเป็นความลับ)\n',
+      '   (the file contains a masterSecret — keep it private)\n'
+    ))
+  }
 
   process.stdout.write(t(
     '\n=== p2pgate connect ===\n',
@@ -1626,9 +1714,102 @@ function makeCredentialProvider(values) {
   }
 }
 
-async function commandPing(values) {
-  const configPath = resolveClientConfigPath(values.config)
-  const config = await loadConfig(configPath)
+async function commandPingAll(values) {
+  const hosts = await listHosts()
+
+  if (hosts.length === 0) {
+    process.stderr.write(t(
+      '\n❌ ยังไม่มี host ใน hosts.json (ใช้ --save ตอน connect ก่อน)\n\n',
+      '\n❌ no hosts in hosts.json (use --save with connect first)\n\n'
+    ))
+    process.exitCode = 1
+    return
+  }
+
+  const rows = []
+  const credential = makeCredentialProvider(values)
+
+  for (const host of hosts) {
+    const config = createClientPasswordConfig({
+      masterSecret: host.masterSecret,
+      localPort: host.localPort
+    })
+
+    if (host.target) config.target = host.target
+
+    let row = { alias: host.alias, ok: false, connectMs: null, authMs: null, error: 'UNKNOWN' }
+
+    try {
+      const session = await startClient(config, {
+        ping: { count: 1 },
+        credential
+      })
+      const result = (session.results || []).find((entry) => entry.ok)
+
+      if (result) {
+        row = {
+          alias: host.alias,
+          ok: true,
+          connectMs: result.connectMs[0],
+          authMs: result.authMs[0],
+          error: null
+        }
+      } else {
+        row.error = (session.results && session.results[0] && session.results[0].error) || 'UNKNOWN'
+      }
+
+      await session.close()
+    } catch (err) {
+      row.error = err.code || err.message
+    }
+
+    rows.push(row)
+  }
+
+  if (values.json) {
+    process.stdout.write(`${JSON.stringify({ hosts: rows }, null, 2)}\n`)
+  } else {
+    process.stdout.write(t('\n=== p2pgate ping --all ===\n', '\n=== p2pgate ping --all ===\n'))
+
+    for (const row of rows) {
+      if (row.ok) {
+        process.stdout.write(
+          `@${row.alias.padEnd(16)} ok      connect ${String(row.connectMs).padStart(5)} ms   auth ${String(row.authMs).padStart(4)} ms\n`
+        )
+      } else {
+        process.stdout.write(
+          `@${row.alias.padEnd(16)} fail    ${row.error}\n`
+        )
+      }
+    }
+
+    process.stdout.write('\n')
+  }
+
+  process.exitCode = rows.some((row) => row.ok) ? 0 : 1
+}
+
+async function commandPing(values, positionals) {
+  if (values.all === true) {
+    await commandPingAll(values)
+    return
+  }
+
+  const alias = aliasFromPositionals(positionals)
+  let configPath = null
+  let config
+
+  if (alias) {
+    const host = await getHost(alias)
+    config = createClientPasswordConfig({
+      masterSecret: host.masterSecret,
+      localPort: host.localPort
+    })
+    if (host.target) config.target = host.target
+  } else {
+    configPath = resolveClientConfigPath(values.config)
+    config = await loadConfig(configPath)
+  }
 
   const count = values.count === undefined ? 3 : Number(values.count)
 
@@ -1647,7 +1828,7 @@ async function commandPing(values) {
 
   if (values.json) {
     process.stdout.write(`${JSON.stringify({
-      config: configPath,
+      config: configPath || `@${alias}`,
       ok: succeeded.length > 0,
       results
     }, null, 2)}\n`)
@@ -1762,6 +1943,131 @@ async function commandUdp(values) {
   ))
   await client.close()
   process.stdout.write(t('ปิดระบบเรียบร้อย\n', 'UDP client stopped\n'))
+}
+
+async function commandHosts(values, positionals) {
+  const subcommand = positionals[1] || 'list'
+
+  if (subcommand === 'list') {
+    const hosts = await listHosts()
+
+    if (values.json) {
+      process.stdout.write(`${JSON.stringify({ hosts }, null, 2)}\n`)
+      return
+    }
+
+    process.stdout.write(t('\n=== p2pgate hosts ===\n', '\n=== p2pgate hosts ===\n'))
+
+    if (hosts.length === 0) {
+      process.stdout.write(t(
+        'ยังไม่มี host — เพิ่มด้วย: p2pgate connect -s <secret> -p <pass> --save <alias>\n\n',
+        'No hosts yet — add one with: p2pgate connect -s <secret> -p <pass> --save <alias>\n\n'
+      ))
+      return
+    }
+
+    for (const host of hosts) {
+      process.stdout.write(
+        `@${host.alias.padEnd(16)} target=${host.target || '-'}  localPort=${host.localPort}` +
+          `${host.socks5Port ? `  socks=${host.socks5Port}` : ''}\n`
+      )
+    }
+
+    process.stdout.write('\n')
+    return
+  }
+
+  if (subcommand === 'remove') {
+    const alias = positionals[2]
+
+    if (!alias) {
+      process.stderr.write(t(
+        '❌ การใช้งาน: p2pgate hosts remove <alias>\n',
+        '❌ Usage: p2pgate hosts remove <alias>\n'
+      ))
+      process.exitCode = 1
+      return
+    }
+
+    await deleteHost(alias)
+    process.stdout.write(t(
+      `\n🗑️  ลบ host @${alias.replace(/^@/, '')} แล้ว\n\n`,
+      `\n🗑️  Removed host @${alias.replace(/^@/, '')}\n\n`
+    ))
+    return
+  }
+
+  process.stderr.write(t(
+    '❌ การใช้งาน: p2pgate hosts list|remove\n',
+    '❌ Usage: p2pgate hosts list|remove\n'
+  ))
+  process.exitCode = 1
+}
+
+async function commandAudit(values) {
+  let config = null
+
+  try {
+    config = await loadConfig(resolveClientConfigPath(values.config))
+  } catch {
+    config = null
+  }
+
+  const auditPath = config && config.auditLog && typeof config.auditLog.path === 'string'
+    ? config.auditLog.path
+    : path.join(DEFAULT_CONFIG_DIR, 'audit.log')
+
+  const limit = values.tail === undefined ? 20 : Number(values.tail)
+
+  if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+    const err = new Error('--tail ต้องเป็นตัวเลข 1-500')
+    err.code = 'CONFIG_INVALID'
+    throw err
+  }
+
+  const sinceMs = parseDurationMs(values.since, '--since')
+  const events = await readAuditEvents(auditPath, {
+    limit,
+    sinceMs,
+    failuresOnly: values.failures === true
+  })
+
+  if (values.json) {
+    process.stdout.write(`${JSON.stringify({ path: auditPath, events }, null, 2)}\n`)
+    return
+  }
+
+  process.stdout.write(t(
+    `\n=== p2pgate audit (${events.length} รายการ) ===\n`,
+    `\n=== p2pgate audit (${events.length} events) ===\n`
+  ))
+  process.stdout.write(t(`ไฟล์: ${auditPath}\n\n`, `File: ${auditPath}\n\n`))
+
+  if (events.length === 0) {
+    process.stdout.write(t('ไม่มีรายการที่ตรงเงื่อนไข\n\n', 'No matching events\n\n'))
+    return
+  }
+
+  for (const event of events) {
+    const time = typeof event.ts === 'string'
+      ? event.ts.replace('T', ' ').replace('Z', '')
+      : (typeof event.t === 'string' ? event.t.replace('T', ' ').replace('Z', '') : '-')
+    const name = String(event.event || '-')
+    const key = typeof event.key === 'string' ? event.key.slice(0, 8) : ''
+    const extras = []
+
+    if (event.target) extras.push(`target=${event.target}`)
+    if (event.mode) extras.push(`mode=${event.mode}`)
+    if (event.reason) extras.push(`reason=${event.reason}`)
+    if (Number.isInteger(event.attempts)) extras.push(`attempts=${event.attempts}`)
+    if (event.source) extras.push(`src=${event.source}`)
+
+    process.stdout.write(
+      `${time}  ${name.padEnd(16)} ${key.padEnd(8)} ${extras.join(' ')}\n`
+    )
+  }
+
+  process.stdout.write('\n')
 }
 
 async function commandConfig(values, positionals) {
@@ -2172,6 +2478,14 @@ async function main(argv) {
         listen: { type: 'string' },
         count: { type: 'string' },
         watch: { type: 'boolean' },
+        ttl: { type: 'string' },
+        idle: { type: 'string' },
+        once: { type: 'boolean' },
+        save: { type: 'string' },
+        all: { type: 'boolean' },
+        tail: { type: 'string' },
+        failures: { type: 'boolean' },
+        since: { type: 'string' },
         yes: { type: 'boolean' },
         reveal: { type: 'boolean' },
         'dry-run': { type: 'boolean' },
@@ -2248,7 +2562,7 @@ async function main(argv) {
       await commandClient(values)
       return
     case 'connect':
-      await commandConnect(values)
+      await commandConnect(values, positionals)
       return
     case 'devices':
       await commandDevices(values, positionals)
@@ -2268,6 +2582,12 @@ async function main(argv) {
     case 'master':
       await commandMaster(values, positionals)
       return
+    case 'hosts':
+      await commandHosts(values, positionals)
+      return
+    case 'audit':
+      await commandAudit(values)
+      return
     case 'config':
       await commandConfig(values, positionals)
       return
@@ -2275,7 +2595,7 @@ async function main(argv) {
       await commandUdp(values)
       return
     case 'ping':
-      await commandPing(values)
+      await commandPing(values, positionals)
       return
     case 'doctor':
       await commandDoctor(values)

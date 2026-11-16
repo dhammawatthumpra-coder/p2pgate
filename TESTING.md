@@ -1,6 +1,6 @@
 # p2pgate v1.6 — คู่มือทดสอบก่อนใช้งานจริง
 
-เอกสารนี้เป็น **manual acceptance test** สำหรับตรวจสอบว่า p2pgate v1.11.3
+เอกสารนี้เป็น **manual acceptance test** สำหรับตรวจสอบว่า p2pgate v1.11.4
 ทำงานได้จริงบนเครื่องและเครือข่ายของคุณ ไม่ใช่แค่ผ่าน self-test
 
 > ⚠️ ควรทดสอบในเครื่อง/บัญชีผู้ใช้ทดสอบก่อน
@@ -154,7 +154,7 @@ npm run self-test
 - มี `SELF-TEST PASSED`
 - ไม่มี `FAILED` หรือ stack trace
 
-จำนวน check ที่ควรมากกว่าหรือเท่ากับ v1.11: **54 checks**
+จำนวน check ที่ควรมากกว่าหรือเท่ากับ v1.11: **57 checks**
 
 ### 2.4 ตรวจ metadata
 
@@ -687,7 +687,7 @@ p2pgate devices list
 
 ---
 
-## 11) Known Limitations ของ v1.11.3
+## 11) Known Limitations ของ v1.11.4
 
 สิ่งเหล่านี้ **ยังไม่มี** และไม่ควรถือว่าเป็นบั๊ก:
 
@@ -706,13 +706,16 @@ p2pgate devices list
 คัดลอกตารางนี้ไปใช้บันทึกผล:
 
 ```text
-p2pgate v1.11.3 — Test Record
+p2pgate v1.11.4 — Test Record
 วันที่:
 เครื่อง Server:
 เครื่อง Client:
 เครือข่าย:
 
-[ ] L0 npm ci + check + self-test (54 checks)
+[ ] L0 npm ci + check + self-test (57 checks)
+[ ] L0 `--save` / `@alias` / `hosts list`
+[ ] L0 `audit --tail` / `--failures`
+[ ] L0 `server --ttl 30s` ปิดตัวเอง
 [ ] L0 `p2pgate ping --count 2`
 [ ] L0 `p2pgate status --watch` (traffic)
 [ ] L0 UDP: `p2pgate udp --target <name>`

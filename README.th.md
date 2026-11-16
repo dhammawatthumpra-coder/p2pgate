@@ -764,6 +764,46 @@ Stream ที่ใช้งาน: 2
 
 ---
 
+## 9.8) Host aliases
+
+```sh
+p2pgate connect -s <secret> -p <password> --save home-pi
+p2pgate connect @home-pi
+p2pgate hosts list
+p2pgate hosts remove home-pi
+p2pgate ping @home-pi
+p2pgate ping --all
+```
+
+- เก็บใน `~/.p2pgate/hosts.json` (โหมด `0600`)
+- ไฟล์มีค่า `masterSecret` — เก็บเป็นความลับ
+- `ping --all` แสดงทีละ host พร้อมเวลา connect/auth หรือ error
+
+## 9.9) Audit viewer
+
+```sh
+p2pgate audit --tail 20
+p2pgate audit --failures --since 24h
+p2pgate audit --json
+```
+
+- อ่านจากท้ายไฟล์ `audit.log` (ไม่โหลดทั้งไฟล์)
+- `--failures` แสดงเฉพาะ failure/declined/revoke/lockout/timeout
+- audit writer ตัด secret ออกอยู่แล้ว
+
+## 9.10) Self-stopping server
+
+```sh
+p2pgate server --ttl 30m     # ปิดเมื่อครบ 30 นาที
+p2pgate server --idle 15m    # ปิดเมื่อไม่มี connection 15 นาที
+p2pgate server --once        # ปิดเมื่อ session แรกจบ
+```
+
+ตอนปิดจะหยุดรับ connection ใหม่ และรอ session ที่ค้างไม่เกิน 60 วินาที
+timer อยู่ในหน่วยความจำเท่านั้น
+
+---
+
 ## 10) สิ่งที่ต้องมี
 
 - มือถือ Android + Termux + Termux:Boot (F-Droid)
@@ -1053,6 +1093,12 @@ tail -f ~/.p2pgate/server.log
 | `p2pgate config show` | แสดง config ที่ normalize แล้วโดยปิด secret |
 | `p2pgate udp --target <name> --listen <port>` | ส่ง UDP จากเครื่องไปยัง udpTarget ของ Server |
 | `p2pgate ping [--count <n>]` | วัด auth time และ RTT แล้วจบ |
+| `p2pgate ping --all` | ping ทุก host ใน `hosts.json` |
+| `p2pgate connect @alias` | เชื่อมต่อด้วย host ที่บันทึกไว้ |
+| `p2pgate connect --save <alias>` | บันทึก host ปัจจุบันเป็น alias |
+| `p2pgate hosts list` | แสดงรายการ host |
+| `p2pgate audit --tail 20` | อ่าน audit log แบบตารางสั้น |
+| `p2pgate server --ttl 30m` | ปิด Server อัตโนมัติเมื่อครบ 30 นาที |
 | `p2pgate status --watch` | รีเฟรชสถานะ (traffic) ทุก 1 วินาที |
 | `p2pgate keygen` | สร้าง/แสดงกุญแจ Client |
 | `p2pgate keygen --passphrase` | ตั้ง/เปลี่ยน passphrase สำหรับ client key |
@@ -1274,7 +1320,8 @@ p2pgate/
 │   │   ├── v1.11.0.md
 │   │   ├── v1.11.1.md
 │   │   ├── v1.11.2.md
-│   │   └── v1.11.3.md
+│   │   ├── v1.11.3.md
+│   │   └── v1.11.4.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
@@ -1307,6 +1354,7 @@ p2pgate/
 └── src/
     ├── allowlist.js
     ├── audit-log.js
+    ├── audit-view.js
     ├── auth-guard.js
     ├── auth.js
     ├── cli.js
@@ -1317,6 +1365,7 @@ p2pgate/
     ├── crypto-utils.js
     ├── device-registry.js
     ├── doctor.js
+    ├── hosts.js
     ├── i18n.js
     ├── keygen.js
     ├── master.js
