@@ -18,7 +18,7 @@
 | [Phase 11 — Hardening](specs/phase11-v1.9.0.md) | v1.9.0 | `config validate/show`, doctor upgrades, per-client SOCKS |
 | [Phase 12 — UDP](specs/phase12-udp.md) | v1.10.0 | UDP-over-stream with `udpTargets` |
 | [Phase 13 — Ping/traffic](specs/phase13-ping-traffic.md) | v1.11.0 | `p2pgate ping`, traffic counters, `status --watch` |
-| [Phase 14 — Multiplexing](specs/phase14-mux.md) | draft | `--mux` carrier with channels (target v1.12.0) |
+| [Phase 14 — Multiplexing](specs/phase14-mux.md) | v1.12.0 | `--mux` carrier with channels (opt-in) |
 
 The Phase 4 document was converted from the original `.docx` handoff file to
 Markdown for easier review and diffing.
@@ -28,6 +28,7 @@ Markdown for easier review and diffing.
 - [Session handoff](HANDOFF.md) — current state, invariants, next steps
 - [Soak test record](SOAK.md) — overnight run results and next-round template
 - [Running as a service](SERVICE.md) — Termux, systemd, Windows
+- [Release notes v1.12.0](releases/v1.12.0.md)
 - [Release notes v1.11.4](releases/v1.11.4.md)
 - [Release notes v1.11.3](releases/v1.11.3.md)
 - [Release notes v1.11.2](releases/v1.11.2.md)

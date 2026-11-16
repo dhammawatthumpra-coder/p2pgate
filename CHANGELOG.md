@@ -7,6 +7,23 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.12.0] - 2026-11-16
+
+### Added
+
+- `--mux` (carrier + channels) สำหรับ `--socks5` และ target mode
+  - carrier 1 สาย, channel สูงสุด 128, flow control ต่อ channel
+  - ลดค่า connect ต่อ request จาก ~2.2 วิ (DHT) เหลือ ~0 ms หลัง carrier เปิดแล้ว
+- mux framing (`src/mux.js`): OPEN/OPEN_OK/OPEN_ERR/DATA/WINDOW/CLOSE/RESET/PING
+- fastpath fallback: trusted device ใช้ `--mux` จะ fallback เป็น per-connection
+- self-test: framing, carrier ผ่าน challenged session, fastpath fallback (60 checks)
+
+### Notes
+
+- เปิดใช้แบบ opt-in (`--mux`); ยังไม่เปิด default
+- carrier idle 5 นาที, keepalive 30 วินาที
+- ไม่ audit ต่อ channel (ดูใน `status --json` แทน)
+
 ## [1.11.4] - 2026-11-16
 
 ### Added

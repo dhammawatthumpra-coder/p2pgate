@@ -1,4 +1,4 @@
-# p2pgate (v1.11)
+# p2pgate (v1.12)
 
 [English](README.md) | **ไทย**
 
@@ -14,10 +14,10 @@ CGNAT/ไฟร์วอลล์ โดยไม่ต้องเปิดพ�
 
 ใช้ได้กับ Termux/Android, Linux, macOS และ Windows ที่มี Node.js 20 ขึ้นไป
 
-> เวอร์ชัน 1.11 เพิ่ม **`p2pgate ping`** (วัด auth time + RTT โดยไม่เปิด listener)
-> และ **traffic counters** ใน `status` พร้อม `status --watch`
-> เวอร์ชัน 1.10 เพิ่ม UDP forwarding, 1.9 config validation + doctor + SOCKS ต่อ client,
-> 1.8 SOCKS5 gateway, 1.7 multi-target, 1.6 zero-setup
+> เวอร์ชัน 1.12 เพิ่ม **stream multiplexing** (`--mux`): carrier เดียวสูงสุด 128
+> channels ทำให้คำขอ SOCKS5 ไม่ต้องจ่ายค่า DHT lookup ~2 วินาที
+> เวอร์ชัน 1.11 เพิ่ม ping/traffic, 1.10 UDP, 1.9 config validation + SOCKS ต่อ client,
+> 1.8 SOCKS5, 1.7 multi-target, 1.6 zero-setup
 >
 > **ติดตั้ง:** `npm install -g p2pgate`
 >
@@ -804,6 +804,26 @@ timer อยู่ในหน่วยความจำเท่านั้�
 
 ---
 
+## 9.11) Multiplexing (`--mux`)
+
+```sh
+p2pgate connect -s <secret> -p <password> --socks5 1080 --mux
+p2pgate client --config client.json --mux
+```
+
+- carrier เดียว authenticate ครั้งเดียว, สูงสุด **128 channels**
+- 1 channel = 1 target หรือ 1 SOCKS destination
+- frame 16 KiB, window 256 KiB ต่อทิศ, queue cap 64 KiB
+- carrier idle 5 นาที, keepalive ทุก 30 วินาที
+- channel error คงรหัสเดิม (`TARGET_UNKNOWN`, `SOCKS_DENIED`, `MUX_BUSY`)
+  และ fallback ไป dedicated stream
+
+**ข้อจำกัด fastpath:** trusted device จะได้ `FASTPATH_READY` ก่อน server อ่าน proof
+จึงใช้ mux ไม่ได้ — `--mux` จะเตือนและใช้ 1 stream ต่อ connection  
+ถ้าต้องการ mux ให้ใช้ key แบบ `scram` หรือ password mode
+
+---
+
 ## 10) สิ่งที่ต้องมี
 
 - มือถือ Android + Termux + Termux:Boot (F-Droid)
@@ -1087,6 +1107,7 @@ tail -f ~/.p2pgate/server.log
 | `p2pgate connect -s <secret> -p <password>` | เชื่อมต่อแบบบรรทัดเดียว |
 | `p2pgate connect --target <name>` | เชื่อมต่อ target ที่ประกาศไว้บน Server |
 | `p2pgate connect --socks5 <port>` | เปิด SOCKS5 gateway ในเครื่อง (allowlist อยู่ที่ Server) |
+| `p2pgate connect --socks5 <port> --mux` | ใช้ carrier เดียวหลาย channels |
 | `p2pgate master show [--reveal]` | แสดง fingerprint ของ masterSecret |
 | `p2pgate master reset --yes` | หมุน masterSecret พร้อมสำรอง config |
 | `p2pgate config validate` | ตรวจ config (exit 1 ถ้าผิด) |
@@ -1321,7 +1342,8 @@ p2pgate/
 │   │   ├── v1.11.1.md
 │   │   ├── v1.11.2.md
 │   │   ├── v1.11.3.md
-│   │   └── v1.11.4.md
+│   │   ├── v1.11.4.md
+│   │   └── v1.12.0.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
@@ -1370,6 +1392,7 @@ p2pgate/
     ├── i18n.js
     ├── keygen.js
     ├── master.js
+    ├── mux.js
     ├── quickstart.js
     ├── self-test.js
     ├── server.js

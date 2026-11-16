@@ -1,4 +1,4 @@
-# p2pgate (v1.11)
+# p2pgate (v1.12)
 
 **English** | [ไทย](README.th.md)
 
@@ -15,11 +15,10 @@ registry**, a **local control plane**, **multi-target routing**, and an optional
 
 Works on Termux/Android, Linux, macOS, and Windows with Node.js 20 or newer.
 
-> Version 1.11 adds **`p2pgate ping`** (auth time + RTT, no listener) and
-> **traffic counters** in `status` with `status --watch`.
-> Version 1.10 added **UDP forwarding**; 1.9 config validation, a stronger
-> doctor and per-client SOCKS; 1.8 the SOCKS5 gateway; 1.7 multi-target; 1.6
-> zero-setup and the connection-password mode.
+> Version 1.12 adds **stream multiplexing** (`--mux`): one authenticated carrier
+> with up to 128 channels, so SOCKS5 requests skip the ~2 s DHT lookup.
+> Version 1.11 added ping/traffic counters; 1.10 UDP; 1.9 config validation and
+> per-client SOCKS; 1.8 SOCKS5; 1.7 multi-target; 1.6 zero-setup.
 >
 > **Install:** `npm install -g p2pgate`
 >
@@ -824,6 +823,27 @@ sessions. Timers are in memory only.
 
 ---
 
+## 9.11) Multiplexing (`--mux`)
+
+```sh
+p2pgate connect -s <secret> -p <password> --socks5 1080 --mux
+p2pgate client --config client.json --mux
+```
+
+- one authenticated carrier, up to **128 channels**
+- each channel carries one target or one SOCKS destination
+- 16 KiB frames, 256 KiB window per direction, 64 KiB queue cap
+- carrier idle timeout 5 min; keepalive every 30 s
+- channel errors keep their codes (`TARGET_UNKNOWN`, `SOCKS_DENIED`, `MUX_BUSY`)
+  and fall back to a dedicated stream
+
+**Fast-path limitation:** a trusted device is answered with `FASTPATH_READY`
+before the server reads the proof, so mux cannot be negotiated. `--mux` logs a
+warning and uses one stream per connection. Use a `scram`-profile key (or
+password mode) for mux.
+
+---
+
 ## 10) Requirements
 
 - Android phone + Termux + Termux:Boot (F-Droid), optional
@@ -1112,6 +1132,7 @@ Messages never contain the PIN or password.
 | `p2pgate connect -s <secret> -p <password>` | One-line client connect |
 | `p2pgate connect --target <name>` | Connect to a named target declared on the Server |
 | `p2pgate connect --socks5 <port>` | Start a local SOCKS5 gateway (server allowlist) |
+| `p2pgate connect --socks5 <port> --mux` | Reuse one carrier for many channels |
 | `p2pgate master show [--reveal]` | Print the masterSecret fingerprint |
 | `p2pgate master reset --yes` | Rotate masterSecret with a timestamped backup |
 | `p2pgate config validate` | Validate a config file (exit 1 when invalid) |
@@ -1347,7 +1368,8 @@ p2pgate/
 │   │   ├── v1.11.1.md
 │   │   ├── v1.11.2.md
 │   │   ├── v1.11.3.md
-│   │   └── v1.11.4.md
+│   │   ├── v1.11.4.md
+│   │   └── v1.12.0.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
@@ -1396,6 +1418,7 @@ p2pgate/
     ├── i18n.js
     ├── keygen.js
     ├── master.js
+    ├── mux.js
     ├── quickstart.js
     ├── self-test.js
     ├── server.js

@@ -37,6 +37,23 @@ const { parseAllowEntry, resolveAllowedHost } = require('./allowlist')
 const dgram = require('node:dgram')
 const { encodeFrame, createDecoder, MAX_DATAGRAM } = require('./udp')
 const {
+  MUX_VERSION,
+  DEFAULT_MAX_CHANNELS,
+  TYPE: MUX_TYPE,
+  FLAG: MUX_FLAG,
+  CHANNEL_WINDOW,
+  MAX_QUEUED,
+  MUX_IDLE_MS,
+  MAX_FRAME,
+  encodeFrame: encodeMuxFrame,
+  FrameParser,
+  encodeJson,
+  decodeJson,
+  encodeUInt32,
+  decodeUInt32,
+  muxError
+} = require('./mux')
+const {
   defaultControlSocketPath,
   defaultControlTokenPath,
   createControlToken,
@@ -787,6 +804,11 @@ async function startServer(config, options = {}) {
           return
         }
 
+        if (result.mux) {
+          startMuxSession(stream, entry, remoteHex, result.leftover)
+          return
+        }
+
         if (result.target && result.target.type === 'udp') {
           startUdpSession(stream, entry, remoteHex, result.target, result.leftover)
           return
@@ -1068,8 +1090,16 @@ async function startServer(config, options = {}) {
       }
 
       let selectedTarget
+      const muxRequested = Boolean(
+        response &&
+        response.mux &&
+        Number(response.mux.version) === MUX_VERSION
+      )
+
       try {
-        if (response && response.udp !== undefined) {
+        if (muxRequested) {
+          selectedTarget = null
+        } else if (response && response.udp !== undefined) {
           selectedTarget = resolveUdpTarget(response.udp)
         } else if (response && response.socks !== undefined) {
           selectedTarget = await resolveSocksTarget(response.socks, remoteHex)
@@ -1100,32 +1130,291 @@ async function startServer(config, options = {}) {
 
       const serverSig = computeServerSignature(verifier.serverKey, authMessage).toString('hex')
 
-      writeAuthMessage(stream, {
+      const successMessage = {
         v: AUTH_VERSION,
         ok: true,
-        serverSig,
-        target: {
+        serverSig
+      }
+
+      if (muxRequested) {
+        successMessage.mux = {
+          version: MUX_VERSION,
+          maxChannels: DEFAULT_MAX_CHANNELS
+        }
+      } else if (selectedTarget) {
+        successMessage.target = {
           name: selectedTarget.name,
           host: selectedTarget.host,
           port: selectedTarget.port
         }
-      })
-      writeLog(`AUTH OK client=${remoteHex} method=${mode} target=${selectedTarget.name}`)
+      }
+
+      writeAuthMessage(stream, successMessage)
+      writeLog(
+        `AUTH OK client=${remoteHex} method=${mode} target=${muxRequested ? 'mux' : selectedTarget.name}`
+      )
       void audit.record('auth.success', {
         source: 'server',
         key: remoteHex,
         mode,
-        target: selectedTarget.name
+        target: muxRequested ? 'mux' : selectedTarget.name
       })
 
       return {
         ok: true,
         leftover: Buffer.concat([readyRead.leftover, read.leftover]),
-        target: selectedTarget
+        target: selectedTarget,
+        mux: muxRequested
       }
     } finally {
       gate.release()
     }
+  }
+
+  function startMuxSession(stream, entry, remoteHex, leftover) {
+    const channels = new Map()
+    const record = openTrafficRecord(remoteHex, 'mux', 'mux')
+    let finished = false
+    let idleTimer = null
+
+    const parser = new FrameParser((frame) => {
+      onFrame(frame).catch((err) => {
+        writeLog(`MUX frame error client=${remoteHex}: ${err.message}`)
+        finish()
+      })
+    }, (err) => {
+      writeLog(`MUX framing error client=${remoteHex}: ${err.message}`)
+      finish()
+    })
+
+    const touchIdle = () => {
+      if (idleTimer) clearTimeout(idleTimer)
+      idleTimer = setTimeout(() => {
+        if (channels.size === 0) finish()
+        else touchIdle()
+      }, MUX_IDLE_MS)
+      idleTimer.unref()
+    }
+
+    const finish = () => {
+      if (finished) return
+      finished = true
+
+      if (idleTimer) clearTimeout(idleTimer)
+      closeTrafficRecord(record)
+
+      for (const channel of channels.values()) {
+        try {
+          channel.socket.destroy()
+        } catch {
+          // Ignore.
+        }
+      }
+
+      const closedChannels = channels.size
+      channels.clear()
+      activeConnections.delete(entry)
+
+      if (!stream.destroyed) stream.destroy()
+      writeLog(`MUX SESSION closed client=${remoteHex} channels=${closedChannels}`)
+    }
+
+    const send = (type, flags, channelId, payload) => {
+      if (finished) return
+
+      try {
+        stream.write(encodeMuxFrame(type, flags, channelId, payload || Buffer.alloc(0)))
+      } catch {
+        finish()
+      }
+    }
+
+    function queueOut(channel, chunk) {
+      channel.queue.push(chunk)
+      flushOut(channel)
+
+      const queued = channel.queue.reduce((sum, buffer) => sum + buffer.length, 0)
+
+      if (queued > MAX_QUEUED) {
+        send(MUX_TYPE.RESET, MUX_FLAG.RESET, channel.id)
+        cleanup(channel.id)
+      }
+    }
+
+    function flushOut(channel) {
+      while (channel.creditOut > 0 && channel.queue.length > 0) {
+        const buffer = channel.queue[0]
+        const size = Math.min(channel.creditOut, buffer.length, MAX_FRAME)
+
+        send(MUX_TYPE.DATA, 0, channel.id, buffer.subarray(0, size))
+        channel.creditOut -= size
+
+        if (size === buffer.length) channel.queue.shift()
+        else channel.queue[0] = buffer.subarray(size)
+      }
+    }
+
+    function cleanup(channelId) {
+      const channel = channels.get(channelId)
+      if (!channel) return
+
+      channels.delete(channelId)
+      try {
+        channel.socket.destroy()
+      } catch {
+        // Ignore.
+      }
+      touchIdle()
+    }
+
+    async function openChannel(channelId, request) {
+      if (channels.size >= DEFAULT_MAX_CHANNELS) {
+        send(MUX_TYPE.OPEN_ERR, 0, channelId, encodeJson({
+          error: 'MUX_BUSY',
+          message: 'too many channels'
+        }))
+        return
+      }
+
+      let target
+
+      try {
+        if (request && request.socks) {
+          target = await resolveSocksTarget(request.socks, remoteHex)
+        } else {
+          target = resolveTarget(request && request.target, remoteHex)
+        }
+      } catch (err) {
+        send(MUX_TYPE.OPEN_ERR, 0, channelId, encodeJson({
+          error: err.code || 'OPEN_FAILED',
+          message: err.message
+        }))
+        return
+      }
+
+      const socket = net.createConnection({ host: target.host, port: target.port })
+      const channel = {
+        id: channelId,
+        socket,
+        target,
+        creditOut: CHANNEL_WINDOW,
+        queue: []
+      }
+
+      channels.set(channelId, channel)
+      socket.setKeepAlive(true, 30_000)
+      socket.setNoDelay(true)
+
+      socket.once('connect', () => {
+        send(MUX_TYPE.OPEN_OK, 0, channelId, encodeJson({
+          target: target.name,
+          host: target.host,
+          port: target.port
+        }))
+      })
+
+      socket.on('data', (chunk) => {
+        addOutbound(record, chunk.length)
+        queueOut(channel, chunk)
+      })
+
+      socket.on('error', () => {
+        send(MUX_TYPE.RESET, MUX_FLAG.RESET, channelId)
+        cleanup(channelId)
+      })
+
+      socket.on('close', () => {
+        send(MUX_TYPE.CLOSE, 0, channelId)
+        cleanup(channelId)
+      })
+
+      writeLog(
+        `MUX OPEN client=${remoteHex} channel=${channelId} target=${target.name} -> ${target.host}:${target.port}`
+      )
+      touchIdle()
+    }
+
+    async function onFrame(frame) {
+      if (finished) return
+
+      switch (frame.type) {
+        case MUX_TYPE.OPEN: {
+          const request = decodeJson(frame.payload)
+
+          if (!request || typeof request !== 'object' || Array.isArray(request)) {
+            send(MUX_TYPE.OPEN_ERR, 0, frame.channelId, encodeJson({
+              error: 'MUX_BAD_REQUEST',
+              message: 'open payload must be JSON'
+            }))
+            return
+          }
+
+          await openChannel(frame.channelId, request)
+          return
+        }
+
+        case MUX_TYPE.DATA: {
+          const channel = channels.get(frame.channelId)
+          if (!channel) return
+
+          addInbound(record, frame.payload.length)
+          send(MUX_TYPE.WINDOW, 0, channel.id, encodeUInt32(frame.payload.length))
+
+          try {
+            channel.socket.write(frame.payload)
+          } catch {
+            send(MUX_TYPE.RESET, MUX_FLAG.RESET, channel.id)
+            cleanup(channel.id)
+          }
+          return
+        }
+
+        case MUX_TYPE.WINDOW: {
+          const channel = channels.get(frame.channelId)
+          if (!channel) return
+
+          channel.creditOut = Math.min(
+            channel.creditOut + decodeUInt32(frame.payload),
+            CHANNEL_WINDOW
+          )
+          flushOut(channel)
+          return
+        }
+
+        case MUX_TYPE.CLOSE: {
+          const channel = channels.get(frame.channelId)
+          if (!channel) return
+
+          try {
+            channel.socket.end()
+          } catch {
+            // Ignore.
+          }
+          cleanup(frame.channelId)
+          return
+        }
+
+        case MUX_TYPE.RESET:
+          cleanup(frame.channelId)
+          return
+
+        case MUX_TYPE.PING:
+          send(MUX_TYPE.PONG, 0, 0, frame.payload)
+          return
+
+        default:
+          return
+      }
+    }
+
+    stream.on('data', (chunk) => parser.push(chunk))
+    stream.on('error', finish)
+    stream.on('close', finish)
+
+    if (leftover && leftover.length > 0) parser.push(leftover)
+
+    touchIdle()
+    writeLog(`MUX SESSION client=${remoteHex} maxChannels=${DEFAULT_MAX_CHANNELS}`)
   }
 
   function startUdpSession(stream, entry, remoteHex, target, leftover) {

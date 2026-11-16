@@ -47,6 +47,11 @@ const { rotateMasterSecret, fingerprint } = require('./master')
 const { redactConfig } = require('./config-tools')
 const { setHost, getHost, listHosts, deleteHost } = require('./hosts')
 const { readAuditEvents } = require('./audit-view')
+const {
+  encodeFrame: encodeMuxFrame,
+  FrameParser: MuxFrameParser,
+  TYPE: MUX_TYPE
+} = require('./mux')
 
 const noop = () => {}
 const quiet = () => {}
@@ -843,7 +848,8 @@ async function main() {
           keyPassphrase: options.keyPassphrase,
           credential,
           target: options.target,
-          socksPort: options.socksPort
+          socksPort: options.socksPort,
+          mux: options.mux
         }
       )
       clients.push(client)
@@ -2155,6 +2161,106 @@ async function main() {
     const ttlSocketExists = await fs.stat(ttlControlPath).then(() => true).catch(() => false)
     assert.equal(ttlSocketExists, false)
     checks.push('server --ttl closes itself and removes the control socket')
+
+    // mux framing round-trip
+    const muxFrames = []
+    const muxParser = new MuxFrameParser((frame) => muxFrames.push(frame))
+    muxParser.push(encodeMuxFrame(MUX_TYPE.DATA, 0, 7, Buffer.from('abc')))
+    assert.equal(muxFrames.length, 1)
+    assert.equal(muxFrames[0].type, MUX_TYPE.DATA)
+    assert.equal(muxFrames[0].channelId, 7)
+    assert.equal(muxFrames[0].payload.toString(), 'abc')
+    checks.push('mux framing round-trips a frame')
+
+    // mux over a challenged session
+    const muxSecret = crypto.randomBytes(32).toString('hex')
+    const muxControlPath = controlPathFor('mux')
+    const muxServer = await startServer({
+      mode: 'server',
+      masterSecret: muxSecret,
+      authMode: 'password',
+      targetHost: '127.0.0.1',
+      targetPort: echoPort,
+      localPort: 8022,
+      clientKeyPath: path.join(tempDir, 'mux-server-key.json'),
+      allowedClientKeys: [],
+      verificationMode: 'hybrid',
+      trustedDevicesFile: path.join(tempDir, 'mux-devices'),
+      auditLog: { enabled: false },
+      customBootstrap: bootstrap,
+      authPin: { enabled: true, unattended: unattendedVerifier },
+      telegramAlert: { enabled: false, botToken: '', chatId: '' }
+    }, {
+      log: quiet,
+      showSessionPin: false,
+      sendStartupAlert: false,
+      failDelayMs: [10, 20],
+      lockoutStatePath: path.join(tempDir, 'mux-lockout.json'),
+      authTimeoutMs: 4_000,
+      interactive: false,
+      controlSocketPath: muxControlPath,
+      controlTokenPath: path.join(tempDir, 'control-mux.token')
+    })
+    extraServers.push(muxServer)
+
+    const muxClient = await startTestClient(
+      unauthorizedKeyPath,
+      unattendedPassword,
+      { base: { ...clientBase, masterSecret: muxSecret }, mux: true }
+    )
+    const muxPayload = crypto.randomBytes(64)
+    assert.deepEqual(await echoThrough(muxClient, muxPayload), muxPayload)
+    assert.equal(muxClient.muxActive, true)
+    checks.push('mux carrier serves a challenged session')
+    await muxClient.close()
+    await muxServer.close()
+
+    // fast-path cannot negotiate mux: must fall back, not break
+    const fastMuxSecret = crypto.randomBytes(32).toString('hex')
+    const fastMuxControlPath = controlPathFor('muxfast')
+    const fastMuxKey = await loadClientKey(unauthorizedKeyPath)
+    const fastMuxServer = await startServer({
+      mode: 'server',
+      masterSecret: fastMuxSecret,
+      authMode: 'registry',
+      targetHost: '127.0.0.1',
+      targetPort: echoPort,
+      localPort: 8022,
+      clientKeyPath: path.join(tempDir, 'muxfast-server-key.json'),
+      allowedClientKeys: [fastMuxKey.publicKey],
+      verificationMode: 'key-only',
+      trustedDevicesFile: path.join(tempDir, 'muxfast-devices'),
+      auditLog: { enabled: false },
+      customBootstrap: bootstrap,
+      authPin: { enabled: false, unattended: null },
+      telegramAlert: { enabled: false, botToken: '', chatId: '' }
+    }, {
+      log: quiet,
+      showSessionPin: false,
+      sendStartupAlert: false,
+      failDelayMs: [10, 20],
+      lockoutStatePath: path.join(tempDir, 'muxfast-lockout.json'),
+      authTimeoutMs: 4_000,
+      interactive: false,
+      controlSocketPath: fastMuxControlPath,
+      controlTokenPath: path.join(tempDir, 'control-muxfast.token')
+    })
+    extraServers.push(fastMuxServer)
+
+    const fastMuxClient = await startTestClient(
+      unauthorizedKeyPath,
+      undefined,
+      {
+        base: { ...clientBase, masterSecret: fastMuxSecret },
+        mux: true
+      }
+    )
+    const fastMuxPayload = crypto.randomBytes(32)
+    assert.deepEqual(await echoThrough(fastMuxClient, fastMuxPayload), fastMuxPayload)
+    assert.equal(fastMuxClient.muxActive, false)
+    checks.push('mux falls back on a fast-path session')
+    await fastMuxClient.close()
+    await fastMuxServer.close()
   } finally {
     if (originalSocket) {
       try {

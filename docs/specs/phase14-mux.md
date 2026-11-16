@@ -1,6 +1,6 @@
 # Phase 14 — Stream multiplexing (`--mux`)
 
-**Status:** design draft (target v1.12.0)
+**Status:** implemented in v1.12.0 (opt-in `--mux`)
 **Baseline:** `p2pgate v1.11.4`
 
 ---

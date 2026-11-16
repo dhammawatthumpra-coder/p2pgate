@@ -20,6 +20,12 @@ const { loadClientKey, DEFAULT_CLIENT_KEY_PATH } = require('./keygen')
 const dgram = require('node:dgram')
 const { encodeFrame, createDecoder, MAX_DATAGRAM } = require('./udp')
 const {
+  MuxCarrier,
+  MUX_VERSION,
+  DEFAULT_MAX_CHANNELS,
+  muxError
+} = require('./mux')
+const {
   REPLY: SOCKS_REPLY,
   readRequest: readSocksRequest,
   writeReply: writeSocksReply
@@ -772,6 +778,13 @@ async function startClient(config, options = {}) {
         }
       }
 
+      if (authOptions.mux) {
+        proofMessage.mux = {
+          version: MUX_VERSION,
+          maxChannels: authOptions.mux.maxChannels || DEFAULT_MAX_CHANNELS
+        }
+      }
+
       if (authOptions.udp) {
         proofMessage.udp = { target: authOptions.udp.target }
       }
@@ -844,8 +857,98 @@ async function startClient(config, options = {}) {
         challengeRead.leftover,
         resultRead.leftover
       ]),
-      target: serverTarget
+      target: serverTarget,
+      mux: result.mux && Number(result.mux.version) === MUX_VERSION
+        ? {
+            version: MUX_VERSION,
+            maxChannels: Number.isInteger(result.mux.maxChannels)
+              ? result.mux.maxChannels
+              : DEFAULT_MAX_CHANNELS
+          }
+        : null
     }
+  }
+
+  let muxCarrier = null
+  let muxUnsupported = false
+  const muxEnabled = options.mux === true
+
+  async function getMuxCarrier() {
+    if (muxCarrier && !muxCarrier.closed) return muxCarrier
+    if (muxUnsupported) return null
+
+    const baseSlot = getSlot(nowMs())
+
+    for (const slot of [baseSlot, baseSlot - 1]) {
+      let stream = null
+
+      try {
+        const publicKey = deriveServerPublicKey(masterSecret, slot)
+        stream = await connectEncrypted(dht, publicKey, keyPair, connectTimeoutMs)
+
+        if (!stream) continue
+
+        stream.on('error', noop)
+
+        const authResult = await authenticateEncrypted(stream, {
+          mux: { version: MUX_VERSION, maxChannels: DEFAULT_MAX_CHANNELS }
+        })
+
+        if (!authResult.mux) {
+          if (!stream.destroyed) stream.destroy()
+          muxUnsupported = true
+          writeLog('MUX unavailable (fast-path or older server); using dedicated streams')
+          return null
+        }
+
+        const carrier = new MuxCarrier(stream, {
+          maxChannels: authResult.mux.maxChannels
+        })
+
+        carrier.on('close', () => {
+          if (muxCarrier === carrier) muxCarrier = null
+        })
+
+        muxCarrier = carrier
+        writeLog(
+          `MUX carrier established slot=${slot} maxChannels=${authResult.mux.maxChannels}`
+        )
+        return carrier
+      } catch (err) {
+        if (stream && !stream.destroyed) stream.destroy()
+      }
+    }
+
+    return null
+  }
+
+  function pipeMuxChannel(channel, socket, entry) {
+    const record = entry || { socket, stream: null }
+    if (!entry) activeConnections.add(record)
+
+    record.stream = channel
+    let finished = false
+
+    const finish = () => {
+      if (finished) return
+      finished = true
+      activeConnections.delete(record)
+      if (!socket.destroyed) socket.destroy()
+      if (!channel.closed) channel.destroy()
+    }
+
+    channel.on('data', (chunk) => {
+      if (socket.destroyed) return
+      socket.write(chunk)
+    })
+
+    channel.on('close', finish)
+    channel.on('error', finish)
+
+    socket.on('data', (chunk) => channel.write(chunk))
+    socket.on('end', () => channel.end())
+    socket.on('error', finish)
+    socket.on('close', finish)
   }
 
   async function handleLocalSocket(socket, socksRequest = null) {
@@ -859,6 +962,25 @@ async function startClient(config, options = {}) {
 
     const entry = { socket, stream: null }
     activeConnections.add(entry)
+
+    if (muxEnabled && socksRequest === null) {
+      const carrier = await getMuxCarrier()
+
+      if (carrier) {
+        try {
+          const channel = await carrier.openChannel(
+            requestedTarget ? { target: requestedTarget } : {}
+          )
+
+          pipeMuxChannel(channel, socket, entry)
+          return
+        } catch (err) {
+          writeLog(
+            `MUX open failed (${err.code || err.message}); using a dedicated stream`
+          )
+        }
+      }
+    }
 
     let aborted = false
     let pendingStream = null
@@ -996,6 +1118,26 @@ async function startClient(config, options = {}) {
       )
       socket.destroy()
       return
+    }
+
+    if (muxEnabled) {
+      const carrier = await getMuxCarrier()
+
+      if (carrier) {
+        try {
+          const channel = await carrier.openChannel({
+            socks: { host: request.host, port: request.port }
+          })
+
+          writeSocksReply(socket, SOCKS_REPLY.SUCCEEDED)
+          pipeMuxChannel(channel, socket, null)
+          return
+        } catch (err) {
+          writeLog(
+            `MUX socks open failed (${err.code || err.message}); using a dedicated stream`
+          )
+        }
+      }
     }
 
     await handleLocalSocket(socket, request)
@@ -1286,6 +1428,15 @@ async function startClient(config, options = {}) {
     if (closed) return
     closed = true
 
+    if (muxCarrier) {
+      try {
+        muxCarrier.close()
+      } catch {
+        // Ignore.
+      }
+      muxCarrier = null
+    }
+
     let closePromise = Promise.resolve()
 
     if (listening) {
@@ -1345,6 +1496,9 @@ async function startClient(config, options = {}) {
     },
     get target() {
       return requestedTarget
+    },
+    get muxActive() {
+      return muxCarrier !== null && !muxCarrier.closed
     },
     get activeConnections() {
       return activeConnections.size

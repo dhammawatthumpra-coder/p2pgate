@@ -837,7 +837,8 @@ async function commandClient(values) {
     pinStdin: values['pin-stdin'] === true,
     keyPassphrase,
     target: values.target === undefined ? undefined : String(values.target),
-    socksPort: parseSocksFlag(values.socks5)
+    socksPort: parseSocksFlag(values.socks5),
+    mux: values.mux === true
   })
   const address = client.address()
 
@@ -1089,7 +1090,8 @@ async function commandConnect(values, positionals) {
 
   const client = await startClient(config, {
     credential: password,
-    socksPort
+    socksPort,
+    mux: values.mux === true
   })
   const address = client.address()
 
@@ -2478,6 +2480,7 @@ async function main(argv) {
         listen: { type: 'string' },
         count: { type: 'string' },
         watch: { type: 'boolean' },
+        mux: { type: 'boolean' },
         ttl: { type: 'string' },
         idle: { type: 'string' },
         once: { type: 'boolean' },
