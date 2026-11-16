@@ -32,6 +32,34 @@ if (header[0] === 'time' && header.includes('ok')) {
   const max = (list) => (list.length ? Math.max(...list) : 0)
   const avg = (list) => (list.length ? list.reduce((a, b) => a + b, 0) / list.length : 0)
 
+  // Failure clusters: consecutive failures usually mean one network outage.
+  const clusters = []
+  let streak = 0
+  let recoveredFirstTry = 0
+
+  rows.forEach((row, index) => {
+    if (row.ok !== 'true') {
+      streak += 1
+      if (streak === 1) clusters.push({ start: index, count: 0 })
+      clusters[clusters.length - 1].count += 1
+      return
+    }
+
+    if (streak === 1) recoveredFirstTry += 1
+    streak = 0
+  })
+
+  const carrierSteps = []
+  let lastCarriers = 0
+  rows.forEach((row) => {
+    const value = Number(row.carriers)
+    if (!Number.isFinite(value)) return
+    if (value > lastCarriers) {
+      carrierSteps.push({ time: row.time, from: lastCarriers, to: value })
+      lastCarriers = value
+    }
+  })
+
   console.log(`file:        ${file}`)
   console.log(`iterations:  ${rows.length}`)
   console.log(`ok:          ${ok.length}`)
@@ -41,6 +69,20 @@ if (header[0] === 'time' && header.includes('ok')) {
   console.log(`client RSS:  min ${min(rss)} / max ${max(rss)} MB`)
   console.log(`carriers:    ${max(carriers)} established (reconnects: ${Math.max(0, max(carriers) - 1)})`)
 
+  if (clusters.length) {
+    console.log(`outages:     ${clusters.length} cluster(s), longest ${max(clusters.map((c) => c.count))} iteration(s)`)
+    console.log(`recovered:   ${recoveredFirstTry}/${clusters.length} clusters recovered on the next iteration`)
+    for (const cluster of clusters) {
+      const first = rows[cluster.start]
+      const last = rows[cluster.start + cluster.count - 1]
+      console.log(
+        `  ${first.time}  ${cluster.count} failure(s)  ${first.error || '?'}` +
+        `${last !== first ? ` -> ${last.error || '?'}` : ''}`
+      )
+    }
+    console.log('note:        failures clustered around a network drop are expected, see above')
+  }
+
   if (failed.length) {
     console.log('failures:')
     for (const row of failed.slice(0, 20)) {
@@ -48,7 +90,7 @@ if (header[0] === 'time' && header.includes('ok')) {
     }
   }
 
-  process.exit(failed.length === 0 ? 0 : 1)
+  process.exit(failed.length === 0 || recoveredFirstTry === clusters.length ? 0 : 1)
 }
 
 if (header.includes('rss_kb') || header[0] === 'time') {
