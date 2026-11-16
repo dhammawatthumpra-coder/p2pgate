@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-16
-สถานะ: **v1.11.1 prepared** (fix: self-test hang/path; npm เป็น 1.11.0)
+สถานะ: **v1.11.1 released** (npm + GitHub Release)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -47,11 +47,11 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | รายการ | ค่า |
 |---|---|
 | Version | `1.11.1` (fix: self-test, พร้อม publish) |
-| npm `latest` | `1.11.0` — ยังไม่อัปเดตจนกว่า `npm publish` |
+| npm `latest` | `1.11.1` |
 | Git branch | `main` |
 | Commit | `69aef6c fix(test): use a temp client key and exit after the self-test` |
 | Tag | `v1.11.1` |
-| GitHub Release | `v1.11.0` = Latest; `v1.11.1` ยังไม่สร้าง |
+| GitHub Release | `v1.11.1` = Latest |
 | Working tree | clean |
 | Tests | `npm test` → **54 checks PASSED** (Windows + Termux) |
 | src | 19 ไฟล์, `src/self-test.js` ~1,700 บรรทัด |
