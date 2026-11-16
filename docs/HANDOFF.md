@@ -49,7 +49,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | Version | `1.11.4` (ops: hosts/audit/ttl, พร้อม publish) |
 | npm `latest` | `1.11.3` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `__COMMIT__` |
+| Commit | `9f69310 feat(ops): host aliases, audit viewer, self-stopping server` |
 | Tag | `v1.11.4` |
 | GitHub Release | `v1.11.3` = Latest; `v1.11.4` ยังไม่สร้าง |
 | Working tree | clean |
