@@ -7,6 +7,16 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.11.1] - 2026-11-16
+
+### Fixed
+
+- self-test ใช้ `~/.p2pgate/client-key.json` (path จริงของผู้ใช้) ใน UDP test
+  ทำให้ `npm test` ล้มบนเครื่องที่ไม่เคยมี client key
+- เมื่อ self-test ล้ม ยังมี DHT handle ค้าง → process ไม่ยอมจบ (`npm test` ค้าง)
+  แก้โดย flush output แล้ว `process.exit()` ทั้งทางผ่านและทางล้ม
+- UDP test ระบุ `clientKeyPath` เป็นไฟล์ใน temp dir เสมอ
+
 ## [1.11.0] - 2026-11-16
 
 ### Added

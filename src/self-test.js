@@ -1903,7 +1903,7 @@ async function main() {
     extraServers.push(udpServer)
 
     const udpClient = await startClient(
-      { ...clientBase, masterSecret: udpSecret },
+      { ...clientBase, masterSecret: udpSecret, clientKeyPath: unauthorizedKeyPath },
       {
         log: quiet,
         credential: unattendedPassword,
@@ -2142,10 +2142,12 @@ async function main() {
 
   process.stdout.write('\nSelf-test results:\n')
   for (const check of checks) process.stdout.write(`  ✅ ${check}\n`)
-  process.stdout.write('\nSELF-TEST PASSED\n')
+  process.stdout.write('\nSELF-TEST PASSED\n', () => process.exit(0))
 }
 
 main().catch((err) => {
-  process.stderr.write(`\nSELF-TEST FAILED\n${err && err.stack ? err.stack : err}\n`)
-  process.exitCode = 1
+  process.stderr.write(
+    `\nSELF-TEST FAILED\n${err && err.stack ? err.stack : err}\n`,
+    () => process.exit(1)
+  )
 })
