@@ -918,6 +918,30 @@ async function main() {
     assert.equal(pinResponse.formatted, formatSessionPin(gateway.sessionPin))
     checks.push('control status and pin require the per-server token')
 
+    const statusWithTraffic = await mainControl({ cmd: 'status' })
+    assert.equal(statusWithTraffic.ok, true)
+    assert.ok(statusWithTraffic.traffic, 'status must include traffic counters')
+    assert.ok(statusWithTraffic.traffic.totalOut > 0, 'echo traffic must be counted')
+    assert.ok(Array.isArray(statusWithTraffic.traffic.active))
+    checks.push('status reports in-memory traffic counters')
+
+    const pingSession = await startClient(
+      { ...clientBase, clientKeyPath: authorizedKeyPath, masterSecret },
+      {
+        log: quiet,
+        credential: unattendedPassword,
+        ping: { count: 2 },
+        connectTimeoutMs: 7_000,
+        authTimeoutMs: 4_000,
+        now: () => serverNow
+      }
+    )
+    const pingOk = (pingSession.results || []).find((entry) => entry.ok)
+    assert.ok(pingOk, 'ping must reach the server')
+    assert.equal(pingOk.rtts.length, 2)
+    await pingSession.close()
+    checks.push('ping measures RTT without opening a listener')
+
     const revokeClient = await startTestClient(revokeKeyPath, unattendedPassword)
     const revokeSocket = await connectLocal(revokeClient.address().port)
     const revokeBanner = await readExactly(revokeSocket, echoBanner.length, 15_000)

@@ -7,6 +7,22 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.11.0] - 2026-11-16
+
+### Added
+
+- `p2pgate ping [--count N] [--json]` — วัด auth time และ RTT ระดับโปรโตคอล
+  โดยไม่เปิด listener
+- Traffic counters ใน `p2pgate status`: `totalIn`, `totalOut` และรายการ stream
+  ที่ใช้งาน (tcp/udp, peer, target, bytes)
+- `p2pgate status --watch` รีเฟรชทุก 1 วินาที
+- self-test: ping RTT + traffic counters (54 checks)
+
+### Changed
+
+- help ระบุ v1.11 และรองรับ TCP/UDP
+- `status` แสดง traffic รวมและ stream ที่ใช้งาน
+
 ## [1.10.0] - 2026-11-16
 
 ### Added

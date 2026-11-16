@@ -1,4 +1,4 @@
-# p2pgate (v1.10)
+# p2pgate (v1.11)
 
 **English** | [ไทย](README.th.md)
 
@@ -15,11 +15,11 @@ registry**, a **local control plane**, **multi-target routing**, and an optional
 
 Works on Termux/Android, Linux, macOS, and Windows with Node.js 20 or newer.
 
-> Version 1.10 adds **UDP forwarding** (`udpTargets` + `p2pgate udp`), carried
-> inside the existing authenticated tunnel with a 1200-byte datagram cap.
-> Version 1.9 added config validation, a stronger doctor, and per-client SOCKS
-> allowlists; 1.8 added the SOCKS5 gateway; 1.7 multi-target routing; 1.6
-> zero-setup startup and the connection-password mode.
+> Version 1.11 adds **`p2pgate ping`** (auth time + RTT, no listener) and
+> **traffic counters** in `status` with `status --watch`.
+> Version 1.10 added **UDP forwarding**; 1.9 config validation, a stronger
+> doctor and per-client SOCKS; 1.8 the SOCKS5 gateway; 1.7 multi-target; 1.6
+> zero-setup and the connection-password mode.
 >
 > **Install:** `npm install -g p2pgate`
 >
@@ -749,6 +749,35 @@ Rules:
 
 ---
 
+## 9.7) Ping and traffic counters
+
+```sh
+p2pgate ping                 # 3 pings: current slot then the previous one
+p2pgate ping --count 5 --json
+```
+
+```text
+slot 498557  serverKey 16db1bcb…
+   auth 92 ms   rtt min/avg/max 0/1/1 ms   (2 pings)
+```
+
+- `auth` is the SCRAM round trip; `rtt` is the ping round trip
+- nothing listens and no port stays open
+- exit code `1` when no slot answers
+
+`p2pgate status` now reports in-memory traffic counters:
+
+```text
+Traffic รวม: in 1.2 KiB / out 8.4 MiB
+Stream ที่ใช้งาน: 2
+  - ssh (tcp) peer=3d8f1df0… in 512 B out 8.4 MiB
+```
+
+`p2pgate status --watch` refreshes every second (Ctrl+C to stop). Counters reset
+on restart and are never written to disk.
+
+---
+
 ## 10) Requirements
 
 - Android phone + Termux + Termux:Boot (F-Droid), optional
@@ -1042,6 +1071,8 @@ Messages never contain the PIN or password.
 | `p2pgate config validate` | Validate a config file (exit 1 when invalid) |
 | `p2pgate config show` | Print the normalised config with secrets masked |
 | `p2pgate udp --target <name> --listen <port>` | Forward local UDP to a Server udpTarget |
+| `p2pgate ping [--count <n>]` | Measure auth time and RTT, then exit |
+| `p2pgate status --watch` | Refresh status (traffic) every second |
 | `p2pgate keygen` | Create/show the Client key |
 | `p2pgate keygen --passphrase` | Protect an existing/new key with a passphrase |
 | `p2pgate keygen --unprotect` | Remove passphrase protection (prompts) |
@@ -1259,7 +1290,8 @@ p2pgate/
 │   │   ├── v1.8.4.md
 │   │   ├── v1.9.0.md
 │   │   ├── v1.9.1.md
-│   │   └── v1.10.0.md
+│   │   ├── v1.10.0.md
+│   │   └── v1.11.0.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
@@ -1272,6 +1304,7 @@ p2pgate/
 │       ├── phase10-master.md
 │       ├── phase11-v1.9.0.md
 │       ├── phase12-udp.md
+│       ├── phase13-ping-traffic.md
 │       └── project-spec.md
 ├── package.json
 ├── package-lock.json

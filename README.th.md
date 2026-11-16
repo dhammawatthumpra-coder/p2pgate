@@ -1,4 +1,4 @@
-# p2pgate (v1.10)
+# p2pgate (v1.11)
 
 [English](README.md) | **ไทย**
 
@@ -14,10 +14,10 @@ CGNAT/ไฟร์วอลล์ โดยไม่ต้องเปิดพ�
 
 ใช้ได้กับ Termux/Android, Linux, macOS และ Windows ที่มี Node.js 20 ขึ้นไป
 
-> เวอร์ชัน 1.10 เพิ่ม **UDP forwarding** (`udpTargets` + `p2pgate udp`)
-> โดยห่อ datagram ใน tunnel ที่ authenticate แล้ว จำกัด 1200 ไบต์
-> เวอร์ชัน 1.9 เพิ่ม config validation, doctor ที่ตรวจลึกขึ้น และ SOCKS ต่อ client
-> เวอร์ชัน 1.8 เพิ่ม SOCKS5 gateway, 1.7 multi-target, 1.6 zero-setup
+> เวอร์ชัน 1.11 เพิ่ม **`p2pgate ping`** (วัด auth time + RTT โดยไม่เปิด listener)
+> และ **traffic counters** ใน `status` พร้อม `status --watch`
+> เวอร์ชัน 1.10 เพิ่ม UDP forwarding, 1.9 config validation + doctor + SOCKS ต่อ client,
+> 1.8 SOCKS5 gateway, 1.7 multi-target, 1.6 zero-setup
 >
 > **ติดตั้ง:** `npm install -g p2pgate`
 >
@@ -729,6 +729,35 @@ p2pgate udp --target dns --listen 5353
 
 ---
 
+## 9.7) Ping และ traffic counters
+
+```sh
+p2pgate ping                 # 3 pings: slot ปัจจุบัน แล้ว slot ก่อนหน้า
+p2pgate ping --count 5 --json
+```
+
+```text
+slot 498557  serverKey 16db1bcb…
+   auth 92 ms   rtt min/avg/max 0/1/1 ms   (2 pings)
+```
+
+- `auth` = เวลา SCRAM, `rtt` = เวลา ping ไป-กลับ
+- ไม่เปิด listener และไม่ทิ้งพอร์ตค้าง
+- exit code `1` เมื่อไม่พบ Server
+
+`p2pgate status` รายงาน traffic ในหน่วยความจำ:
+
+```text
+Traffic รวม: in 1.2 KiB / out 8.4 MiB
+Stream ที่ใช้งาน: 2
+  - ssh (tcp) peer=3d8f1df0… in 512 B out 8.4 MiB
+```
+
+`p2pgate status --watch` รีเฟรชทุก 1 วินาที (Ctrl+C เพื่อหยุด)
+ตัวนับรีเซ็ตเมื่อรีสตาร์ต และไม่เขียนลงดิสก์
+
+---
+
 ## 10) สิ่งที่ต้องมี
 
 - มือถือ Android + Termux + Termux:Boot (F-Droid)
@@ -1017,6 +1046,8 @@ tail -f ~/.p2pgate/server.log
 | `p2pgate config validate` | ตรวจ config (exit 1 ถ้าผิด) |
 | `p2pgate config show` | แสดง config ที่ normalize แล้วโดยปิด secret |
 | `p2pgate udp --target <name> --listen <port>` | ส่ง UDP จากเครื่องไปยัง udpTarget ของ Server |
+| `p2pgate ping [--count <n>]` | วัด auth time และ RTT แล้วจบ |
+| `p2pgate status --watch` | รีเฟรชสถานะ (traffic) ทุก 1 วินาที |
 | `p2pgate keygen` | สร้าง/แสดงกุญแจ Client |
 | `p2pgate keygen --passphrase` | ตั้ง/เปลี่ยน passphrase สำหรับ client key |
 | `p2pgate keygen --unprotect` | ถอด passphrase (ต้องยืนยันของเดิม) |
@@ -1233,7 +1264,8 @@ p2pgate/
 │   │   ├── v1.8.4.md
 │   │   ├── v1.9.0.md
 │   │   ├── v1.9.1.md
-│   │   └── v1.10.0.md
+│   │   ├── v1.10.0.md
+│   │   └── v1.11.0.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
@@ -1246,6 +1278,7 @@ p2pgate/
 │       ├── phase10-master.md
 │       ├── phase11-v1.9.0.md
 │       ├── phase12-udp.md
+│       ├── phase13-ping-traffic.md
 │       └── project-spec.md
 ├── package.json
 ├── package-lock.json

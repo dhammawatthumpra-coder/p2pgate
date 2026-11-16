@@ -466,6 +466,9 @@ async function startServer(config, options = {}) {
   const udpIdleTimeoutMs = Number.isInteger(options.udpIdleTimeoutMs)
     ? options.udpIdleTimeoutMs
     : 60_000
+  const pingIdleTimeoutMs = Number.isInteger(options.pingIdleTimeoutMs)
+    ? options.pingIdleTimeoutMs
+    : 30_000
 
   const startedAt = Date.now()
   const log = typeof options.log === 'function'
@@ -612,6 +615,39 @@ async function startServer(config, options = {}) {
   const activeConnections = new Set()
   const alertLimiter = new AlertRateLimiter()
 
+  // In-memory traffic counters (no per-byte logging).
+  const traffic = { totalIn: 0, totalOut: 0, streams: new Map() }
+  let nextStreamId = 1
+
+  function openTrafficRecord(peer, targetName, kind) {
+    const record = {
+      id: nextStreamId++,
+      peer,
+      target: targetName,
+      kind,
+      startedAt: Date.now(),
+      in: 0,
+      out: 0
+    }
+
+    traffic.streams.set(record.id, record)
+    return record
+  }
+
+  function closeTrafficRecord(record) {
+    if (record) traffic.streams.delete(record.id)
+  }
+
+  function addInbound(record, bytes) {
+    traffic.totalIn += bytes
+    if (record) record.in += bytes
+  }
+
+  function addOutbound(record, bytes) {
+    traffic.totalOut += bytes
+    if (record) record.out += bytes
+  }
+
   let currentSlot = getSlot(nowMs())
   let blockedCount = 0
   let closed = false
@@ -744,6 +780,11 @@ async function startServer(config, options = {}) {
         if (closed) {
           activeConnections.delete(entry)
           if (!stream.destroyed) stream.destroy()
+          return
+        }
+
+        if (result.ping) {
+          startPingSession(stream, entry, remoteHex, result.leftover)
           return
         }
 
@@ -1029,7 +1070,9 @@ async function startServer(config, options = {}) {
 
       let selectedTarget
       try {
-        if (response && response.udp !== undefined) {
+        if (response && response.ping === true) {
+          selectedTarget = null
+        } else if (response && response.udp !== undefined) {
           selectedTarget = resolveUdpTarget(response.udp)
         } else if (response && response.socks !== undefined) {
           selectedTarget = await resolveSocksTarget(response.socks, remoteHex)
@@ -1059,36 +1102,105 @@ async function startServer(config, options = {}) {
       }
 
       const serverSig = computeServerSignature(verifier.serverKey, authMessage).toString('hex')
-      writeAuthMessage(stream, {
+      const isPing = selectedTarget === null
+
+      const successMessage = {
         v: AUTH_VERSION,
         ok: true,
-        serverSig,
-        target: {
+        serverSig
+      }
+
+      if (isPing) {
+        successMessage.ping = true
+      } else {
+        successMessage.target = {
           name: selectedTarget.name,
           host: selectedTarget.host,
           port: selectedTarget.port
         }
-      })
-      writeLog(`AUTH OK client=${remoteHex} method=${mode} target=${selectedTarget.name}`)
+      }
+
+      writeAuthMessage(stream, successMessage)
+      writeLog(
+        `AUTH OK client=${remoteHex} method=${mode} target=${isPing ? 'ping' : selectedTarget.name}`
+      )
       void audit.record('auth.success', {
         source: 'server',
         key: remoteHex,
         mode,
-        target: selectedTarget.name
+        target: isPing ? 'ping' : selectedTarget.name
       })
 
       return {
         ok: true,
         leftover: Buffer.concat([readyRead.leftover, read.leftover]),
-        target: selectedTarget
+        target: selectedTarget,
+        ping: isPing
       }
     } finally {
       gate.release()
     }
   }
 
+  function startPingSession(stream, entry, remoteHex) {
+    let finished = false
+    let pings = 0
+
+    const finish = () => {
+      if (finished) return
+      finished = true
+
+      activeConnections.delete(entry)
+      if (!stream.destroyed) stream.destroy()
+      writeLog(`PING session closed client=${remoteHex} pings=${pings}`)
+    }
+
+    const run = async () => {
+      while (!finished && !stream.destroyed) {
+        let read
+        try {
+          read = await readControlLine(stream, {
+            timeoutMs: pingIdleTimeoutMs,
+            maxBytes: MAX_CONTROL_BYTES
+          })
+        } catch {
+          break
+        }
+
+        let message = null
+        try {
+          message = decodeControl(read.line)
+        } catch {
+          break
+        }
+
+        if (
+          !message ||
+          message.v !== AUTH_VERSION ||
+          !message.ping ||
+          typeof message.ping.nonce !== 'string' ||
+          message.ping.nonce === '' ||
+          message.ping.nonce.length > 64
+        ) {
+          break
+        }
+
+        writeAuthMessage(stream, {
+          v: AUTH_VERSION,
+          ping: { nonce: message.ping.nonce }
+        })
+        pings += 1
+      }
+    }
+
+    stream.on('error', finish)
+    stream.on('close', finish)
+    run().finally(finish)
+  }
+
   function startUdpSession(stream, entry, remoteHex, target, leftover) {
     const socket = dgram.createSocket('udp4')
+    const record = openTrafficRecord(remoteHex, target.name, 'udp')
     let finished = false
     let idleTimer = null
     let datagrams = 0
@@ -1097,6 +1209,7 @@ async function startServer(config, options = {}) {
       if (finished) return
       finished = true
 
+      closeTrafficRecord(record)
       if (idleTimer !== null) {
         clearTimeout(idleTimer)
         idleTimer = null
@@ -1134,6 +1247,7 @@ async function startServer(config, options = {}) {
 
       try {
         stream.write(encodeFrame(message))
+        addOutbound(record, message.length)
       } catch {
         finish()
       }
@@ -1142,6 +1256,7 @@ async function startServer(config, options = {}) {
     const decoder = createDecoder((payload) => {
       if (finished) return
       datagrams += 1
+      addInbound(record, payload.length)
       touch()
 
       try {
@@ -1176,6 +1291,10 @@ async function startServer(config, options = {}) {
     socket.setKeepAlive(true, 30_000)
     socket.setNoDelay(true)
 
+    const record = openTrafficRecord(remoteHex, forwardTarget.name, 'tcp')
+    stream.on('data', (chunk) => addInbound(record, chunk.length))
+    socket.on('data', (chunk) => addOutbound(record, chunk.length))
+
     let finished = false
     let connectTimer = null
 
@@ -1183,6 +1302,7 @@ async function startServer(config, options = {}) {
       if (finished) return
       finished = true
 
+      closeTrafficRecord(record)
       if (connectTimer !== null) {
         clearTimeout(connectTimer)
         connectTimer = null
@@ -1431,6 +1551,19 @@ async function startServer(config, options = {}) {
         activeConnections: activeConnections.size,
         activeKeys: [...activeKeys],
         uptimeMs: Date.now() - startedAt,
+        traffic: {
+          totalIn: traffic.totalIn,
+          totalOut: traffic.totalOut,
+          active: [...traffic.streams.values()].map((record) => ({
+            id: record.id,
+            peer: record.peer,
+            target: record.target,
+            kind: record.kind,
+            startedAt: new Date(record.startedAt).toISOString(),
+            in: record.in,
+            out: record.out
+          }))
+        },
         trustedDevicesFile: registry.filePath,
         controlSocketPath
       }

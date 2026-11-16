@@ -776,6 +776,10 @@ async function startClient(config, options = {}) {
         proofMessage.udp = { target: authOptions.udp.target }
       }
 
+      if (authOptions.ping === true) {
+        proofMessage.ping = true
+      }
+
       encrypted.write(encodeControl(proofMessage))
     } catch {
       throw new AuthError('ไม่สามารถส่งข้อมูลยืนยันตัวตนได้', 'AUTH_PROTOCOL')
@@ -1013,6 +1017,97 @@ async function startClient(config, options = {}) {
   dht.on('error', (err) => {
     writeLog(`DHT error: ${err.message}`)
   })
+
+  async function runPing() {
+    const requested = options.ping && Number.isInteger(options.ping.count)
+      ? options.ping.count
+      : 3
+    const count = Math.max(1, Math.min(10, requested))
+    const baseSlot = getSlot(nowMs())
+    const results = []
+
+    for (const slot of [baseSlot, baseSlot - 1]) {
+      let publicKey
+      try {
+        publicKey = deriveServerPublicKey(masterSecret, slot)
+      } catch (err) {
+        results.push({ slot, ok: false, error: err.code || err.message })
+        continue
+      }
+
+      let stream = null
+      const startedAt = nowMs()
+
+      try {
+        stream = await connectEncrypted(dht, publicKey, keyPair, connectTimeoutMs)
+
+        if (!stream) {
+          results.push({ slot, ok: false, error: 'PEER_NOT_FOUND' })
+          continue
+        }
+
+        stream.on('error', noop)
+
+        const authStart = nowMs()
+        await authenticateEncrypted(stream, { ping: true })
+        const authMs = nowMs() - authStart
+        const rtts = []
+
+        for (let i = 0; i < count; i += 1) {
+          const nonce = crypto.randomBytes(8).toString('hex')
+          const t0 = nowMs()
+
+          stream.write(encodeControl({ v: AUTH_VERSION, ping: { nonce } }))
+          const read = await readControlLine(stream, {
+            timeoutMs: authTimeoutMs,
+            maxBytes: MAX_CONTROL_BYTES
+          })
+          const message = decodeControl(read.line)
+
+          if (!message || !message.ping || message.ping.nonce !== nonce) {
+            throw new AuthError('unexpected ping reply', 'AUTH_PROTOCOL')
+          }
+
+          rtts.push(nowMs() - t0)
+        }
+
+        results.push({
+          slot,
+          ok: true,
+          serverKey: publicKey.toString('hex'),
+          authMs,
+          totalMs: nowMs() - startedAt,
+          rtts
+        })
+        break
+      } catch (err) {
+        results.push({ slot, ok: false, error: err.code || err.message })
+      } finally {
+        if (stream && !stream.destroyed) stream.destroy()
+      }
+    }
+
+    return results
+  }
+
+  if (options.ping) {
+    const results = await runPing()
+
+    try {
+      await dht.destroy()
+    } catch {
+      // Ignore.
+    }
+
+    return {
+      mode: 'ping',
+      results,
+      address() {
+        return null
+      },
+      async close() {}
+    }
+  }
 
   const activeConnections = new Set()
 

@@ -51,7 +51,7 @@ const {
 } = require('./keygen')
 const { version } = require('../package.json')
 
-const HELP_TEXT = `p2pgate v1.8 — อุโมงค์ TCP แบบ P2P สำหรับ SSH และ service บน loopback (HyperDHT)
+const HELP_TEXT = `p2pgate v1.11 — อุโมงค์ TCP/UDP แบบ P2P สำหรับ SSH และ service บน loopback (HyperDHT)
 
 การใช้งาน:
   p2pgate server [--config <path>] [--port <targetPort>]
@@ -83,8 +83,9 @@ const HELP_TEXT = `p2pgate v1.8 — อุโมงค์ TCP แบบ P2P ส�
       จัดการไฟล์ trusted_devices
       trusted ต้องระบุ --expires หรือ --permanent เท่านั้น
 
-  p2pgate status [--config <path>] [--json]
+  p2pgate status [--config <path>] [--json] [--watch]
       ดูสถานะเซิร์ฟเวอร์ที่รันอยู่ผ่าน local control socket
+      --watch: รีเฟรชทุก 1 วินาที (แสดง traffic สด)
 
   p2pgate pin [--config <path>]
       ขอ Session PIN ปัจจุบันจากเซิร์ฟเวอร์ที่รันอยู่ (key-only ไม่มี PIN)
@@ -104,6 +105,10 @@ const HELP_TEXT = `p2pgate v1.8 — อุโมงค์ TCP แบบ P2P ส�
   p2pgate udp --target <name> [--listen <port>] [--config <path>]
       เปิด UDP listener ในเครื่อง แล้วส่ง datagram ไปยัง udpTargets ของ Server
       --listen: พอร์ต UDP ฝั่ง client (ค่าเริ่มต้น 5353)
+
+  p2pgate ping [--count <n>] [--json] [--config <path>]
+      วัด RTT ระดับโปรโตคอล (auth + ping) แล้วจบ ไม่เปิดพอร์ตค้าง
+      --count: จำนวน ping ต่อ slot (1-10, ค่าเริ่มต้น 3)
 
   p2pgate master reset [--yes] [--dry-run] [--json]
       หมุน masterSecret: สำรอง config เดิม แล้วเขียนค่าใหม่
@@ -165,7 +170,7 @@ Passphrase ของ client key:
   - อุโมงค์ผูกกับ 127.0.0.1 เท่านั้น
 `
 
-const HELP_TEXT_EN = `p2pgate v1.8 — P2P TCP tunnel for SSH and loopback services (HyperDHT)
+const HELP_TEXT_EN = `p2pgate v1.11 — P2P TCP/UDP tunnel for SSH and loopback services (HyperDHT)
 
 Usage:
   p2pgate server [--config <path>] [--port <targetPort>]
@@ -185,7 +190,7 @@ Usage:
 
   p2pgate keygen [--passphrase] [--unprotect]
   p2pgate devices list|add|remove
-  p2pgate status [--json]
+  p2pgate status [--json] [--watch]
   p2pgate pin
   p2pgate revoke <key>
   p2pgate password reset
@@ -198,6 +203,8 @@ Usage:
       Validate a config file, or print the normalised config with secrets masked
   p2pgate udp --target <name> [--listen <port>]
       Open a local UDP listener and forward datagrams to a Server udpTarget
+  p2pgate ping [--count <n>] [--json]
+      Measure protocol-level RTT (auth + ping) without opening a listener
   p2pgate doctor [--json]
   p2pgate unlock --list|<key>|--all
 
@@ -1280,18 +1287,144 @@ function writeJson(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
 }
 
+function formatBytes(value) {
+  const bytes = Number.isFinite(value) ? Math.max(0, value) : 0
+
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`
+}
+
+function renderStatusResponse(response) {
+  const activeKeys = Array.isArray(response.activeKeys) ? response.activeKeys : []
+  const slots = Array.isArray(response.listeningSlots) ? response.listeningSlots : []
+  const pinState = response.sessionPinAvailable
+    ? `พร้อมใช้ (generation ${response.sessionGeneration})`
+    : 'ไม่มี (key-only หรือยังไม่สร้าง)'
+
+  process.stdout.write('\n=== p2pgate status ===\n')
+  process.stdout.write(`โหมดยืนยันตัวตน: ${response.verificationMode}\n`)
+  process.stdout.write(`โหมดยืนยันสิทธิ์: ${response.authMode || '-'}\n`)
+  process.stdout.write(`Session PIN: ${pinState}\n`)
+  process.stdout.write(`Slot ปัจจุบัน: ${response.currentSlot}\n`)
+  process.stdout.write(
+    `Slots ที่เปิดอยู่: ${slots.length > 0 ? slots.join(', ') : '-'}\n`
+  )
+  process.stdout.write(`อุปกรณ์ที่ลงทะเบียน: ${response.registrySize}\n`)
+  process.stdout.write(`Connection ที่ใช้งาน: ${response.activeConnections}\n`)
+  process.stdout.write(
+    `คีย์ที่เชื่อมต่อ: ${activeKeys.length > 0 ? activeKeys.join(', ') : '-'}\n`
+  )
+  process.stdout.write(`ถูกบล็อกสะสม: ${response.blockedCount}\n`)
+
+  const traffic = response.traffic && typeof response.traffic === 'object'
+    ? response.traffic
+    : null
+
+  if (traffic) {
+    process.stdout.write(
+      `Traffic รวม: in ${formatBytes(traffic.totalIn)} / out ${formatBytes(traffic.totalOut)}\n`
+    )
+
+    const active = Array.isArray(traffic.active) ? traffic.active : []
+
+    if (active.length === 0) {
+      process.stdout.write('Stream ที่ใช้งาน: -\n')
+    } else {
+      process.stdout.write(`Stream ที่ใช้งาน: ${active.length}\n`)
+
+      for (const stream of active.slice(0, 8)) {
+        const peer = typeof stream.peer === 'string' ? stream.peer.slice(0, 8) : '?'
+        process.stdout.write(
+          `  - ${stream.target || '-'} (${stream.kind || 'tcp'}) peer=${peer}… ` +
+            `in ${formatBytes(stream.in)} out ${formatBytes(stream.out)}\n`
+        )
+      }
+    }
+  }
+
+  process.stdout.write(`ทำงานมา: ${formatUptime(response.uptimeMs)}\n`)
+  process.stdout.write(`Terminal แบบ interactive: ${response.interactive ? 'ใช่' : 'ไม่ใช่'}\n`)
+  process.stdout.write(`ไฟล์ trusted_devices: ${response.trustedDevicesFile}\n`)
+  process.stdout.write(`Control socket: ${response.controlSocketPath}\n\n`)
+}
+
 async function commandStatus(values = {}) {
   const json = values.json === true
-  let response
+  const watch = values.watch === true
 
-  try {
-    response = await sendControl({ cmd: 'status' })
-  } catch (err) {
-    if (isControlUnavailable(err)) {
+  if (watch && json) {
+    const err = new Error('ใช้ --watch ร่วมกับ --json ไม่ได้')
+    err.code = 'CONFIG_INVALID'
+    throw err
+  }
+
+  const fetchStatus = async () => {
+    try {
+      return { response: await sendControl({ cmd: 'status' }) }
+    } catch (err) {
+      return { error: err }
+    }
+  }
+
+  if (watch) {
+    let stopped = false
+    const stop = () => { stopped = true }
+    process.once('SIGINT', stop)
+    process.once('SIGTERM', stop)
+
+    try {
+      while (!stopped) {
+        const result = await fetchStatus()
+
+        if (result.error) {
+          if (isControlUnavailable(result.error)) {
+            process.stderr.write(
+              '\n⚠️  ไม่พบเซิร์ฟเวอร์ที่กำลังทำงาน (control socket ไม่พร้อมใช้งาน)\n'
+            )
+            process.stderr.write('   กด Ctrl+C เพื่อหยุด\n')
+            process.exitCode = 1
+            break
+          }
+          throw result.error
+        }
+
+        if (!result.response || result.response.ok !== true) {
+          process.stderr.write(
+            `\n❌ เซิร์ฟเวอร์ตอบกลับผิดพลาด: ${
+              result.response && result.response.error ? result.response.error : 'UNKNOWN'
+            }\n`
+          )
+          process.exitCode = 1
+          break
+        }
+
+        if (process.stdout.isTTY) process.stdout.write('\u001b[2J\u001b[H')
+        renderStatusResponse(result.response)
+        process.stdout.write(t(
+          'กด Ctrl+C เพื่อหยุดการเฝ้าดู\n',
+          'Press Ctrl+C to stop watching\n'
+        ))
+
+        await new Promise((resolve) => setTimeout(resolve, 1_000))
+      }
+    } finally {
+      process.removeListener('SIGINT', stop)
+      process.removeListener('SIGTERM', stop)
+    }
+
+    return
+  }
+
+  const result = await fetchStatus()
+
+  if (result.error) {
+    if (isControlUnavailable(result.error)) {
       if (json) {
         writeJson({
           ok: false,
-          error: err.code || 'CONTROL_UNAVAILABLE',
+          error: result.error.code || 'CONTROL_UNAVAILABLE',
           message: 'server is not running or the control token is unavailable'
         })
       } else {
@@ -1304,8 +1437,10 @@ async function commandStatus(values = {}) {
       return
     }
 
-    throw err
+    throw result.error
   }
+
+  const response = result.response
 
   if (!response || response.ok !== true) {
     if (json) {
@@ -1328,30 +1463,7 @@ async function commandStatus(values = {}) {
     return
   }
 
-  const activeKeys = Array.isArray(response.activeKeys) ? response.activeKeys : []
-  const slots = Array.isArray(response.listeningSlots) ? response.listeningSlots : []
-  const pinState = response.sessionPinAvailable
-    ? `พร้อมใช้ (generation ${response.sessionGeneration})`
-    : 'ไม่มี (key-only หรือยังไม่สร้าง)'
-
-  process.stdout.write('\n=== p2pgate status ===\n')
-  process.stdout.write(`โหมดยืนยันตัวตน: ${response.verificationMode}\n`)
-  process.stdout.write(`โหมดยืนยันสิทธิ์: ${response.authMode || '-'}\n`)
-  process.stdout.write(`Session PIN: ${pinState}\n`)
-  process.stdout.write(`Slot ปัจจุบัน: ${response.currentSlot}\n`)
-  process.stdout.write(
-    `Slots ที่เปิดอยู่: ${slots.length > 0 ? slots.join(', ') : '-'}\n`
-  )
-  process.stdout.write(`อุปกรณ์ที่ลงทะเบียน: ${response.registrySize}\n`)
-  process.stdout.write(`Connection ที่ใช้งาน: ${response.activeConnections}\n`)
-  process.stdout.write(
-    `คีย์ที่เชื่อมต่อ: ${activeKeys.length > 0 ? activeKeys.join(', ') : '-'}\n`
-  )
-  process.stdout.write(`ถูกบล็อกสะสม: ${response.blockedCount}\n`)
-  process.stdout.write(`ทำงานมา: ${formatUptime(response.uptimeMs)}\n`)
-  process.stdout.write(`Terminal แบบ interactive: ${response.interactive ? 'ใช่' : 'ไม่ใช่'}\n`)
-  process.stdout.write(`ไฟล์ trusted_devices: ${response.trustedDevicesFile}\n`)
-  process.stdout.write(`Control socket: ${response.controlSocketPath}\n\n`)
+  renderStatusResponse(response)
 }
 
 async function commandPin() {
@@ -1494,6 +1606,70 @@ function makeCredentialProvider(values) {
     cached = value
     return cached
   }
+}
+
+async function commandPing(values) {
+  const configPath = resolveConfigPath(values.config)
+  const config = await loadConfig(configPath)
+
+  const count = values.count === undefined ? 3 : Number(values.count)
+
+  if (!Number.isInteger(count) || count < 1 || count > 10) {
+    const err = new Error('--count ต้องเป็นตัวเลข 1-10')
+    err.code = 'CONFIG_INVALID'
+    throw err
+  }
+
+  const session = await startClient(config, {
+    ping: { count },
+    credential: makeCredentialProvider(values)
+  })
+  const results = session.results || []
+  const succeeded = results.filter((entry) => entry.ok)
+
+  if (values.json) {
+    process.stdout.write(`${JSON.stringify({
+      config: configPath,
+      ok: succeeded.length > 0,
+      results
+    }, null, 2)}\n`)
+  } else {
+    process.stdout.write(t('\n=== p2pgate ping ===\n', '\n=== p2pgate ping ===\n'))
+
+    for (const entry of results) {
+      if (!entry.ok) {
+        process.stdout.write(t(
+          `slot ${entry.slot}  ไม่พบ (${entry.error})\n`,
+          `slot ${entry.slot}  not found (${entry.error})\n`
+        ))
+        continue
+      }
+
+      const min = Math.min(...entry.rtts)
+      const max = Math.max(...entry.rtts)
+      const avg = Math.round(entry.rtts.reduce((sum, value) => sum + value, 0) / entry.rtts.length)
+
+      process.stdout.write(t(
+        `slot ${entry.slot}  serverKey ${entry.serverKey}\n`,
+        `slot ${entry.slot}  serverKey ${entry.serverKey}\n`
+      ))
+      process.stdout.write(t(
+        `   auth ${entry.authMs} ms   rtt min/avg/max ${min}/${avg}/${max} ms   (${entry.rtts.length} pings)\n`,
+        `   auth ${entry.authMs} ms   rtt min/avg/max ${min}/${avg}/${max} ms   (${entry.rtts.length} pings)\n`
+      ))
+    }
+
+    if (succeeded.length === 0) {
+      process.stdout.write(t(
+        '\n❌ ต่อไม่ถึง Server (ตรวจว่า server รันอยู่ และ masterSecret ตรงกัน)\n\n',
+        '\n❌ could not reach the Server (check that it is running and the masterSecret matches)\n\n'
+      ))
+    } else {
+      process.stdout.write('\n')
+    }
+  }
+
+  process.exitCode = succeeded.length > 0 ? 0 : 1
 }
 
 async function commandUdp(values) {
@@ -1964,6 +2140,8 @@ async function main(argv) {
         target: { type: 'string' },
         socks5: { type: 'string' },
         listen: { type: 'string' },
+        count: { type: 'string' },
+        watch: { type: 'boolean' },
         yes: { type: 'boolean' },
         reveal: { type: 'boolean' },
         'dry-run': { type: 'boolean' },
@@ -2065,6 +2243,9 @@ async function main(argv) {
       return
     case 'udp':
       await commandUdp(values)
+      return
+    case 'ping':
+      await commandPing(values)
       return
     case 'doctor':
       await commandDoctor(values)
