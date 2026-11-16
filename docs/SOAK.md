@@ -82,6 +82,24 @@ target = sshd 8022) เพื่อไม่แตะ config หลัก
 
 ---
 
+## 1.3) 1.12.1 ข้ามเครื่อง — 2026-11-16 (Windows ↔ Termux)
+
+ทดสอบหลัง publish 1.12.1: Termux เป็น server + HTTP target (8 MiB random),
+Windows เป็น client (`-p` password mode), วัด SHA-256 สองฝั่ง
+
+| โหมด | bytes | เวลา | SHA-256 |
+|---|---|---|---|
+| `--mux` | 8,388,608 | 4,062 ms (~2.0 MB/s) | ตรง (`f562b30c…`) |
+| dedicated stream | 8,388,608 | 3,637 ms (~2.2 MB/s) | ตรง |
+
+- `npm test` บน Termux (global 1.12.1) → **66 checks PASSED**
+- server หลักบน Termux อัปเกรดเป็น 1.12.1 และรีสตาร์ตแล้ว (pid 21674)
+- ระหว่างทดสอบ server หมุน slot ตามรอบชั่วโมงได้โดย session ที่เปิดอยู่ไม่หลุด
+- หมายเหตุ: `curl` บน Windows มี probe แปลก ๆ (`0.0.0.20:80`) ที่ถูก allowlist ปฏิเสธ
+  จึงใช้ Node HTTP client เป็นตัววัดหลัก (curl ไม่ใช่ตัวชี้วัดที่เชื่อถือได้ในเครื่องนี้)
+
+---
+
 ## 2. วิธีเก็บตัวเลขสำหรับรอบถัดไป
 
 ### Client (Windows)

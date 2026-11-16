@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-16
-สถานะ: **v1.12.1 พร้อม publish** (แก้ truncation + backpressure; npm ยังเป็น 1.12.0)
+สถานะ: **v1.12.1 released** (npm + GitHub Release; Termux อัปเกรดและทดสอบแล้ว)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -47,13 +47,13 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | รายการ | ค่า |
 |---|---|
 | Version | `1.12.1` (แก้ truncation ตอนปิด + backpressure + half-close) |
-| npm `latest` | `1.12.0` (1.12.1 ยังไม่ publish) |
+| npm `latest` | `1.12.1` |
 | Git branch | `main` |
-| Commit | ดู `git log --oneline -1` (1.12.1 ต่อจาก `83c3df4`) |
-| Tag | `v1.12.1` (หลัง commit) |
-| GitHub Release | ยังไม่สร้าง (รอ publish) |
-| Working tree | clean หลัง commit |
-| Tests | `npm test` → **66 checks PASSED** (Windows) |
+| Commit | `c78ae72` (1.12.1) + docs commit ถัดมา — ดู `git log --oneline -1` |
+| Tag | `v1.12.1` |
+| GitHub Release | `v1.12.1` = Latest |
+| Working tree | clean หลัง commit docs |
+| Tests | `npm test` → **66 checks PASSED** (Windows + Termux 1.12.1) |
 | src | 22 ไฟล์ (`src/mux.js` ใหม่), `src/self-test.js` ~1,900 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
@@ -384,7 +384,7 @@ p2pgate unlock --list
 | NAT บางรูปแบบ | ยังไม่ครอบคลุม |
 | mux บนอุปกรณ์จริง | ✅ ทดสอบ 2026-11-16 (Windows→Termux, 1 carrier/3 channels, 100 ms ต่อ connection — ดู `docs/SOAK.md` §1.1) ยังไม่มี soak 24 ชม. |
 | mux โอนไฟล์ใหญ่ | ✅ 1.12.1: 8/32 MiB upload+echo, 16 MiB download, 8 channels × 4 MiB — SHA-256 ตรง |
-| 1.12.1 บน Termux | ⏳ ยังไม่ติดตั้ง/ทดสอบ (ทำหลัง publish) |
+| 1.12.1 บน Termux | ✅ ติดตั้ง + `npm test` 66 checks + โอน 8 MiB (mux/dedicated) SHA-256 ตรง (`docs/SOAK.md` §1.3) |
 | mux กับ trusted/fastpath | ใช้ไม่ได้โดยออกแบบ — fallback per-connection |
 | TUN / subnet routing | ไม่รองรับ (Termux ทำไม่ได้ถ้าไม่ root) |
 | i18n legacy commands | แปลไม่ครบ (setup/server/connect/help แปลแล้ว) |
@@ -395,11 +395,8 @@ p2pgate unlock --list
 
 เรียงตามความคุ้ม:
 
-1. **Publish v1.12.1 + ทดสอบบน Termux** — `npm publish` (OTP), GitHub Release,
-   อัปเกรด Termux แล้วรัน `npm test` (66 checks) + ทดสอบ mux ข้ามเครื่องอีกรอบ
-   ด้วยไฟล์ใหญ่ (เช็ก SHA-256 ปลายทาง)
-2. **Soak mux 24 ชม. + multi-client** — รอบแรก (non-mux) ผ่าน overnight
-   (ดู `docs/SOAK.md` §1) และ mux ทดสอบจริงแล้ว (§1.1)
+1. **Soak mux 24 ชม. + multi-client** — รอบแรก (non-mux) ผ่าน overnight
+   (`docs/SOAK.md` §1); mux/1.12.1 ผ่านการโอนไฟล์ข้ามเครื่อง (§1.1–1.3)
    รอบถัดไป: เปิด `--socks5 --mux` ทิ้งไว้ เก็บ reconnect count + memory
 2. **Network switching** — ปิด/เปิด Wi-Fi, สลับ 4G, ดูว่า reconnect เองได้
    (รวมถึงพฤติกรรมของ carrier เมื่อเน็ตขาด: carrier ตาย → client สร้างใหม่)
