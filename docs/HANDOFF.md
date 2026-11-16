@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-16
-สถานะ: **v1.12.0 released** (npm + GitHub Release; Termux อัปเกรดและทดสอบแล้ว)
+สถานะ: **v1.12.1 พร้อม publish** (แก้ truncation + backpressure; npm ยังเป็น 1.12.0)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -13,7 +13,7 @@
 วางข้อความนี้ใน session ใหม่:
 
 ```text
-โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.12.0)
+โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.12.1)
 อ่าน docs/HANDOFF.md ก่อน แล้วสรุปสถานะปัจจุบันและรอคำสั่ง
 ```
 
@@ -38,7 +38,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 |---|---|
 | Repo | https://github.com/dhammawatthumpra-coder/p2pgate |
 | npm | https://www.npmjs.com/package/p2pgate |
-| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.12.0 |
+| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.12.1 |
 
 ---
 
@@ -46,14 +46,14 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.12.0` (mux: carrier เดียว หลาย channels, opt-in `--mux`) |
-| npm `latest` | `1.12.0` |
+| Version | `1.12.1` (แก้ truncation ตอนปิด + backpressure + half-close) |
+| npm `latest` | `1.12.0` (1.12.1 ยังไม่ publish) |
 | Git branch | `main` |
-| Commit | `15283ff` mux, `d22aa2f` help fix (HEAD อาจใหม่กว่า — ดู `git log --oneline -1`) |
-| Tag | `v1.12.0` |
-| GitHub Release | `v1.12.0` = Latest |
-| Working tree | clean หลัง commit docs ล่าสุด |
-| Tests | `npm test` → **60 checks PASSED** (Windows + Termux 1.12.0) |
+| Commit | ดู `git log --oneline -1` (1.12.1 ต่อจาก `83c3df4`) |
+| Tag | `v1.12.1` (หลัง commit) |
+| GitHub Release | ยังไม่สร้าง (รอ publish) |
+| Working tree | clean หลัง commit |
+| Tests | `npm test` → **66 checks PASSED** (Windows) |
 | src | 22 ไฟล์ (`src/mux.js` ใหม่), `src/self-test.js` ~1,900 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
@@ -69,6 +69,17 @@ npm view p2pgate version
 ---
 
 ## 3. ประวัติรุ่น (สรุป)
+
+### v1.12.1 (fix)
+
+- แก้ **truncation ตอนปิด** ทั้ง mux และ dedicated stream (destroy ก่อน flush)
+- mux half-close จริง: `CLOSE` = FIN, ปิด channel เมื่อทั้งสองฝั่งส่ง FIN
+- client backpressure: `write()` → false + `drain`, pause/resume socket, queue cap 1 MiB
+- server: pause target socket แทน RESET ทันที, RESET เฉพาะเกิน 1 MiB
+- dedupe การสร้าง carrier (race ตอนเปิดหลาย connection พร้อมกัน)
+- เพดาน server: 64 carriers / 512 channels (`MUX_BUSY`)
+- `status --json`: `traffic.mux = {carriers, channels}` + `channels` ต่อ record
+- self-test: 66 checks (backpressure, half-close, 1 MiB mux, parallel channels, status)
 
 ### v1.12.0 (mux)
 
@@ -261,7 +272,7 @@ p2pgate connect -s <masterSecret> -p <password>
 | `src/keygen.js` | client key + passphrase protection |
 | `src/setup-wizard.js` | advanced setup + `--easy` + i18n |
 | `src/i18n.js` | `P2PGATE_LANG` / `--lang` / `t(th, en)` |
-| `src/self-test.js` | 60 checks รวม password, targets, SOCKS5, UDP, ping, hosts, audit, mux |
+| `src/self-test.js` | 66 checks รวม password, targets, SOCKS5, UDP, ping, hosts, audit, mux |
 | `src/mux.js` | mux framing, `MuxCarrier`, `MuxChannel`, flow control, idle/keepalive |
 
 Docs: `docs/specs/phase7-v1.6.0.md` (spec), `docs/releases/v1.6.3.md` (patch notes),
@@ -324,6 +335,11 @@ p2pgate unlock --list
 13. **mux channel ต้องผ่านการตรวจเดียวกับ stream ปกติ** — `OPEN` ส่งได้แค่ชื่อ
     target หรือ SOCKS destination; ไม่มี `host:port` ดิบ และต้องถูกตรวจ allowlist
     ทุกครั้งที่เปิด channel (ไม่ใช่ตรวจครั้งเดียวตอน carrier)
+14. **ห้ามปิด connection ด้วย `destroy()` ก่อน flush** — ทั้ง mux และ stream ปกติต้อง
+    `end()`/ส่ง FIN แล้วรออีกฝั่งปิด; `destroy()` ใช้เฉพาะ error/abort เท่านั้น
+    (1.11.x–1.12.0 ทำพลาดข้อนี้ → ไฟล์ใหญ่ขาดท้ายเงียบ ๆ)
+15. **ทุกทิศทางต้องมี backpressure** — ถ้าเขียนไม่ทันให้หยุดอ่าน (pause) ไม่ใช่สะสม
+    queue ไม่จำกัด และถ้าปล่อย `write()` คืน false ต้องมี `drain` ให้ปลด
 
 ---
 
@@ -367,6 +383,8 @@ p2pgate unlock --list
 | Wi-Fi ↔ 4G switching | ยังไม่ทดสอบ |
 | NAT บางรูปแบบ | ยังไม่ครอบคลุม |
 | mux บนอุปกรณ์จริง | ✅ ทดสอบ 2026-11-16 (Windows→Termux, 1 carrier/3 channels, 100 ms ต่อ connection — ดู `docs/SOAK.md` §1.1) ยังไม่มี soak 24 ชม. |
+| mux โอนไฟล์ใหญ่ | ✅ 1.12.1: 8/32 MiB upload+echo, 16 MiB download, 8 channels × 4 MiB — SHA-256 ตรง |
+| 1.12.1 บน Termux | ⏳ ยังไม่ติดตั้ง/ทดสอบ (ทำหลัง publish) |
 | mux กับ trusted/fastpath | ใช้ไม่ได้โดยออกแบบ — fallback per-connection |
 | TUN / subnet routing | ไม่รองรับ (Termux ทำไม่ได้ถ้าไม่ root) |
 | i18n legacy commands | แปลไม่ครบ (setup/server/connect/help แปลแล้ว) |
@@ -377,7 +395,10 @@ p2pgate unlock --list
 
 เรียงตามความคุ้ม:
 
-1. **Soak mux 24 ชม. + multi-client** — รอบแรก (non-mux) ผ่าน overnight
+1. **Publish v1.12.1 + ทดสอบบน Termux** — `npm publish` (OTP), GitHub Release,
+   อัปเกรด Termux แล้วรัน `npm test` (66 checks) + ทดสอบ mux ข้ามเครื่องอีกรอบ
+   ด้วยไฟล์ใหญ่ (เช็ก SHA-256 ปลายทาง)
+2. **Soak mux 24 ชม. + multi-client** — รอบแรก (non-mux) ผ่าน overnight
    (ดู `docs/SOAK.md` §1) และ mux ทดสอบจริงแล้ว (§1.1)
    รอบถัดไป: เปิด `--socks5 --mux` ทิ้งไว้ เก็บ reconnect count + memory
 2. **Network switching** — ปิด/เปิด Wi-Fi, สลับ 4G, ดูว่า reconnect เองได้

@@ -64,6 +64,24 @@ target = sshd 8022) เพื่อไม่แตะ config หลัก
 
 ---
 
+## 1.2) mux — โอนไฟล์ขนาดใหญ่ (1.12.1) — 2026-11-16
+
+ทดสอบซ้ำหลังแก้ truncation/backpressure (Windows, Node 24, client+server อยู่เครื่องเดียว)
+
+| การทดสอบ | ผล |
+|---|---|
+| mux upload+echo 8 MiB | SHA-256 ตรง |
+| mux upload+echo 32 MiB | SHA-256 ตรง (~6.7 MB/s, RSS peak ~149 MB รวม payload ของ test) |
+| mux download 16 MiB (target ส่งก่อน) | SHA-256 ตรง (~4.9 MB/s) |
+| mux 8 channels พร้อมกัน × 4 MiB, carrier เดียว | ตรงทุก channel |
+| abort กลางทาง (เขียน 2 MiB แล้วตัด socket) | connection ถัดไปใช้ได้ปกติ |
+| dedicated stream 16 MiB × 3 รอบ | ตรงทุกครั้ง |
+
+หมายเหตุ: ก่อน 1.12.1 ปลายข้อมูลหายได้เงียบ ๆ ทั้ง mux และ stream ปกติ
+(`destroy()` ก่อน flush) — ถ้าโอนไฟล์ด้วย 1.11.x/1.12.0 ควรเช็ก checksum ปลายทาง
+
+---
+
 ## 2. วิธีเก็บตัวเลขสำหรับรอบถัดไป
 
 ### Client (Windows)

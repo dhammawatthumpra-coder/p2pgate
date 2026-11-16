@@ -39,10 +39,13 @@ const { encodeFrame, createDecoder, MAX_DATAGRAM } = require('./udp')
 const {
   MUX_VERSION,
   DEFAULT_MAX_CHANNELS,
+  MAX_CARRIERS,
+  MAX_TOTAL_CHANNELS,
   TYPE: MUX_TYPE,
   FLAG: MUX_FLAG,
   CHANNEL_WINDOW,
   MAX_QUEUED,
+  MAX_CHANNEL_QUEUE,
   MUX_IDLE_MS,
   MAX_FRAME,
   encodeFrame: encodeMuxFrame,
@@ -634,7 +637,14 @@ async function startServer(config, options = {}) {
 
   // In-memory traffic counters (no per-byte logging).
   const traffic = { totalIn: 0, totalOut: 0, streams: new Map() }
+  const muxSessions = new Set()
   let nextStreamId = 1
+
+  function countMuxChannels() {
+    let total = 0
+    for (const session of muxSessions) total += session.channels.size
+    return total
+  }
 
   function openTrafficRecord(peer, targetName, kind) {
     const record = {
@@ -1172,8 +1182,20 @@ async function startServer(config, options = {}) {
   }
 
   function startMuxSession(stream, entry, remoteHex, leftover) {
+    if (muxSessions.size >= MAX_CARRIERS) {
+      writeLog(
+        `MUX REJECT client=${remoteHex} carriers=${muxSessions.size} limit=${MAX_CARRIERS}`
+      )
+      activeConnections.delete(entry)
+      if (!stream.destroyed) stream.destroy()
+      return
+    }
+
     const channels = new Map()
     const record = openTrafficRecord(remoteHex, 'mux', 'mux')
+    record.channels = 0
+    const session = { channels, record }
+    muxSessions.add(session)
     let finished = false
     let idleTimer = null
 
@@ -1204,6 +1226,7 @@ async function startServer(config, options = {}) {
       closeTrafficRecord(record)
 
       for (const channel of channels.values()) {
+        if (channel.abortTimer) clearTimeout(channel.abortTimer)
         try {
           channel.socket.destroy()
         } catch {
@@ -1213,10 +1236,15 @@ async function startServer(config, options = {}) {
 
       const closedChannels = channels.size
       channels.clear()
+      record.channels = 0
+      muxSessions.delete(session)
       activeConnections.delete(entry)
 
       if (!stream.destroyed) stream.destroy()
-      writeLog(`MUX SESSION closed client=${remoteHex} channels=${closedChannels}`)
+      writeLog(
+        `MUX SESSION closed client=${remoteHex} channels=${closedChannels} ` +
+        `in=${record.in} out=${record.out}`
+      )
     }
 
     const send = (type, flags, channelId, payload) => {
@@ -1229,15 +1257,35 @@ async function startServer(config, options = {}) {
       }
     }
 
+    function maybeFinishChannel(channel) {
+      if (!channel.targetEnded || channel.finished) return
+      if (channel.sentFin) return
+      if (channel.queue.length > 0) return
+
+      channel.sentFin = true
+      send(MUX_TYPE.CLOSE, 0, channel.id)
+
+      if (channel.remoteEnded) cleanup(channel.id)
+    }
+
     function queueOut(channel, chunk) {
       channel.queue.push(chunk)
+      channel.queuedBytes += chunk.length
       flushOut(channel)
 
-      const queued = channel.queue.reduce((sum, buffer) => sum + buffer.length, 0)
-
-      if (queued > MAX_QUEUED) {
+      if (channel.queuedBytes > MAX_CHANNEL_QUEUE) {
         send(MUX_TYPE.RESET, MUX_FLAG.RESET, channel.id)
         cleanup(channel.id)
+        return
+      }
+
+      if (channel.queuedBytes >= MAX_QUEUED && !channel.paused) {
+        channel.paused = true
+        try {
+          channel.socket.pause()
+        } catch {
+          // Ignore.
+        }
       }
     }
 
@@ -1248,17 +1296,35 @@ async function startServer(config, options = {}) {
 
         send(MUX_TYPE.DATA, 0, channel.id, buffer.subarray(0, size))
         channel.creditOut -= size
+        channel.queuedBytes -= size
 
         if (size === buffer.length) channel.queue.shift()
         else channel.queue[0] = buffer.subarray(size)
       }
+
+      if (channel.queue.length === 0 && channel.paused) {
+        channel.paused = false
+        try {
+          if (!channel.socket.destroyed) channel.socket.resume()
+        } catch {
+          // Ignore.
+        }
+      }
+
+      maybeFinishChannel(channel)
     }
 
     function cleanup(channelId) {
       const channel = channels.get(channelId)
       if (!channel) return
 
+      channel.finished = true
+      if (channel.abortTimer) {
+        clearTimeout(channel.abortTimer)
+        channel.abortTimer = null
+      }
       channels.delete(channelId)
+      record.channels = channels.size
       try {
         channel.socket.destroy()
       } catch {
@@ -1272,6 +1338,14 @@ async function startServer(config, options = {}) {
         send(MUX_TYPE.OPEN_ERR, 0, channelId, encodeJson({
           error: 'MUX_BUSY',
           message: 'too many channels'
+        }))
+        return
+      }
+
+      if (countMuxChannels() >= MAX_TOTAL_CHANNELS) {
+        send(MUX_TYPE.OPEN_ERR, 0, channelId, encodeJson({
+          error: 'MUX_BUSY',
+          message: 'server channel limit reached'
         }))
         return
       }
@@ -1298,10 +1372,17 @@ async function startServer(config, options = {}) {
         socket,
         target,
         creditOut: CHANNEL_WINDOW,
-        queue: []
+        queue: [],
+        queuedBytes: 0,
+        paused: false,
+        sentFin: false,
+        targetEnded: false,
+        remoteEnded: false,
+        abortTimer: null
       }
 
       channels.set(channelId, channel)
+      record.channels = channels.size
       socket.setKeepAlive(true, 30_000)
       socket.setNoDelay(true)
 
@@ -1324,8 +1405,8 @@ async function startServer(config, options = {}) {
       })
 
       socket.on('close', () => {
-        send(MUX_TYPE.CLOSE, 0, channelId)
-        cleanup(channelId)
+        channel.targetEnded = true
+        maybeFinishChannel(channel)
       })
 
       writeLog(
@@ -1385,12 +1466,23 @@ async function startServer(config, options = {}) {
           const channel = channels.get(frame.channelId)
           if (!channel) return
 
+          // Half-close: the peer finished sending, but the target may still be
+          // writing its reply, so keep the channel alive until it drains.
+          channel.remoteEnded = true
           try {
             channel.socket.end()
           } catch {
-            // Ignore.
+            cleanup(frame.channelId)
+            return
           }
-          cleanup(frame.channelId)
+          channel.abortTimer = setTimeout(() => {
+            channel.abortTimer = null
+            if (!channel.finished) cleanup(channel.id)
+          }, 60_000)
+          if (typeof channel.abortTimer.unref === 'function') {
+            channel.abortTimer.unref()
+          }
+          maybeFinishChannel(channel)
           return
         }
 
@@ -1515,12 +1607,11 @@ async function startServer(config, options = {}) {
     socket.on('data', (chunk) => addOutbound(record, chunk.length))
 
     let finished = false
+    let streamClosed = false
+    let socketClosed = false
     let connectTimer = null
 
-    const finish = () => {
-      if (finished) return
-      finished = true
-
+    const release = () => {
       closeTrafficRecord(record)
       if (connectTimer !== null) {
         clearTimeout(connectTimer)
@@ -1528,6 +1619,19 @@ async function startServer(config, options = {}) {
       }
 
       activeConnections.delete(entry)
+    }
+
+    const maybeRelease = () => {
+      if (finished) return
+      if (!streamClosed || !socketClosed) return
+      finished = true
+      release()
+    }
+
+    const abort = () => {
+      if (finished) return
+      finished = true
+      release()
 
       if (!stream.destroyed) stream.destroy()
       if (!socket.destroyed) socket.destroy()
@@ -1535,7 +1639,7 @@ async function startServer(config, options = {}) {
 
     connectTimer = setTimeout(() => {
       writeLog(`local target connect timed out for client=${remoteHex} (slot=${slot})`)
-      finish()
+      abort()
     }, localConnectTimeoutMs)
 
     socket.once('connect', () => {
@@ -1555,7 +1659,7 @@ async function startServer(config, options = {}) {
         try {
           socket.write(leftover)
         } catch {
-          finish()
+          abort()
           return
         }
       }
@@ -1566,12 +1670,12 @@ async function startServer(config, options = {}) {
 
     stream.on('error', (err) => {
       if (!finished) writeLog(`p2p stream error for client=${remoteHex}: ${err.message}`)
-      finish()
+      abort()
     })
 
     socket.on('error', (err) => {
       if (!finished) writeLog(`local socket error for client=${remoteHex}: ${err.message}`)
-      finish()
+      abort()
     })
 
     stream.on('end', () => {
@@ -1582,8 +1686,17 @@ async function startServer(config, options = {}) {
       if (!stream.destroyed) stream.end()
     })
 
-    stream.on('close', finish)
-    socket.on('close', finish)
+    stream.on('close', () => {
+      streamClosed = true
+      if (!socket.destroyed) socket.end()
+      maybeRelease()
+    })
+
+    socket.on('close', () => {
+      socketClosed = true
+      if (!stream.destroyed) stream.end()
+      maybeRelease()
+    })
   }
 
   async function startSlotListener(slot) {
@@ -1823,6 +1936,10 @@ async function startServer(config, options = {}) {
         traffic: {
           totalIn: traffic.totalIn,
           totalOut: traffic.totalOut,
+          mux: {
+            carriers: muxSessions.size,
+            channels: countMuxChannels()
+          },
           active: [...traffic.streams.values()].map((record) => ({
             id: record.id,
             peer: record.peer,
@@ -1830,7 +1947,8 @@ async function startServer(config, options = {}) {
             kind: record.kind,
             startedAt: new Date(record.startedAt).toISOString(),
             in: record.in,
-            out: record.out
+            out: record.out,
+            ...(record.kind === 'mux' ? { channels: record.channels || 0 } : {})
           }))
         },
         trustedDevicesFile: registry.filePath,

@@ -130,8 +130,17 @@ function connectEncrypted(dht, publicKey, keyPair, timeoutMs, registerStream) {
 
 function pump(encrypted, socket, entry, onDone, log, leftover) {
   let finished = false
+  let encryptedClosed = false
+  let socketClosed = false
 
-  const finish = (reason) => {
+  const release = () => {
+    if (finished) return
+    if (!encryptedClosed || !socketClosed) return
+    finished = true
+    onDone(entry)
+  }
+
+  const abort = (reason) => {
     if (finished) return
     finished = true
 
@@ -142,8 +151,8 @@ function pump(encrypted, socket, entry, onDone, log, leftover) {
     onDone(entry)
   }
 
-  encrypted.on('error', (err) => finish(`p2p stream error: ${err.message}`))
-  socket.on('error', (err) => finish(`local socket error: ${err.message}`))
+  encrypted.on('error', (err) => abort(`p2p stream error: ${err.message}`))
+  socket.on('error', (err) => abort(`local socket error: ${err.message}`))
 
   encrypted.on('end', () => {
     if (!socket.destroyed) socket.end()
@@ -153,14 +162,25 @@ function pump(encrypted, socket, entry, onDone, log, leftover) {
     if (!encrypted.destroyed) encrypted.end()
   })
 
-  encrypted.on('close', () => finish())
-  socket.on('close', () => finish())
+  // Flush both sides before releasing resources: destroying on the first
+  // 'close' drops whatever is still buffered (truncated transfers).
+  encrypted.on('close', () => {
+    encryptedClosed = true
+    if (!socket.destroyed) socket.end()
+    release()
+  })
+
+  socket.on('close', () => {
+    socketClosed = true
+    if (!encrypted.destroyed) encrypted.end()
+    release()
+  })
 
   if (leftover && leftover.length > 0 && !socket.destroyed) {
     try {
       socket.write(leftover)
     } catch {
-      finish('failed to write buffered tunnel data')
+      abort('failed to write buffered tunnel data')
       return
     }
   }
@@ -870,56 +890,68 @@ async function startClient(config, options = {}) {
   }
 
   let muxCarrier = null
+  let muxPending = null
   let muxUnsupported = false
   const muxEnabled = options.mux === true
 
   async function getMuxCarrier() {
     if (muxCarrier && !muxCarrier.closed) return muxCarrier
     if (muxUnsupported) return null
+    if (muxPending) return muxPending
 
-    const baseSlot = getSlot(nowMs())
+    const pending = (async () => {
+      const baseSlot = getSlot(nowMs())
 
-    for (const slot of [baseSlot, baseSlot - 1]) {
-      let stream = null
+      for (const slot of [baseSlot, baseSlot - 1]) {
+        let stream = null
 
-      try {
-        const publicKey = deriveServerPublicKey(masterSecret, slot)
-        stream = await connectEncrypted(dht, publicKey, keyPair, connectTimeoutMs)
+        try {
+          const publicKey = deriveServerPublicKey(masterSecret, slot)
+          stream = await connectEncrypted(dht, publicKey, keyPair, connectTimeoutMs)
 
-        if (!stream) continue
+          if (!stream) continue
 
-        stream.on('error', noop)
+          stream.on('error', noop)
 
-        const authResult = await authenticateEncrypted(stream, {
-          mux: { version: MUX_VERSION, maxChannels: DEFAULT_MAX_CHANNELS }
-        })
+          const authResult = await authenticateEncrypted(stream, {
+            mux: { version: MUX_VERSION, maxChannels: DEFAULT_MAX_CHANNELS }
+          })
 
-        if (!authResult.mux) {
-          if (!stream.destroyed) stream.destroy()
-          muxUnsupported = true
-          writeLog('MUX unavailable (fast-path or older server); using dedicated streams')
-          return null
+          if (!authResult.mux) {
+            if (!stream.destroyed) stream.destroy()
+            muxUnsupported = true
+            writeLog('MUX unavailable (fast-path or older server); using dedicated streams')
+            return null
+          }
+
+          const carrier = new MuxCarrier(stream, {
+            maxChannels: authResult.mux.maxChannels
+          })
+
+          carrier.on('close', () => {
+            if (muxCarrier === carrier) muxCarrier = null
+          })
+
+          muxCarrier = carrier
+          writeLog(
+            `MUX carrier established slot=${slot} maxChannels=${authResult.mux.maxChannels}`
+          )
+          return carrier
+        } catch (err) {
+          if (stream && !stream.destroyed) stream.destroy()
         }
-
-        const carrier = new MuxCarrier(stream, {
-          maxChannels: authResult.mux.maxChannels
-        })
-
-        carrier.on('close', () => {
-          if (muxCarrier === carrier) muxCarrier = null
-        })
-
-        muxCarrier = carrier
-        writeLog(
-          `MUX carrier established slot=${slot} maxChannels=${authResult.mux.maxChannels}`
-        )
-        return carrier
-      } catch (err) {
-        if (stream && !stream.destroyed) stream.destroy()
       }
-    }
 
-    return null
+      return null
+    })()
+
+    muxPending = pending
+
+    try {
+      return await pending
+    } finally {
+      if (muxPending === pending) muxPending = null
+    }
   }
 
   function pipeMuxChannel(channel, socket, entry) {
@@ -928,27 +960,74 @@ async function startClient(config, options = {}) {
 
     record.stream = channel
     let finished = false
+    let paused = false
+    let lingerTimer = null
 
-    const finish = () => {
-      if (finished) return
-      finished = true
+    const cleanup = () => {
+      if (lingerTimer) {
+        clearTimeout(lingerTimer)
+        lingerTimer = null
+      }
+
       activeConnections.delete(record)
-      if (!socket.destroyed) socket.destroy()
       if (!channel.closed) channel.destroy()
     }
 
     channel.on('data', (chunk) => {
-      if (socket.destroyed) return
+      if (socket.destroyed || socket.writableEnded) return
       socket.write(chunk)
     })
 
-    channel.on('close', finish)
-    channel.on('error', finish)
+    // Peer finished sending: close our writable side, but keep the channel so
+    // the local app can still finish writing (half-close).
+    channel.on('end', () => {
+      if (socket.destroyed || socket.writableEnded) return
+      socket.end()
+    })
 
-    socket.on('data', (chunk) => channel.write(chunk))
+    channel.on('close', () => {
+      if (finished) return
+      finished = true
+      cleanup()
+
+      if (socket.destroyed) return
+      if (!socket.writableEnded) socket.end()
+
+      lingerTimer = setTimeout(() => {
+        lingerTimer = null
+        if (!socket.destroyed) socket.destroy()
+      }, 5_000)
+      if (typeof lingerTimer.unref === 'function') lingerTimer.unref()
+    })
+
+    channel.on('error', () => {
+      finished = true
+      cleanup()
+      if (!socket.destroyed) socket.destroy()
+    })
+
+    channel.on('drain', () => {
+      if (!paused || finished || socket.destroyed) return
+      paused = false
+      socket.resume()
+    })
+
+    socket.on('data', (chunk) => {
+      if (finished) return
+
+      if (!channel.write(chunk)) {
+        paused = true
+        socket.pause()
+      }
+    })
     socket.on('end', () => channel.end())
-    socket.on('error', finish)
-    socket.on('close', finish)
+    socket.on('error', () => {
+      if (!socket.destroyed) socket.destroy()
+      if (!channel.closed) channel.destroy()
+    })
+    socket.on('close', () => {
+      if (!channel.closed) channel.destroy()
+    })
   }
 
   async function handleLocalSocket(socket, socksRequest = null) {
@@ -1345,7 +1424,7 @@ async function startClient(config, options = {}) {
 
   const server = udpMode
     ? null
-    : net.createServer((socket) => {
+    : net.createServer({ allowHalfOpen: true }, (socket) => {
         connectionHandler(socket).catch((err) => {
           writeLog(`unexpected local connection failure: ${err.message}`)
           socket.destroy()

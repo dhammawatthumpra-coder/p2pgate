@@ -7,6 +7,7 @@ const fs = require('node:fs/promises')
 const net = require('node:net')
 const os = require('node:os')
 const path = require('node:path')
+const { EventEmitter } = require('node:events')
 const HyperDHT = require('hyperdht')
 
 const {
@@ -50,7 +51,14 @@ const { readAuditEvents } = require('./audit-view')
 const {
   encodeFrame: encodeMuxFrame,
   FrameParser: MuxFrameParser,
-  TYPE: MUX_TYPE
+  TYPE: MUX_TYPE,
+  MuxCarrier,
+  encodeJson: encodeMuxJson,
+  encodeUInt32: encodeMuxUInt32,
+  CHANNEL_WINDOW,
+  MAX_FRAME,
+  MAX_CARRIERS,
+  MAX_TOTAL_CHANNELS
 } = require('./mux')
 
 const noop = () => {}
@@ -965,6 +973,10 @@ async function main() {
     assert.ok(statusWithTraffic.traffic.totalOut > 0, 'echo traffic must be counted')
     assert.ok(Array.isArray(statusWithTraffic.traffic.active))
     checks.push('status reports in-memory traffic counters')
+
+    const dedicatedBulk = crypto.randomBytes(1024 * 1024)
+    assert.deepEqual(await echoThrough(originalClient, dedicatedBulk), dedicatedBulk)
+    checks.push('dedicated stream carries a 1 MiB transfer intact')
 
     const pingSession = await startClient(
       { ...clientBase, clientKeyPath: authorizedKeyPath, masterSecret },
@@ -2172,6 +2184,69 @@ async function main() {
     assert.equal(muxFrames[0].payload.toString(), 'abc')
     checks.push('mux framing round-trips a frame')
 
+    // mux backpressure: a full window must stop accepting and later drain
+    const unitFrames = []
+    const unitStream = new EventEmitter()
+    unitStream.destroyed = false
+    unitStream.write = (buffer) => {
+      unitFrames.push(buffer)
+      return true
+    }
+    unitStream.destroy = () => {
+      unitStream.destroyed = true
+    }
+
+    const unitCarrier = new MuxCarrier(unitStream)
+    const pendingUnitChannel = unitCarrier.openChannel({})
+    unitCarrier._onFrame({
+      type: MUX_TYPE.OPEN_OK,
+      flags: 0,
+      channelId: 1,
+      payload: encodeMuxJson({})
+    })
+    const unitChannel = await pendingUnitChannel
+
+    const oversizedWindow = Buffer.alloc(CHANNEL_WINDOW + 8 * 1024)
+    assert.equal(unitChannel.write(oversizedWindow), false)
+    assert.equal(unitChannel.queuedBytes, 8 * 1024)
+
+    const dataFrames = unitFrames.filter((frame) => frame.readUInt8(0) === MUX_TYPE.DATA)
+    assert.equal(dataFrames.length, CHANNEL_WINDOW / MAX_FRAME)
+
+    await new Promise((resolve) => {
+      unitChannel.once('drain', resolve)
+      unitCarrier._onFrame({
+        type: MUX_TYPE.WINDOW,
+        flags: 0,
+        channelId: 1,
+        payload: encodeMuxUInt32(8 * 1024)
+      })
+    })
+    assert.equal(unitChannel.queuedBytes, 0)
+    checks.push('mux channel applies backpressure and drains')
+
+    // half-close must not drop queued bytes
+    const countClose = () => unitFrames.filter(
+      (frame) => frame.readUInt8(0) === MUX_TYPE.CLOSE
+    ).length
+
+    unitChannel.write(Buffer.alloc(32 * 1024))
+    unitChannel.end()
+    assert.equal(countClose(), 0)
+
+    unitCarrier._onFrame({
+      type: MUX_TYPE.WINDOW,
+      flags: 0,
+      channelId: 1,
+      payload: encodeMuxUInt32(32 * 1024)
+    })
+    assert.equal(countClose(), 1)
+    checks.push('mux half-close waits for queued data')
+    unitChannel.on('error', () => {})
+    unitCarrier.close()
+
+    assert.ok(MAX_CARRIERS > 0 && MAX_TOTAL_CHANNELS > 0)
+
     // mux over a challenged session
     const muxSecret = crypto.randomBytes(32).toString('hex')
     const muxControlPath = controlPathFor('mux')
@@ -2212,6 +2287,29 @@ async function main() {
     assert.deepEqual(await echoThrough(muxClient, muxPayload), muxPayload)
     assert.equal(muxClient.muxActive, true)
     checks.push('mux carrier serves a challenged session')
+
+    const muxBulk = crypto.randomBytes(1024 * 1024)
+    assert.deepEqual(await echoThrough(muxClient, muxBulk), muxBulk)
+    checks.push('mux carries a 1 MiB transfer intact')
+
+    const muxParallel = await Promise.all(
+      [0, 1, 2, 3].map(() => echoThrough(muxClient, crypto.randomBytes(96 * 1024)))
+    )
+    for (const body of muxParallel) assert.equal(body.length, 96 * 1024)
+    checks.push('mux serves parallel channels over one carrier')
+
+    const muxToken = await readControlToken(muxServer.controlTokenPath)
+    await new Promise((resolve) => setTimeout(resolve, 250))
+    const muxStatus = await sendControlCommand(
+      muxControlPath,
+      { v: CONTROL_VERSION, cmd: 'status' },
+      { token: muxToken }
+    )
+    assert.equal(muxStatus.ok, true)
+    assert.equal(muxStatus.traffic.mux.carriers, 1)
+    assert.equal(muxStatus.traffic.mux.channels, 0)
+    checks.push('status reports mux carriers and channels')
+
     await muxClient.close()
     await muxServer.close()
 

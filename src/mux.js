@@ -4,10 +4,13 @@ const { EventEmitter } = require('node:events')
 
 const MUX_VERSION = 1
 const DEFAULT_MAX_CHANNELS = 128
+const MAX_CARRIERS = 64
+const MAX_TOTAL_CHANNELS = 512
 const MAX_FRAME = 16 * 1024
 const HEADER_BYTES = 10
 const CHANNEL_WINDOW = 256 * 1024
 const MAX_QUEUED = 64 * 1024
+const MAX_CHANNEL_QUEUE = 1024 * 1024
 const MUX_IDLE_MS = 5 * 60 * 1000
 const KEEPALIVE_MS = 30 * 1000
 
@@ -102,8 +105,14 @@ class MuxChannel extends EventEmitter {
     this.creditOut = CHANNEL_WINDOW
     this.creditIn = CHANNEL_WINDOW
     this.queue = []
+    this.queuedBytes = 0
     this.closed = false
     this._pendingData = []
+    this._needDrain = false
+    this._localEnded = false
+    this._remoteEnded = false
+    this._sentFin = false
+    this._abortTimer = null
   }
 
   on(event, listener) {
@@ -125,6 +134,12 @@ class MuxChannel extends EventEmitter {
       return false
     }
 
+    if (this._localEnded) {
+      const err = muxError('channel write side is closed', 'MUX_WRITE_AFTER_END')
+      if (callback) callback(err)
+      return false
+    }
+
     const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data)
 
     if (buffer.length === 0) {
@@ -132,16 +147,28 @@ class MuxChannel extends EventEmitter {
       return true
     }
 
+    if (this.queuedBytes >= MAX_CHANNEL_QUEUE) {
+      const err = muxError('channel queue overflow', 'MUX_QUEUE_OVERFLOW')
+      if (callback) callback(err)
+      this.destroy()
+      return false
+    }
+
     this.queue.push({ buffer, callback })
+    this.queuedBytes += buffer.length
     this._flush()
-    return this.queue.length === 0
+
+    if (this.queuedBytes === 0) return true
+
+    this._needDrain = true
+    return false
   }
 
   end() {
-    if (this.closed) return
+    if (this.closed || this._localEnded) return
+
+    this._localEnded = true
     this._flush()
-    this.carrier._send(TYPE.CLOSE, 0, this.id)
-    this._finish()
   }
 
   destroy() {
@@ -157,6 +184,7 @@ class MuxChannel extends EventEmitter {
       const slice = item.buffer.subarray(0, size)
 
       this.creditOut -= size
+      this.queuedBytes -= size
       item.buffer = item.buffer.subarray(size)
 
       this.carrier._send(TYPE.DATA, 0, this.id, slice)
@@ -166,6 +194,45 @@ class MuxChannel extends EventEmitter {
         if (item.callback) item.callback()
       }
     }
+
+    if (this.queuedBytes === 0 && this._needDrain) {
+      this._needDrain = false
+      process.nextTick(() => {
+        if (!this.closed) this.emit('drain')
+      })
+    }
+
+    this._maybeClose()
+  }
+
+  _maybeClose() {
+    if (this.closed || !this._localEnded || this._sentFin) return
+    if (this.queue.length > 0) return
+
+    this._sentFin = true
+    this.carrier._send(TYPE.CLOSE, 0, this.id)
+
+    if (this._remoteEnded) this._finish()
+  }
+
+  // Peer sent CLOSE (FIN): it will not write more, but we may still send.
+  _onRemoteEnd() {
+    if (this.closed || this._remoteEnded) return
+
+    this._remoteEnded = true
+    this.emit('end')
+
+    if (this._sentFin) {
+      this._finish()
+      return
+    }
+
+    // Guard against a peer that closes its side and never reads ours.
+    this._abortTimer = setTimeout(() => {
+      this._abortTimer = null
+      if (!this.closed) this._finish()
+    }, 60_000)
+    if (typeof this._abortTimer.unref === 'function') this._abortTimer.unref()
   }
 
   _onData(payload) {
@@ -190,6 +257,14 @@ class MuxChannel extends EventEmitter {
     if (this.closed) return
     this.closed = true
     this.queue.length = 0
+    this.queuedBytes = 0
+    this._needDrain = false
+
+    if (this._abortTimer) {
+      clearTimeout(this._abortTimer)
+      this._abortTimer = null
+    }
+
     this.carrier._forget(this.id)
     this.emit('close')
   }
@@ -326,7 +401,12 @@ class MuxCarrier extends EventEmitter {
         break
       }
 
-      case TYPE.CLOSE:
+      case TYPE.CLOSE: {
+        const channel = this.channels.get(frame.channelId)
+        if (channel) channel._onRemoteEnd()
+        break
+      }
+
       case TYPE.RESET: {
         const channel = this.channels.get(frame.channelId)
         if (channel) channel._finish()
@@ -411,10 +491,13 @@ function muxError(message, code) {
 module.exports = {
   MUX_VERSION,
   DEFAULT_MAX_CHANNELS,
+  MAX_CARRIERS,
+  MAX_TOTAL_CHANNELS,
   MAX_FRAME,
   HEADER_BYTES,
   CHANNEL_WINDOW,
   MAX_QUEUED,
+  MAX_CHANNEL_QUEUE,
   MUX_IDLE_MS,
   TYPE,
   FLAG,

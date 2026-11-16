@@ -7,6 +7,38 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.12.1] - 2026-11-16
+
+### Fixed
+
+- **การโอนข้อมูลขนาดใหญ่ถูกตัดท้าย (ทั้ง mux และ stream ปกติ)** — เมื่อฝั่งหนึ่งปิด
+  แบบ graceful อีกฝั่งทำ `destroy()` ทันที ทำให้ข้อมูลที่ยังค้างใน buffer หาย
+  อาการ: `scp`/`rsync`/ดาวน์โหลดไฟล์ใหญ่ได้ไฟล์ขาดท้ายโดยไม่แจ้ง error
+- **mux ไม่มี backpressure ฝั่ง client** — ตอนนี้ `write()` คืน `false` + emit `drain`
+  และ pipe pause/resume socket; queue เกิน 1 MiB จะ RESET พร้อม error แทนการทิ้งเงียบ
+- **half-close (FIN) ของ mux ผิดความหมาย** — `CLOSE` เคยปิดทั้ง channel ทำให้ฝั่งที่
+  ยังอ่านคำตอบอยู่หยุดรับข้อมูล; ตอนนี้เป็น half-close จริง (ปิดเมื่อทั้งสองฝั่งส่ง FIN)
+- **race ตอนสร้าง carrier พร้อมกัน** — หลาย connection ที่เปิดพร้อมกันสร้าง carrier
+  ซ้ำ (DHT lookup ซ้ำ); ตอนนี้มี in-flight promise ตัวเดียว
+- **server-side queue overflow เคย RESET ทันที** — เปลี่ยนเป็น pause target socket
+  ที่ 64 KiB และ RESET เฉพาะเมื่อเกิน 1 MiB (กัน memory โตและกัน RESET ผิดจังหวะ)
+
+### Added
+
+- เพดานระดับ server: carrier สูงสุด 64, channel รวมสูงสุด 512 (`MUX_BUSY` เมื่อเต็ม)
+- `status --json`: `traffic.mux = { carriers, channels }` และ `channels` ต่อ record
+  (แก้คำอธิบายใน release notes 1.12.0 ที่เขียนเกินจริง)
+- log `MUX SESSION closed ... in=<bytes> out=<bytes>` ไว้ตรวจยอดโอน
+
+### Verified
+
+- mux: 8 MiB และ 32 MiB upload+echo, 16 MiB download — SHA-256 ตรงทุกครั้ง
+- mux ผ่าน SOCKS5: ดาวน์โหลด 8 MiB ผ่าน `--socks5 --mux` — SHA-256 ตรง (3.5 MB/s)
+- mux: 8 channels พร้อมกัน × 4 MiB ผ่าน carrier เดียว — ตรงทุก channel
+- abort กลางทาง (เขียน 2 MiB แล้วตัด socket) → connection ถัดไปยังใช้งานได้
+- dedicated stream (ไม่ใช้ mux): 16 MiB × 3 รอบ ตรงทุกครั้ง
+- `npm test` → **66 checks**
+
 ## [1.12.0] - 2026-11-16
 
 ### Added
