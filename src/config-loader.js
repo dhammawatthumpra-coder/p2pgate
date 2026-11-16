@@ -390,6 +390,48 @@ function normalizeAuthMode(value, raw) {
 /**
  * Merges a raw configuration object with defaults and validates every field.
  */
+function normalizeUdpTargets(value) {
+  if (value === undefined || value === null) return null
+
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new ConfigError('udpTargets must be an object of name -> { port }', 'CONFIG_INVALID')
+  }
+
+  const targets = Object.create(null)
+  const names = Object.keys(value)
+
+  for (const name of names) {
+    if (!isValidTargetName(name)) {
+      throw new ConfigError(
+        `udpTargets.${name} is not a valid name (1-32 chars: A-Z a-z 0-9 _ -)`,
+        'CONFIG_INVALID'
+      )
+    }
+
+    const entry = value[name]
+
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new ConfigError(`udpTargets.${name} must be an object`, 'CONFIG_INVALID')
+    }
+
+    const host = entry.host === undefined ? TARGET_HOST : String(entry.host).trim()
+
+    if (host !== TARGET_HOST) {
+      throw new ConfigError(
+        `udpTargets.${name}.host must be ${TARGET_HOST}`,
+        'CONFIG_INVALID'
+      )
+    }
+
+    targets[name] = {
+      host,
+      port: parsePort(entry.port, `udpTargets.${name}.port`)
+    }
+  }
+
+  return Object.keys(targets).length > 0 ? targets : null
+}
+
 function normalizeSocks(value) {
   if (value === undefined || value === null) {
     return { enabled: false, allow: [], perClient: null }
@@ -555,6 +597,19 @@ function normalizeConfig(raw) {
     ? null
     : parsePort(raw.socks5Port, 'socks5Port')
 
+  const udpTarget = raw.udpTarget === undefined || raw.udpTarget === null ||
+    String(raw.udpTarget).trim() === ''
+    ? null
+    : String(raw.udpTarget).trim()
+
+  if (udpTarget !== null && !isValidTargetName(udpTarget)) {
+    throw new ConfigError('udpTarget must be 1-32 chars: A-Z a-z 0-9 _ -', 'CONFIG_INVALID')
+  }
+
+  const udpListen = raw.udpListen === undefined || raw.udpListen === null
+    ? null
+    : parsePort(raw.udpListen, 'udpListen')
+
   return {
     mode,
     masterSecret,
@@ -566,6 +621,9 @@ function normalizeConfig(raw) {
     target,
     socks: mode === 'server' ? normalizeSocks(raw.socks) : undefined,
     socks5Port,
+    udpTargets: mode === 'server' ? normalizeUdpTargets(raw.udpTargets) : undefined,
+    udpTarget,
+    udpListen,
     localPort: parsePort(
       raw.localPort === undefined ? base.localPort : raw.localPort,
       'localPort',

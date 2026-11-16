@@ -1,4 +1,4 @@
-# p2pgate (v1.9)
+# p2pgate (v1.10)
 
 [English](README.md) | **ไทย**
 
@@ -14,11 +14,10 @@ CGNAT/ไฟร์วอลล์ โดยไม่ต้องเปิดพ�
 
 ใช้ได้กับ Termux/Android, Linux, macOS และ Windows ที่มี Node.js 20 ขึ้นไป
 
-> เวอร์ชัน 1.9 เพิ่ม **config validation** (`p2pgate config validate|show`),
-> **doctor** ที่ตรวจลึกขึ้น (fingerprint/อายุ secret, target ไม่ตอบ, allowlist กว้าง)
-> และ **SOCKS allowlist ต่อ client** (`socks.perClient`)
-> เวอร์ชัน 1.8 เพิ่ม **SOCKS5 gateway**, 1.7 เพิ่ม **multi-target routing**,
-> 1.6 เพิ่ม **zero-setup** และ **connection-password mode**
+> เวอร์ชัน 1.10 เพิ่ม **UDP forwarding** (`udpTargets` + `p2pgate udp`)
+> โดยห่อ datagram ใน tunnel ที่ authenticate แล้ว จำกัด 1200 ไบต์
+> เวอร์ชัน 1.9 เพิ่ม config validation, doctor ที่ตรวจลึกขึ้น และ SOCKS ต่อ client
+> เวอร์ชัน 1.8 เพิ่ม SOCKS5 gateway, 1.7 multi-target, 1.6 zero-setup
 >
 > **ติดตั้ง:** `npm install -g p2pgate`
 >
@@ -699,6 +698,37 @@ p2pgate config show --json
 
 ---
 
+## 9.6) UDP targets
+
+UDP จะทำงานเมื่อประกาศ target เท่านั้น datagram ถูกห่อใน tunnel ที่ authenticate แล้ว
+(`[len:uint16][payload]` สูงสุด 1200 ไบต์)
+
+Server:
+
+```json
+"udpTargets": {
+  "dns": { "host": "127.0.0.1", "port": 53 },
+  "ntp": { "host": "127.0.0.1", "port": 123 }
+}
+```
+
+Client:
+
+```sh
+p2pgate udp --target dns --listen 5353
+# หรือเก็บใน client.json: "udpTarget": "dns", "udpListen": 5353
+```
+
+กติกา:
+
+- client ส่งเป็น **ชื่อ** target; `host` ต้องเป็น `127.0.0.1`
+- 1 stream ต่อ endpoint ของ client และปิดเมื่อ idle 60 วิ
+- reply วิ่งกลับทาง stream เดิมเท่านั้น (ใช้เป็น reflector ไม่ได้)
+- datagram เกิน 1200 ไบต์ถูก drop ทั้งสองฝั่ง
+- รองรับ IPv4 เท่านั้น; ยังไม่รองรับผ่าน SOCKS5
+
+---
+
 ## 10) สิ่งที่ต้องมี
 
 - มือถือ Android + Termux + Termux:Boot (F-Droid)
@@ -986,6 +1016,7 @@ tail -f ~/.p2pgate/server.log
 | `p2pgate master reset --yes` | หมุน masterSecret พร้อมสำรอง config |
 | `p2pgate config validate` | ตรวจ config (exit 1 ถ้าผิด) |
 | `p2pgate config show` | แสดง config ที่ normalize แล้วโดยปิด secret |
+| `p2pgate udp --target <name> --listen <port>` | ส่ง UDP จากเครื่องไปยัง udpTarget ของ Server |
 | `p2pgate keygen` | สร้าง/แสดงกุญแจ Client |
 | `p2pgate keygen --passphrase` | ตั้ง/เปลี่ยน passphrase สำหรับ client key |
 | `p2pgate keygen --unprotect` | ถอด passphrase (ต้องยืนยันของเดิม) |
@@ -1201,7 +1232,8 @@ p2pgate/
 │   │   ├── v1.8.3.md
 │   │   ├── v1.8.4.md
 │   │   ├── v1.9.0.md
-│   │   └── v1.9.1.md
+│   │   ├── v1.9.1.md
+│   │   └── v1.10.0.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
@@ -1213,6 +1245,7 @@ p2pgate/
 │       ├── phase9-socks5.md
 │       ├── phase10-master.md
 │       ├── phase11-v1.9.0.md
+│       ├── phase12-udp.md
 │       └── project-spec.md
 ├── package.json
 ├── package-lock.json
@@ -1249,7 +1282,8 @@ p2pgate/
     ├── self-test.js
     ├── server.js
     ├── setup-wizard.js
-    └── socks.js
+    ├── socks.js
+    └── udp.js
 ```
 
 ### การพัฒนาและ CI

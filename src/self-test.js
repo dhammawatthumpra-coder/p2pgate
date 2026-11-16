@@ -1835,6 +1835,101 @@ async function main() {
     await noSocksServer.close()
 
     // ---------------------------------------------------------------------
+    // 10d-6. UDP forwarding over the tunnel
+    // ---------------------------------------------------------------------
+    const udpEcho = dgram.createSocket('udp4')
+    udpEcho.on('message', (message, rinfo) => {
+      udpEcho.send(message, rinfo.port, rinfo.address)
+    })
+    await new Promise((resolve, reject) => {
+      udpEcho.once('error', reject)
+      udpEcho.bind({ address: '127.0.0.1', port: 0 }, resolve)
+    })
+    const udpEchoPort = udpEcho.address().port
+
+    const udpSecret = crypto.randomBytes(32).toString('hex')
+    const udpServer = await startServer({
+      mode: 'server',
+      masterSecret: udpSecret,
+      authMode: 'password',
+      targetHost: '127.0.0.1',
+      targetPort: echoPort,
+      udpTargets: { echo: { host: '127.0.0.1', port: udpEchoPort } },
+      localPort: 8022,
+      clientKeyPath: path.join(tempDir, 'udp-server-key.json'),
+      allowedClientKeys: [],
+      verificationMode: 'hybrid',
+      trustedDevicesFile: path.join(tempDir, 'udp-devices'),
+      auditLog: { enabled: false },
+      customBootstrap: bootstrap,
+      authPin: { enabled: true, unattended: unattendedVerifier },
+      telegramAlert: { enabled: false, botToken: '', chatId: '' }
+    }, {
+      log: quiet,
+      showSessionPin: false,
+      sendStartupAlert: false,
+      failDelayMs: [10, 20],
+      lockoutStatePath: path.join(tempDir, 'udp-lockout.json'),
+      authTimeoutMs: 4_000,
+      udpIdleTimeoutMs: 500,
+      interactive: false,
+      controlSocketPath: controlPathFor('udp'),
+      controlTokenPath: path.join(tempDir, 'control-udp.token')
+    })
+    extraServers.push(udpServer)
+
+    const udpClient = await startClient(
+      { ...clientBase, masterSecret: udpSecret },
+      {
+        log: quiet,
+        credential: unattendedPassword,
+        udpTarget: 'echo',
+        udpListen: 0,
+        udpIdleTimeoutMs: 500,
+        connectTimeoutMs: 7_000,
+        authTimeoutMs: 4_000,
+        now: () => serverNow,
+        dhtOptions: { bootstrap }
+      }
+    )
+    clients.push(udpClient)
+    assert.equal(udpClient.mode, 'udp')
+
+    const udpApp = dgram.createSocket('udp4')
+
+    const sendUdp = (payload, timeoutMs = 8_000) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('udp timeout')), timeoutMs)
+
+      const onMessage = (message) => {
+        clearTimeout(timer)
+        udpApp.removeListener('message', onMessage)
+        resolve(message)
+      }
+
+      udpApp.once('message', onMessage)
+      udpApp.send(payload, udpClient.address().port, '127.0.0.1')
+    })
+
+    const udpPayload = crypto.randomBytes(64)
+    assert.deepEqual(await sendUdp(udpPayload), udpPayload)
+    checks.push('UDP datagrams are forwarded through the tunnel')
+
+    const oversized = crypto.randomBytes(1400)
+    let oversizedReply = null
+    try {
+      oversizedReply = await sendUdp(oversized, 1_200)
+    } catch {
+      oversizedReply = null
+    }
+    assert.equal(oversizedReply, null)
+    checks.push('UDP datagrams above the limit are dropped')
+
+    udpApp.close()
+    await udpClient.close()
+    await udpServer.close()
+    udpEcho.close()
+
+    // ---------------------------------------------------------------------
     // 10e. Doctor and trusted-device expiry enforcement
     // ---------------------------------------------------------------------
     const doctorConfigPath = path.join(tempDir, 'doctor-server.json')

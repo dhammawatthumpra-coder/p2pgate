@@ -101,6 +101,10 @@ const HELP_TEXT = `p2pgate v1.8 — อุโมงค์ TCP แบบ P2P ส�
   p2pgate config show [--json] [--config <path>]
       แสดง config ที่ normalize แล้ว โดยปิดค่า secret
 
+  p2pgate udp --target <name> [--listen <port>] [--config <path>]
+      เปิด UDP listener ในเครื่อง แล้วส่ง datagram ไปยัง udpTargets ของ Server
+      --listen: พอร์ต UDP ฝั่ง client (ค่าเริ่มต้น 5353)
+
   p2pgate master reset [--yes] [--dry-run] [--json]
       หมุน masterSecret: สำรอง config เดิม แล้วเขียนค่าใหม่
       ต้องรีสตาร์ต Server และอัปเดต client ทุกเครื่อง
@@ -192,6 +196,8 @@ Usage:
   p2pgate config validate [--json]
   p2pgate config show [--json]
       Validate a config file, or print the normalised config with secrets masked
+  p2pgate udp --target <name> [--listen <port>]
+      Open a local UDP listener and forward datagrams to a Server udpTarget
   p2pgate doctor [--json]
   p2pgate unlock --list|<key>|--all
 
@@ -258,6 +264,18 @@ function printError(err) {
       process.stderr.write(t(
         '👉 ต้องยืนยันด้วย --yes เมื่อไม่ได้รันใน terminal\n',
         '👉 pass --yes when running without a terminal\n'
+      ))
+      break
+    case 'UDP_TARGET_REQUIRED':
+      process.stderr.write(t(
+        '👉 ต้องระบุ UDP target: p2pgate udp --target <name> (ประกาศใน udpTargets ของ Server)\n',
+        '👉 a UDP target is required: p2pgate udp --target <name> (declared in Server udpTargets)\n'
+      ))
+      break
+    case 'UDP_TARGET_UNKNOWN':
+      process.stderr.write(t(
+        '👉 Server ไม่มี udpTargets ชื่อนี้\n',
+        '👉 the Server has no udpTargets entry with that name\n'
       ))
       break
     case 'MASTER_SECRET_UNCHANGED':
@@ -1446,6 +1464,100 @@ async function commandRevoke(positionals) {
   }
 }
 
+function makeCredentialProvider(values) {
+  let cached = null
+
+  return async () => {
+    if (cached !== null) return cached
+
+    let value = null
+
+    if (values.password !== undefined) {
+      value = String(values.password)
+    } else if (typeof process.env.P2PGATE_PASSWORD === 'string') {
+      value = process.env.P2PGATE_PASSWORD
+      delete process.env.P2PGATE_PASSWORD
+    } else if (values['password-stdin']) {
+      value = (await readStdinLine()).trim()
+    } else if (process.stdin.isTTY) {
+      value = (await promptHidden(t('🔑 password: ', '🔑 password: '))).trim()
+    }
+
+    if (typeof value !== 'string' || value === '') {
+      const err = new Error(
+        'password is required; use -p, --password-stdin, or P2PGATE_PASSWORD'
+      )
+      err.code = 'PASSWORD_REQUIRED'
+      throw err
+    }
+
+    cached = value
+    return cached
+  }
+}
+
+async function commandUdp(values) {
+  const configPath = resolveConfigPath(values.config)
+  const config = await loadConfig(configPath)
+
+  const target = values.target === undefined
+    ? (typeof config.udpTarget === 'string' ? config.udpTarget : null)
+    : String(values.target).trim()
+
+  if (!target) {
+    const err = new Error('ต้องระบุ UDP target: p2pgate udp --target <name>')
+    err.code = 'UDP_TARGET_REQUIRED'
+    throw err
+  }
+
+  if (!/^[A-Za-z0-9_-]{1,32}$/.test(target)) {
+    const err = new Error('--target ต้องเป็น 1-32 ตัวอักษร: A-Z a-z 0-9 _ -')
+    err.code = 'CONFIG_INVALID'
+    throw err
+  }
+
+  let listenPort = Number.isInteger(config.udpListen) ? config.udpListen : 5353
+
+  if (values.listen !== undefined) {
+    listenPort = Number(values.listen)
+
+    if (!Number.isInteger(listenPort) || listenPort < 1 || listenPort > 65535) {
+      const err = new Error('--listen ต้องเป็นตัวเลขระหว่าง 1 ถึง 65535')
+      err.code = 'PORT_INVALID'
+      throw err
+    }
+  }
+
+  process.stdout.write(t('\n=== p2pgate udp ===\n', '\n=== p2pgate udp ===\n'))
+  process.stdout.write(t(`ไฟล์ตั้งค่า: ${configPath}\n`, `Config: ${configPath}\n`))
+
+  const client = await startClient(config, {
+    udpTarget: target,
+    udpListen: listenPort,
+    credential: makeCredentialProvider(values)
+  })
+  const address = client.address()
+
+  process.stdout.write(t('\n✅ UDP tunnel พร้อมใช้งาน\n', '\n✅ UDP tunnel is ready\n'))
+  process.stdout.write(t(
+    `   เปิดพอร์ตเฉพาะ: 127.0.0.1:${address.port} (UDP)\n`,
+    `   Local listener: 127.0.0.1:${address.port} (UDP)\n`
+  ))
+  process.stdout.write(t(
+    `   ปลายทาง: ${target}\n\n`,
+    `   Target: ${target}\n\n`
+  ))
+  process.stdout.write(t('กด Ctrl+C เพื่อหยุดอย่างปลอดภัย\n', 'Press Ctrl+C to stop safely\n'))
+
+  const signal = await waitForShutdownSignal()
+  process.stdout.write(t(
+    `\nได้รับสัญญาณ ${signal} กำลังปิดระบบ...\n`,
+    `\nReceived ${signal}; shutting down...\n`
+  ))
+  await client.close()
+  process.stdout.write(t('ปิดระบบเรียบร้อย\n', 'UDP client stopped\n'))
+}
+
 async function commandConfig(values, positionals) {
   const subcommand = positionals[1]
   const configPath = resolveConfigPath(values.config)
@@ -1851,6 +1963,7 @@ async function main(argv) {
         'target-port': { type: 'string' },
         target: { type: 'string' },
         socks5: { type: 'string' },
+        listen: { type: 'string' },
         yes: { type: 'boolean' },
         reveal: { type: 'boolean' },
         'dry-run': { type: 'boolean' },
@@ -1949,6 +2062,9 @@ async function main(argv) {
       return
     case 'config':
       await commandConfig(values, positionals)
+      return
+    case 'udp':
+      await commandUdp(values)
       return
     case 'doctor':
       await commandDoctor(values)

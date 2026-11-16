@@ -17,6 +17,8 @@ const {
   isHex64
 } = require('./crypto-utils')
 const { loadClientKey, DEFAULT_CLIENT_KEY_PATH } = require('./keygen')
+const dgram = require('node:dgram')
+const { encodeFrame, createDecoder, MAX_DATAGRAM } = require('./udp')
 const {
   REPLY: SOCKS_REPLY,
   readRequest: readSocksRequest,
@@ -203,6 +205,34 @@ async function startClient(config, options = {}) {
     ? validateLocalPort(Number(socksPortRaw))
     : null
 
+  const udpTarget = typeof options.udpTarget === 'string' && options.udpTarget.trim() !== ''
+    ? options.udpTarget.trim()
+    : (typeof config.udpTarget === 'string' && config.udpTarget.trim() !== ''
+        ? config.udpTarget.trim()
+        : null)
+
+  if (udpTarget !== null && !/^[A-Za-z0-9_-]{1,32}$/.test(udpTarget)) {
+    const err = new Error('udpTarget must be 1-32 chars: A-Z a-z 0-9 _ -')
+    err.code = 'CONFIG_INVALID'
+    throw err
+  }
+
+  const udpMode = udpTarget !== null
+
+  if (udpMode && (socksMode || requestedTarget !== null)) {
+    const err = new Error('UDP mode cannot be combined with --socks5 or --target')
+    err.code = 'CONFIG_INVALID'
+    throw err
+  }
+
+  const udpListenPort = udpMode
+    ? validateLocalPort(
+        options.udpListen !== undefined
+          ? Number(options.udpListen)
+          : (Number.isInteger(config.udpListen) ? config.udpListen : 5353)
+      )
+    : null
+
   const log = typeof options.log === 'function'
     ? options.log
     : (line) => console.log(line)
@@ -213,6 +243,9 @@ async function startClient(config, options = {}) {
   const authTimeoutMs = Number.isInteger(options.authTimeoutMs)
     ? options.authTimeoutMs
     : AUTH_TIMEOUT_MS
+  const udpIdleTimeoutMs = Number.isInteger(options.udpIdleTimeoutMs)
+    ? options.udpIdleTimeoutMs
+    : 60_000
   const nowMs = typeof options.now === 'function' ? options.now : Date.now
 
   function writeLog(message) {
@@ -739,6 +772,10 @@ async function startClient(config, options = {}) {
         }
       }
 
+      if (authOptions.udp) {
+        proofMessage.udp = { target: authOptions.udp.target }
+      }
+
       encrypted.write(encodeControl(proofMessage))
     } catch {
       throw new AuthError('ไม่สามารถส่งข้อมูลยืนยันตัวตนได้', 'AUTH_PROTOCOL')
@@ -984,27 +1021,156 @@ async function startClient(config, options = {}) {
 
   const connectionHandler = socksMode ? handleSocksSocket : handleLocalSocket
 
-  const server = net.createServer((socket) => {
-    connectionHandler(socket).catch((err) => {
-      writeLog(`unexpected local connection failure: ${err.message}`)
-      socket.destroy()
-    })
-  })
+  const udpSessions = new Map()
+  let udpSocket = null
 
-  server.on('error', (err) => {
-    writeLog(`local listener error: ${err.message}`)
-  })
+  function closeUdpSession(key) {
+    const session = udpSessions.get(key)
+    if (!session) return
+
+    udpSessions.delete(key)
+    session.closed = true
+
+    if (session.timer !== null) {
+      clearTimeout(session.timer)
+      session.timer = null
+    }
+
+    if (session.stream && !session.stream.destroyed) session.stream.destroy()
+  }
+
+  function touchUdpSession(key, session) {
+    if (session.timer !== null) clearTimeout(session.timer)
+    session.timer = setTimeout(() => closeUdpSession(key), udpIdleTimeoutMs)
+  }
+
+  async function openUdpStream() {
+    const baseSlot = getSlot(nowMs())
+    const slots = [baseSlot, baseSlot - 1]
+    let lastError = null
+
+    for (const slot of slots) {
+      if (closed) break
+
+      let publicKey
+      try {
+        publicKey = deriveServerPublicKey(masterSecret, slot)
+      } catch (err) {
+        lastError = err
+        break
+      }
+
+      let encrypted = null
+      try {
+        encrypted = await connectEncrypted(dht, publicKey, keyPair, connectTimeoutMs)
+        if (!encrypted) continue
+
+        encrypted.on('error', noop)
+        await authenticateEncrypted(encrypted, { udp: { target: udpTarget } })
+        writeLog(`UDP TUNNEL established slot=${slot} target=${udpTarget}`)
+        return encrypted
+      } catch (err) {
+        lastError = err
+        if (encrypted && !encrypted.destroyed) encrypted.destroy()
+      }
+    }
+
+    throw lastError || new AuthError('UDP tunnel failed', 'AUTH_FAILED')
+  }
+
+  async function forwardUdpDatagram(rinfo, payload) {
+    const key = `${rinfo.address}:${rinfo.port}`
+    let session = udpSessions.get(key)
+
+    if (!session) {
+      const stream = await openUdpStream()
+
+      session = { stream, timer: null, closed: false }
+      const decoder = createDecoder((message) => {
+        if (session.closed) return
+        touchUdpSession(key, session)
+
+        try {
+          udpSocket.send(message, rinfo.port, rinfo.address)
+        } catch {
+          closeUdpSession(key)
+        }
+      }, (err) => {
+        writeLog(`UDP framing error for ${key}: ${err.message}`)
+        closeUdpSession(key)
+      })
+
+      stream.on('data', (chunk) => decoder(chunk))
+      stream.on('error', () => closeUdpSession(key))
+      stream.on('close', () => closeUdpSession(key))
+
+      udpSessions.set(key, session)
+    }
+
+    touchUdpSession(key, session)
+    session.stream.write(encodeFrame(payload))
+  }
+
+  const server = udpMode
+    ? null
+    : net.createServer((socket) => {
+        connectionHandler(socket).catch((err) => {
+          writeLog(`unexpected local connection failure: ${err.message}`)
+          socket.destroy()
+        })
+      })
+
+  if (server) {
+    server.on('error', (err) => {
+      writeLog(`local listener error: ${err.message}`)
+    })
+  }
 
   try {
-    await new Promise((resolve, reject) => {
-      const onError = (err) => reject(err)
-      server.once('error', onError)
-      server.listen({ host: '127.0.0.1', port: socksMode ? socksPort : localPort }, () => {
-        server.removeListener('error', onError)
-        resolve()
+    if (udpMode) {
+      udpSocket = dgram.createSocket('udp4')
+
+      udpSocket.on('error', (err) => {
+        writeLog(`UDP listener error: ${err.message}`)
       })
-    })
-    listening = true
+
+      udpSocket.on('message', (message, rinfo) => {
+        if (closed) return
+
+        if (message.length > MAX_DATAGRAM) {
+          writeLog(`UDP datagram dropped (${message.length} bytes) from ${rinfo.address}:${rinfo.port}`)
+          return
+        }
+
+        forwardUdpDatagram(rinfo, message).catch((err) => {
+          writeLog(
+            `UDP tunnel failed for ${rinfo.address}:${rinfo.port}: ${err.message}`
+          )
+        })
+      })
+
+      await new Promise((resolve, reject) => {
+        const onError = (err) => reject(err)
+        udpSocket.once('error', onError)
+        udpSocket.bind({ address: '127.0.0.1', port: udpListenPort }, () => {
+          udpSocket.removeListener('error', onError)
+          resolve()
+        })
+      })
+
+      listening = true
+    } else {
+      await new Promise((resolve, reject) => {
+        const onError = (err) => reject(err)
+        server.once('error', onError)
+        server.listen({ host: '127.0.0.1', port: socksMode ? socksPort : localPort }, () => {
+          server.removeListener('error', onError)
+          resolve()
+        })
+      })
+
+      listening = true
+    }
   } catch (err) {
     try {
       await dht.destroy()
@@ -1014,22 +1180,42 @@ async function startClient(config, options = {}) {
     throw err
   }
 
-  const address = server.address()
-  writeLog(
-    socksMode
-      ? `SOCKS5 listening on 127.0.0.1:${address.port}`
-      : `LISTENING on 127.0.0.1:${address.port} (connect with: ssh -p ${address.port} localhost)`
-  )
+  const address = udpMode ? udpSocket.address() : server.address()
+
+  if (udpMode) {
+    writeLog(`UDP LISTENING on 127.0.0.1:${address.port} (target ${udpTarget})`)
+  } else if (socksMode) {
+    writeLog(`SOCKS5 listening on 127.0.0.1:${address.port}`)
+  } else {
+    writeLog(
+      `LISTENING on 127.0.0.1:${address.port} (connect with: ssh -p ${address.port} localhost)`
+    )
+  }
 
   async function close() {
     if (closed) return
     closed = true
 
     let closePromise = Promise.resolve()
+
     if (listening) {
-      closePromise = new Promise((resolve) => {
-        server.close(() => resolve())
-      })
+      if (udpMode) {
+        closePromise = new Promise((resolve) => {
+          try {
+            udpSocket.close(() => resolve())
+          } catch {
+            resolve()
+          }
+        })
+      } else {
+        closePromise = new Promise((resolve) => {
+          server.close(() => resolve())
+        })
+      }
+    }
+
+    for (const key of [...udpSessions.keys()]) {
+      closeUdpSession(key)
     }
 
     for (const entry of activeConnections) {
@@ -1059,11 +1245,12 @@ async function startClient(config, options = {}) {
 
   return {
     dht,
-    server,
+    server: udpSocket || server,
     address() {
-      return server.address()
+      return udpMode ? udpSocket.address() : server.address()
     },
     get mode() {
+      if (udpMode) return 'udp'
       return socksMode ? 'socks' : 'tcp'
     },
     get target() {

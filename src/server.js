@@ -34,6 +34,8 @@ const {
   normalizeVerificationMode
 } = require('./device-registry')
 const { parseAllowEntry, resolveAllowedHost } = require('./allowlist')
+const dgram = require('node:dgram')
+const { encodeFrame, createDecoder, MAX_DATAGRAM } = require('./udp')
 const {
   defaultControlSocketPath,
   defaultControlTokenPath,
@@ -297,6 +299,53 @@ async function startServer(config, options = {}) {
     throw err
   }
 
+  const udpTargetDefs = new Map()
+
+  if (config.udpTargets && typeof config.udpTargets === 'object' && !Array.isArray(config.udpTargets)) {
+    for (const [name, entry] of Object.entries(config.udpTargets)) {
+      if (!/^[A-Za-z0-9_-]{1,32}$/.test(name)) {
+        const err = new Error(`invalid udp target name "${name}"`)
+        err.code = 'CONFIG_INVALID'
+        throw err
+      }
+
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        const err = new Error(`udpTargets.${name} must be an object`)
+        err.code = 'CONFIG_INVALID'
+        throw err
+      }
+
+      const host = entry.host === undefined ? '127.0.0.1' : String(entry.host)
+
+      if (host !== '127.0.0.1') {
+        const err = new Error(`udpTargets.${name}.host must be 127.0.0.1`)
+        err.code = 'CONFIG_INVALID'
+        throw err
+      }
+
+      udpTargetDefs.set(name, {
+        name,
+        host,
+        port: validateTargetPort(entry.port),
+        type: 'udp'
+      })
+    }
+  }
+
+  function resolveUdpTarget(request) {
+    const name = request && typeof request === 'object' && typeof request.target === 'string'
+      ? request.target.trim()
+      : ''
+
+    if (!/^[A-Za-z0-9_-]{1,32}$/.test(name) || !udpTargetDefs.has(name)) {
+      const err = new Error(`unknown udp target "${name}"`)
+      err.code = 'UDP_TARGET_UNKNOWN'
+      throw err
+    }
+
+    return udpTargetDefs.get(name)
+  }
+
   /**
    * Resolves a SOCKS5 CONNECT request (host:port) against the server-side
    * IP/CIDR allowlist. Hostnames are resolved on the server and every resolved
@@ -414,6 +463,9 @@ async function startServer(config, options = {}) {
   const preAuthTimeoutMs = Number.isInteger(options.preAuthTimeoutMs)
     ? options.preAuthTimeoutMs
     : PRE_AUTH_TIMEOUT_MS
+  const udpIdleTimeoutMs = Number.isInteger(options.udpIdleTimeoutMs)
+    ? options.udpIdleTimeoutMs
+    : 60_000
 
   const startedAt = Date.now()
   const log = typeof options.log === 'function'
@@ -695,6 +747,11 @@ async function startServer(config, options = {}) {
           return
         }
 
+        if (result.target && result.target.type === 'udp') {
+          startUdpSession(stream, entry, remoteHex, result.target, result.leftover)
+          return
+        }
+
         forwardToTarget(stream, entry, remoteHex, slot, result.leftover, result.target)
       })
       .catch((err) => {
@@ -972,7 +1029,9 @@ async function startServer(config, options = {}) {
 
       let selectedTarget
       try {
-        if (response && response.socks !== undefined) {
+        if (response && response.udp !== undefined) {
+          selectedTarget = resolveUdpTarget(response.udp)
+        } else if (response && response.socks !== undefined) {
           selectedTarget = await resolveSocksTarget(response.socks, remoteHex)
         } else {
           selectedTarget = resolveTarget(response && response.target, remoteHex)
@@ -1026,6 +1085,85 @@ async function startServer(config, options = {}) {
     } finally {
       gate.release()
     }
+  }
+
+  function startUdpSession(stream, entry, remoteHex, target, leftover) {
+    const socket = dgram.createSocket('udp4')
+    let finished = false
+    let idleTimer = null
+    let datagrams = 0
+
+    const finish = () => {
+      if (finished) return
+      finished = true
+
+      if (idleTimer !== null) {
+        clearTimeout(idleTimer)
+        idleTimer = null
+      }
+
+      try {
+        socket.close()
+      } catch {
+        // Ignore.
+      }
+
+      activeConnections.delete(entry)
+      if (!stream.destroyed) stream.destroy()
+      writeLog(
+        `UDP SESSION closed client=${remoteHex} target=${target.name} datagrams=${datagrams}`
+      )
+    }
+
+    const touch = () => {
+      if (idleTimer !== null) clearTimeout(idleTimer)
+      idleTimer = setTimeout(finish, udpIdleTimeoutMs)
+    }
+
+    socket.on('error', (err) => {
+      writeLog(`UDP target error client=${remoteHex} target=${target.name}: ${err.message}`)
+      finish()
+    })
+
+    socket.on('message', (message) => {
+      if (finished) return
+      if (message.length > MAX_DATAGRAM) {
+        writeLog(`UDP reply too large client=${remoteHex} bytes=${message.length}`)
+        return
+      }
+
+      try {
+        stream.write(encodeFrame(message))
+      } catch {
+        finish()
+      }
+    })
+
+    const decoder = createDecoder((payload) => {
+      if (finished) return
+      datagrams += 1
+      touch()
+
+      try {
+        socket.send(payload, target.port, target.host)
+      } catch {
+        finish()
+      }
+    }, (err) => {
+      writeLog(`UDP framing error client=${remoteHex}: ${err.message}`)
+      finish()
+    })
+
+    stream.on('data', (chunk) => decoder(chunk))
+    stream.on('error', finish)
+    stream.on('close', finish)
+
+    if (leftover && leftover.length > 0) decoder(leftover)
+
+    touch()
+    writeLog(
+      `UDP SESSION client=${remoteHex} target=${target.name} -> ${target.host}:${target.port}`
+    )
   }
 
   function forwardToTarget(stream, entry, remoteHex, slot, leftover, target) {

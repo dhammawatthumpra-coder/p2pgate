@@ -7,6 +7,23 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.10.0] - 2026-11-16
+
+### Added
+
+- UDP forwarding แบบ opt-in: `udpTargets` ฝั่ง Server และ `p2pgate udp --target <name>`
+- framing `[len:uint16][payload]`, จำกัด 1200 ไบต์, drop ของที่ใหญ่กว่า
+- one session per client source endpoint + idle timeout (ค่าเริ่มต้น 60 วิ)
+- `udpTarget` / `udpListen` ใน client config
+- Client `udp` ใช้ credential แบบ lazy (ถามเฉพาะเมื่อถูก challenge)
+- self-test: UDP echo ผ่าน tunnel + oversized datagram ถูก drop
+
+### Security
+
+- client ส่งได้เฉพาะ **ชื่อ** udpTarget ที่ประกาศใน config
+- host ต้องเป็น `127.0.0.1`; ไม่มีทางส่ง datagram ไปปลายทางอิสระ
+- ตอบกลับได้เฉพาะ stream ที่ส่งมา → ใช้เป็น reflector ไม่ได้
+
 ## [1.9.1] - 2026-11-16
 
 ### Fixed

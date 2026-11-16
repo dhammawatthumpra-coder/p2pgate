@@ -1,4 +1,4 @@
-# p2pgate (v1.9)
+# p2pgate (v1.10)
 
 **English** | [ไทย](README.th.md)
 
@@ -15,11 +15,11 @@ registry**, a **local control plane**, **multi-target routing**, and an optional
 
 Works on Termux/Android, Linux, macOS, and Windows with Node.js 20 or newer.
 
-> Version 1.9 adds **config validation** (`p2pgate config validate|show`), a
-> stronger **doctor** (secret fingerprint/age, target reachability, SOCKS policy
-> warnings), and **per-client SOCKS allowlists** (`socks.perClient`).
-> Version 1.8 added the **SOCKS5 gateway**; 1.7 added **multi-target routing**;
-> 1.6 added **zero-setup startup** and a **connection-password mode**.
+> Version 1.10 adds **UDP forwarding** (`udpTargets` + `p2pgate udp`), carried
+> inside the existing authenticated tunnel with a 1200-byte datagram cap.
+> Version 1.9 added config validation, a stronger doctor, and per-client SOCKS
+> allowlists; 1.8 added the SOCKS5 gateway; 1.7 multi-target routing; 1.6
+> zero-setup startup and the connection-password mode.
 >
 > **Install:** `npm install -g p2pgate`
 >
@@ -718,6 +718,37 @@ with `masterSecret`, the SCRAM verifier and the Telegram token masked.
 
 ---
 
+## 9.6) UDP targets
+
+UDP is off unless you declare targets. Datagrams are framed inside the same
+authenticated tunnel (`[len:uint16][payload]`, max 1200 bytes).
+
+Server:
+
+```json
+"udpTargets": {
+  "dns": { "host": "127.0.0.1", "port": 53 },
+  "ntp": { "host": "127.0.0.1", "port": 123 }
+}
+```
+
+Client:
+
+```sh
+p2pgate udp --target dns --listen 5353
+# optional: "udpTarget": "dns", "udpListen": 5353 in client.json
+```
+
+Rules:
+
+- the client sends a target **name**; `host` must be `127.0.0.1`
+- one tunnel stream per client source endpoint, closed after 60 s idle
+- replies only travel back through the originating stream (no reflector use)
+- datagrams above 1200 bytes are dropped on both sides
+- IPv4 only; UDP is not available through SOCKS5 in this release
+
+---
+
 ## 10) Requirements
 
 - Android phone + Termux + Termux:Boot (F-Droid), optional
@@ -1010,6 +1041,7 @@ Messages never contain the PIN or password.
 | `p2pgate master reset --yes` | Rotate masterSecret with a timestamped backup |
 | `p2pgate config validate` | Validate a config file (exit 1 when invalid) |
 | `p2pgate config show` | Print the normalised config with secrets masked |
+| `p2pgate udp --target <name> --listen <port>` | Forward local UDP to a Server udpTarget |
 | `p2pgate keygen` | Create/show the Client key |
 | `p2pgate keygen --passphrase` | Protect an existing/new key with a passphrase |
 | `p2pgate keygen --unprotect` | Remove passphrase protection (prompts) |
@@ -1226,7 +1258,8 @@ p2pgate/
 │   │   ├── v1.8.3.md
 │   │   ├── v1.8.4.md
 │   │   ├── v1.9.0.md
-│   │   └── v1.9.1.md
+│   │   ├── v1.9.1.md
+│   │   └── v1.10.0.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
@@ -1238,6 +1271,7 @@ p2pgate/
 │       ├── phase9-socks5.md
 │       ├── phase10-master.md
 │       ├── phase11-v1.9.0.md
+│       ├── phase12-udp.md
 │       └── project-spec.md
 ├── package.json
 ├── package-lock.json
@@ -1274,7 +1308,8 @@ p2pgate/
     ├── self-test.js
     ├── server.js
     ├── setup-wizard.js
-    └── socks.js
+    ├── socks.js
+    └── udp.js
 ```
 
 ### Development and CI

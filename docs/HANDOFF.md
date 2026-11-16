@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-15
-สถานะ: **v1.9.1 released** (npm + GitHub Release)
+สถานะ: **v1.10.0 prepared** (feature: UDP forwarding; npm ยังเป็น 1.9.1)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -13,7 +13,7 @@
 วางข้อความนี้ใน session ใหม่:
 
 ```text
-โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.9.1)
+โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.10.0)
 อ่าน docs/HANDOFF.md ก่อน แล้วสรุปสถานะปัจจุบันและรอคำสั่ง
 ```
 
@@ -38,7 +38,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 |---|---|
 | Repo | https://github.com/dhammawatthumpra-coder/p2pgate |
 | npm | https://www.npmjs.com/package/p2pgate |
-| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.9.1 |
+| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.10.0 |
 
 ---
 
@@ -46,15 +46,15 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.9.1` (docs fix + guard, พร้อม publish) |
-| npm `latest` | `1.9.1` |
+| Version | `1.10.0` (feature: UDP forwarding, พร้อม publish) |
+| npm `latest` | `1.9.1` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `53b0c55 docs: fix README version and add docs consistency check` |
-| Tag | `v1.9.1` |
-| GitHub Release | `v1.9.1` = Latest |
+| Commit | `__COMMIT__` |
+| Tag | `v1.10.0` |
+| GitHub Release | `v1.9.1` = Latest; `v1.10.0` ยังไม่สร้าง |
 | Working tree | clean |
-| Tests | `npm test` → **50 checks PASSED** (Windows + Termux) |
-| src | 18 ไฟล์, `src/self-test.js` ~1,600 บรรทัด |
+| Tests | `npm test` → **52 checks PASSED** (Windows + Termux) |
+| src | 19 ไฟล์, `src/self-test.js` ~1,700 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
 
@@ -69,6 +69,13 @@ npm view p2pgate version
 ---
 
 ## 3. ประวัติรุ่น (สรุป)
+
+### v1.10.0 (feature)
+
+- UDP forwarding: `udpTargets` ฝั่ง Server + `p2pgate udp --target` ฝั่ง client
+- framing `[len:uint16][payload]`, cap 1200 ไบต์, session per endpoint, idle 60 วิ
+- client ส่งได้เฉพาะชื่อ target; host ต้อง 127.0.0.1; ตอบกลับทาง stream เดิมเท่านั้น
+- self-test: UDP echo + oversized drop (52 checks)
 
 ### v1.9.1 (docs + guard)
 
@@ -211,7 +218,7 @@ p2pgate connect -s <masterSecret> -p <password>
 | `src/keygen.js` | client key + passphrase protection |
 | `src/setup-wizard.js` | advanced setup + `--easy` + i18n |
 | `src/i18n.js` | `P2PGATE_LANG` / `--lang` / `t(th, en)` |
-| `src/self-test.js` | 50 checks รวม password, targets, SOCKS5 (+per-client), config, master |
+| `src/self-test.js` | 52 checks รวม password, targets, SOCKS5, UDP, config, master |
 
 Docs: `docs/specs/phase7-v1.6.0.md` (spec), `docs/releases/v1.6.3.md` (patch notes),
 `docs/SERVICE.md` (service/Termux/systemd/Windows runbook),
@@ -224,7 +231,7 @@ Docs: `docs/specs/phase7-v1.6.0.md` (spec), `docs/releases/v1.6.3.md` (patch not
 
 ```powershell
 # dev
-npm test                 # check + 50 self-test checks
+npm test                 # check + 52 self-test checks
 npm run check            # syntax check ทุกไฟล์
 npm run self-test
 
@@ -462,7 +469,7 @@ ssh -p 8022 -o BatchMode=yes -o StrictHostKeyChecking=no `
 cd D:\tunnel\p2pgate
 git status --short          # ต้องรู้ว่ามีไฟล์ค้างไหม
 git log --oneline -3
-npm test                    # ต้องได้ 50 checks (หรือมากกว่า)
+npm test                    # ต้องได้ 52 checks (หรือมากกว่า)
 npm view p2pgate version    # ต้องเป็น 1.6.1
 ```
 

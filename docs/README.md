@@ -16,6 +16,7 @@
 | [Phase 9 — SOCKS5](specs/phase9-socks5.md) | v1.8.0 | SOCKS5 gateway with an IP/CIDR allowlist |
 | [Phase 10 — masterSecret rotation](specs/phase10-master.md) | v1.8.3 | `master show` / `master reset` with backup |
 | [Phase 11 — Hardening](specs/phase11-v1.9.0.md) | v1.9.0 | `config validate/show`, doctor upgrades, per-client SOCKS |
+| [Phase 12 — UDP](specs/phase12-udp.md) | v1.10.0 | UDP-over-stream with `udpTargets` |
 
 The Phase 4 document was converted from the original `.docx` handoff file to
 Markdown for easier review and diffing.
@@ -25,6 +26,7 @@ Markdown for easier review and diffing.
 - [Session handoff](HANDOFF.md) — current state, invariants, next steps
 - [Soak test record](SOAK.md) — overnight run results and next-round template
 - [Running as a service](SERVICE.md) — Termux, systemd, Windows
+- [Release notes v1.10.0](releases/v1.10.0.md)
 - [Release notes v1.9.1](releases/v1.9.1.md)
 - [Release notes v1.9.0](releases/v1.9.0.md)
 - [Release notes v1.8.4](releases/v1.8.4.md)
