@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-16
-สถานะ: **v1.11.2 prepared** (fix: client config fallback; npm เป็น 1.11.1)
+สถานะ: **v1.11.2 released** (npm + GitHub Release)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -47,11 +47,11 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | รายการ | ค่า |
 |---|---|
 | Version | `1.11.2` (fix: client config fallback, พร้อม publish) |
-| npm `latest` | `1.11.1` — ยังไม่อัปเดตจนกว่า `npm publish` |
+| npm `latest` | `1.11.2` |
 | Git branch | `main` |
 | Commit | `8956bd4 fix(cli): fall back to client.json for client-side commands` |
 | Tag | `v1.11.2` |
-| GitHub Release | `v1.11.1` = Latest; `v1.11.2` ยังไม่สร้าง |
+| GitHub Release | `v1.11.2` = Latest |
 | Working tree | clean |
 | Tests | `npm test` → **54 checks PASSED** (Windows + Termux) |
 | src | 19 ไฟล์, `src/self-test.js` ~1,700 บรรทัด |
