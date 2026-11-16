@@ -55,7 +55,7 @@ const {
 } = require('./keygen')
 const { version } = require('../package.json')
 
-const HELP_TEXT = `p2pgate v1.11 — อุโมงค์ TCP/UDP แบบ P2P สำหรับ SSH และ service บน loopback (HyperDHT)
+const HELP_TEXT = `p2pgate v${version} — อุโมงค์ TCP/UDP แบบ P2P สำหรับ SSH และ service บน loopback (HyperDHT)
 
 การใช้งาน:
   p2pgate server [--config <path>] [--port <targetPort>]
@@ -64,9 +64,11 @@ const HELP_TEXT = `p2pgate v1.11 — อุโมงค์ TCP/UDP แบบ P2P
       --port: เปลี่ยนพอร์ตปลายทางเฉพาะรอบนี้ (ไม่บันทึก)
 
   p2pgate connect [-s <masterSecret>] [-p <password>] [--port <localPort>]
-      [--target <name>]
+      [--target <name>] [--socks5 <port>] [--mux]
       เชื่อมต่อจาก Client และสร้าง client key อัตโนมัติ
       --target: เลือก service ที่ประกาศไว้ใน targets ของ Server
+      --socks5: เปิด SOCKS5 gateway ในเครื่อง (allowlist อยู่ที่ Server)
+      --mux: ใช้ carrier เดียวหลาย channels (เฉพาะ session ที่ถูก challenge)
 
   p2pgate setup [--easy] [--mode server|client] [--config <path>]
       ตั้งค่าแบบ advanced
@@ -77,7 +79,7 @@ const HELP_TEXT = `p2pgate v1.11 — อุโมงค์ TCP/UDP แบบ P2P
       --passphrase: ตั้ง/เปลี่ยน passphrase สำหรับ client key
 
   p2pgate client [--config <path>] [--port <localPort>] [--pin-stdin]
-      [--key-passphrase-stdin] [--target <name>]
+      [--key-passphrase-stdin] [--target <name>] [--mux]
       เริ่มอุโมงค์แบบ advanced (ใช้ config ที่ตั้งไว้แล้ว)
 
   p2pgate devices list [--config <path>]
@@ -183,7 +185,7 @@ Passphrase ของ client key:
   - อุโมงค์ผูกกับ 127.0.0.1 เท่านั้น
 `
 
-const HELP_TEXT_EN = `p2pgate v1.11 — P2P TCP/UDP tunnel for SSH and loopback services (HyperDHT)
+const HELP_TEXT_EN = `p2pgate v${version} — P2P TCP/UDP tunnel for SSH and loopback services (HyperDHT)
 
 Usage:
   p2pgate server [--config <path>] [--port <targetPort>]
