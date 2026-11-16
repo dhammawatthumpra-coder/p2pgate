@@ -49,7 +49,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | Version | `1.9.1` (docs fix + guard, พร้อม publish) |
 | npm `latest` | `1.9.0` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `__COMMIT__` |
+| Commit | `53b0c55 docs: fix README version and add docs consistency check` |
 | Tag | `v1.9.1` |
 | GitHub Release | `v1.9.0` = Latest; `v1.9.1` ยังไม่สร้าง |
 | Working tree | clean |
