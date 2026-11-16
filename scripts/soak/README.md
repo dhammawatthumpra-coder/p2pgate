@@ -58,7 +58,37 @@ ssh -p 8022 -i $env:USERPROFILE\.ssh\id_ed25519 watthumpra@<host> `
 Pass criteria: `failed = 0`, `carriers = 1` (no reconnect), throughput stable,
 client RSS flat, server RSS flat.
 
-## 4. Cleanup
+## 4. Unattended run (survives the agent/shell)
+
+A long run started from an interactive shell can be killed together with that shell's
+process tree. For overnight runs, register the runner with Task Scheduler so it has its
+own tree and leaves a trace if it dies:
+
+```powershell
+# creds go in %USERPROFILE%\.p2pgate-soak-mux\run.json
+schtasks /create /tn p2pgate-soak `
+  /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\tunnel\p2pgate\scripts\soak\runner.ps1 -Hours 4 -IntervalMinutes 3" `
+  /sc once /st 23:59 /sd 11/17/2026 /f
+schtasks /create /tn p2pgate-soak-watch `
+  /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\tunnel\p2pgate\scripts\soak\watch.ps1" `
+  /sc minute /mo 10 /f
+
+schtasks /run /tn p2pgate-soak
+```
+
+- `runner.log` gets `START` / `END exit=` / `CRASH …` lines with timestamps
+- `watchdog.log` gets `DEAD … restarting`, or `STALE … stuck?` when the task is alive
+  but not producing rows
+- the watchdog restarts the task if the CSV stops for more than 20 minutes
+
+Remove the tasks when done:
+
+```powershell
+schtasks /delete /tn p2pgate-soak /f
+schtasks /delete /tn p2pgate-soak-watch /f
+```
+
+## 5. Cleanup
 
 ```sh
 pkill -f 'target-http.js'

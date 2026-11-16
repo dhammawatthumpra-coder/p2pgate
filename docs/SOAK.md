@@ -100,6 +100,32 @@ Windows เป็น client (`-p` password mode), วัด SHA-256 สองฝ
 
 ---
 
+## 1.4) mux soak คืน 2026-11-16 → 17 (ถูกตัดกลางคัน)
+
+รอบแรกของ soak mux (4 MiB ทุก 3 นาที, ตั้งเป้า 9 ชม.)
+
+| รายการ | ค่า |
+|---|---|
+| รอบที่ทำได้ | 119/180 (หยุดเอง 02:39:43) |
+| ผ่าน / ล้ม | 109 / 10 |
+| failure | ก้อนเดียว 00:33–01:20 (ECONNRESET → timeout) ฟื้นเอง |
+| carriers | 11 (reconnect 10 ครั้ง จากเน็ตขาด) |
+| throughput | min 0.87 / avg 2.60 / max 4.39 MB/s |
+| client RSS | 51.4 – 67.7 MB (นิ่ง) |
+| server RSS | 59 – 70 MB (นิ่ง) |
+
+สาเหตุที่หยุด: ไม่ใช่ p2pgate — ไม่มี reboot (boot 13 พ.ย.), ไม่มี sleep/resume,
+ไม่มี Application Error/WER ของ node, และ client ไม่ได้ log error อะไร
+เหลือแค่แถวสุดท้าย `ok=true` แล้วหายทั้ง client และสคริปต์พร้อมกัน
+⇒ ถูกฆ่าจากภายนอก (process tree) จึงย้ายไปรันผ่าน Task Scheduler ในรอบถัดไป
+(`scripts/soak/runner.ps1` + `watch.ps1`)
+
+ระหว่างก้อน failure: server log แสดงทุกรอบว่าได้รับ `GET` (72 B) แล้วส่งไฟล์ไปได้
+320 KB–1.2 MB ก่อน session ปิดโดยไม่มี error ฝั่ง server ⇒ เส้นทางฝั่ง client ตาย
+(Windows มี 32 events ของ Hyper-V vSwitch NIC disconnect ในช่วงเวลาเดียวกัน)
+
+---
+
 ## 2. วิธีเก็บตัวเลขสำหรับรอบถัดไป
 
 มีสคริปต์พร้อมใช้แล้วที่ [`scripts/soak/`](../scripts/soak/README.md) —
