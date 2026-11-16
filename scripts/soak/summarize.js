@@ -35,7 +35,6 @@ if (header[0] === 'time' && header.includes('ok')) {
   // Failure clusters: consecutive failures usually mean one network outage.
   const clusters = []
   let streak = 0
-  let recoveredFirstTry = 0
 
   rows.forEach((row, index) => {
     if (row.ok !== 'true') {
@@ -45,7 +44,6 @@ if (header[0] === 'time' && header.includes('ok')) {
       return
     }
 
-    if (streak === 1) recoveredFirstTry += 1
     streak = 0
   })
 
@@ -70,17 +68,30 @@ if (header[0] === 'time' && header.includes('ok')) {
   console.log(`carriers:    ${max(carriers)} established (reconnects: ${Math.max(0, max(carriers) - 1)})`)
 
   if (clusters.length) {
+    let recoveredClusters = 0
+    for (const cluster of clusters) {
+      const next = rows[cluster.start + cluster.count]
+      cluster.recovered = Boolean(next && next.ok === 'true')
+      if (cluster.recovered) recoveredClusters += 1
+    }
+
     console.log(`outages:     ${clusters.length} cluster(s), longest ${max(clusters.map((c) => c.count))} iteration(s)`)
-    console.log(`recovered:   ${recoveredFirstTry}/${clusters.length} clusters recovered on the next iteration`)
+    console.log(`recovered:   ${recoveredClusters}/${clusters.length} cluster(s) recovered afterwards`)
+
     for (const cluster of clusters) {
       const first = rows[cluster.start]
       const last = rows[cluster.start + cluster.count - 1]
       console.log(
         `  ${first.time}  ${cluster.count} failure(s)  ${first.error || '?'}` +
-        `${last !== first ? ` -> ${last.error || '?'}` : ''}`
+        `${last !== first ? ` -> ${last.error || '?'}` : ''}  -> ${cluster.recovered ? 'recovered' : 'NOT recovered yet'}`
       )
     }
-    console.log('note:        failures clustered around a network drop are expected, see above')
+
+    if (max(clusters.map((c) => c.count)) > 3) {
+      console.log('note:        a long cluster means the network path stayed broken; check router/Wi-Fi/virtual adapters')
+    } else {
+      console.log('note:        failures clustered around a network drop are expected')
+    }
   }
 
   if (failed.length) {
@@ -90,7 +101,7 @@ if (header[0] === 'time' && header.includes('ok')) {
     }
   }
 
-  process.exit(failed.length === 0 || recoveredFirstTry === clusters.length ? 0 : 1)
+  process.exit(failed.length === 0 || clusters.every((c) => c.recovered) ? 0 : 1)
 }
 
 if (header.includes('rss_kb') || header[0] === 'time') {
@@ -110,3 +121,4 @@ if (header.includes('rss_kb') || header[0] === 'time') {
 
 console.log('unrecognized csv format:', header.join(','))
 process.exit(1)
+
