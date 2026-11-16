@@ -49,7 +49,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | Version | `1.11.3` (fix: ping + fastpath, พร้อม publish) |
 | npm `latest` | `1.11.2` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `__COMMIT__` |
+| Commit | `d0d0511 fix(ping): measure the authenticated handshake instead of a frame` |
 | Tag | `v1.11.3` |
 | GitHub Release | `v1.11.2` = Latest; `v1.11.3` ยังไม่สร้าง |
 | Working tree | clean |
