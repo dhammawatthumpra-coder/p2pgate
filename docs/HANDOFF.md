@@ -362,7 +362,10 @@ p2pgate unlock --list
 
 เรียงตามความคุ้ม:
 
-1. **Soak + multi-client** — รอบแรกผ่าน (overnight, ดู `docs/SOAK.md`)
+1. **v1.12.0 multiplexing (`--mux`)** — spec ร่างอยู่ที่
+   `docs/specs/phase14-mux.md` (carrier + channels, flow control,
+   ข้อจำกัด fastpath)
+2. **Soak + multi-client** — รอบแรกผ่าน (overnight, ดู `docs/SOAK.md`)
    รอบถัดไปเก็บ reconnect count + memory และทดสอบหลาย client พร้อมกัน
 2. **Network switching** — ปิด/เปิด Wi-Fi, สลับ 4G, ดูว่า reconnect เองได้
 3. **เปิด CI** — แก้ billing หรือย้ายไป CI อื่น (workflow มีอยู่แต่ disable)

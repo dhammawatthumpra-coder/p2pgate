@@ -18,6 +18,7 @@
 | [Phase 11 — Hardening](specs/phase11-v1.9.0.md) | v1.9.0 | `config validate/show`, doctor upgrades, per-client SOCKS |
 | [Phase 12 — UDP](specs/phase12-udp.md) | v1.10.0 | UDP-over-stream with `udpTargets` |
 | [Phase 13 — Ping/traffic](specs/phase13-ping-traffic.md) | v1.11.0 | `p2pgate ping`, traffic counters, `status --watch` |
+| [Phase 14 — Multiplexing](specs/phase14-mux.md) | draft | `--mux` carrier with channels (target v1.12.0) |
 
 The Phase 4 document was converted from the original `.docx` handoff file to
 Markdown for easier review and diffing.
