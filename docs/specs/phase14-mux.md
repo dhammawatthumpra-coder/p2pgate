@@ -78,8 +78,9 @@ Server accepts with:
 { "v": 3, "ok": true, "serverSig": "...", "mux": { "version": 1, "maxChannels": 64 } }
 ```
 
-`maxChannels` is the negotiated minimum of both sides. If the server does not
-support mux it answers without the field and the client falls back.
+`maxChannels` is the negotiated minimum of both sides; the default is **128**.
+If the server does not support mux it answers without the field and the client
+falls back.
 
 ### 4.2 Frame format
 
@@ -129,6 +130,7 @@ client                       server
 - only one target per channel; no mixing
 - unknown `channelId` → `RESET` and a log line
 - `OPEN` timeout 10 s, idle channel timeout 120 s (configurable)
+- carrier idle timeout: **5 minutes** without channels (see §5)
 
 ### 4.5 Flow control
 
@@ -160,6 +162,10 @@ MuxClient
 - carrier reconnect: channels fail with `MUX_CARRIER_CLOSED`; the client opens a
   new carrier on the next request. No channel resumption (same as today's
   streams).
+- carrier idle timeout **5 minutes**: with zero channels the carrier closes and
+  the next request pays one DHT connect (~2 s). Five minutes covers normal
+  browsing/shell bursts; raising it to 10 minutes only trades idle sockets for
+  less reconnects.
 - keepalive `PING` every 30 s while idle; carrier considered dead after 3
   missed PONGs.
 
@@ -176,7 +182,8 @@ SOCKS integration: each accepted SOCKS connection opens one channel with
 - per channel: create TCP socket to the resolved target (or UDP session later)
 - reuse `forwardToTarget`'s pipe logic, but write into `DATA` frames with
   credit accounting
-- enforce `maxChannels`; beyond that answer `OPEN_ERR { error: "MUX_BUSY" }`
+- enforce `maxChannels` (128 by default); beyond that answer
+  `OPEN_ERR { error: "MUX_BUSY" }`
 - audit `auth.success` once per carrier; per-channel events are logged but not
   audited (volume)
 
@@ -258,9 +265,27 @@ time before/after.
 
 ---
 
-## 12. Open questions
+## 12. Decisions (2026-11-16)
 
-1. Default `maxChannels`: 64 or 128?
-2. Should `--mux` be on by default for `--socks5` in 1.12.x after a soak?
-3. Carrier idle timeout: close after 5 min without channels?
-4. Do we expose channel stats in `status --json` only, or also in audit?
+1. **`maxChannels` default: 128** on both sides; the carrier uses the minimum of
+   the two.
+2. **`--mux` default: off in 1.12.0.** It flips on for `--socks5` in a 1.12.x
+   patch only after a soak passes and the fast-path fallback is proven silent.
+   Turning it on is otherwise side-effect free: challenged sessions get mux and
+   trusted sessions fall back to one stream per connection.
+3. **Carrier idle timeout: 5 minutes** with zero channels. With a challenge session
+   the next request then pays one DHT connect (~2 s); 5 minutes covers normal
+   browsing and shell bursts. Exposed as `MUX_IDLE_MS` internally, configurable
+   later if operators ask.
+4. **Audit: no per-channel events by default.** A page load can open 20–40
+   channels and would flood `audit.log`. Channel visibility comes from
+   `status --json` (`traffic.active[]`) and debug logs. If an operator needs it
+   later, add `mux.auditChannels: true` (off by default) instead of changing the
+   default behaviour.
+
+### Still open (non-blocking)
+
+- Fast-path mux (pre-auth capability frame) — needs a latency proof.
+- Multiple carriers per server (2–4) to reduce head-of-line blocking.
+- Channel prioritisation for interactive SSH over bulk transfers.
+- UDP channels.
