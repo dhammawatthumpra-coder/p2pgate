@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-16
-สถานะ: **v1.11.4 released** (npm + GitHub Release)
+สถานะ: **v1.12.0 พร้อม publish** (โค้ด + docs + tag แล้ว, รอ `npm publish`)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -13,7 +13,7 @@
 วางข้อความนี้ใน session ใหม่:
 
 ```text
-โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.11.4)
+โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.12.0)
 อ่าน docs/HANDOFF.md ก่อน แล้วสรุปสถานะปัจจุบันและรอคำสั่ง
 ```
 
@@ -38,7 +38,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 |---|---|
 | Repo | https://github.com/dhammawatthumpra-coder/p2pgate |
 | npm | https://www.npmjs.com/package/p2pgate |
-| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.11.4 |
+| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.12.0 |
 
 ---
 
@@ -46,15 +46,15 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.11.4` (ops: hosts/audit/ttl, พร้อม publish) |
-| npm `latest` | `1.11.4` |
+| Version | `1.12.0` (mux: carrier เดียว หลาย channels, opt-in `--mux`) |
+| npm `latest` | `1.11.4` (1.12.0 ยังไม่ publish) |
 | Git branch | `main` |
-| Commit | `9f69310 feat(ops): host aliases, audit viewer, self-stopping server` |
-| Tag | `v1.11.4` |
-| GitHub Release | `v1.11.4` = Latest |
-| Working tree | clean |
-| Tests | `npm test` → **57 checks PASSED** (Windows + Termux) |
-| src | 21 ไฟล์, `src/self-test.js` ~1,800 บรรทัด |
+| Commit | `15283ff feat(mux): multiplexed carrier for SOCKS5 and target mode` |
+| Tag | `v1.12.0` |
+| GitHub Release | ยังไม่สร้าง (รอ publish) |
+| Working tree | clean (หลัง commit HANDOFF) |
+| Tests | `npm test` → **60 checks PASSED** (Windows; Termux ยังไม่รันรอบนี้) |
+| src | 22 ไฟล์ (`src/mux.js` ใหม่), `src/self-test.js` ~1,900 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
 
@@ -69,6 +69,16 @@ npm view p2pgate version
 ---
 
 ## 3. ประวัติรุ่น (สรุป)
+
+### v1.12.0 (mux)
+
+- `--mux` (opt-in): carrier เดียว authenticate ครั้งเดียว, สูงสุด 128 channels
+- framing ใหม่ `src/mux.js`: OPEN/OPEN_OK/OPEN_ERR/DATA/WINDOW/CLOSE/RESET/PING/PONG
+- flow control ต่อ channel: frame 16 KiB, window 256 KiB, queue cap 64 KiB
+- carrier idle 5 นาที, keepalive 30 วินาที
+- ใช้ได้กับ `--socks5` และ target mode; channel error fallback ไป dedicated stream
+- fastpath/trusted device ใช้ mux ไม่ได้ (`FASTPATH_READY` มาก่อน proof) → เตือน + fallback
+- self-test: mux framing, carrier ผ่าน challenged session, fastpath fallback (60 checks)
 
 ### v1.11.4 (ops)
 
@@ -251,7 +261,8 @@ p2pgate connect -s <masterSecret> -p <password>
 | `src/keygen.js` | client key + passphrase protection |
 | `src/setup-wizard.js` | advanced setup + `--easy` + i18n |
 | `src/i18n.js` | `P2PGATE_LANG` / `--lang` / `t(th, en)` |
-| `src/self-test.js` | 57 checks รวม password, targets, SOCKS5, UDP, ping, hosts, audit |
+| `src/self-test.js` | 60 checks รวม password, targets, SOCKS5, UDP, ping, hosts, audit, mux |
+| `src/mux.js` | mux framing, `MuxCarrier`, `MuxChannel`, flow control, idle/keepalive |
 
 Docs: `docs/specs/phase7-v1.6.0.md` (spec), `docs/releases/v1.6.3.md` (patch notes),
 `docs/SERVICE.md` (service/Termux/systemd/Windows runbook),
@@ -272,6 +283,7 @@ npm run self-test
 p2pgate server
 p2pgate connect
 p2pgate connect -s <secret> -p <password> --port 8022
+p2pgate connect -s <secret> -p <password> --socks5 1080 --mux
 ssh -p 8022 localhost
 
 # จัดการ
@@ -309,6 +321,9 @@ p2pgate unlock --list
     `host:port` และ `host` ต้องเป็น `127.0.0.1` (กัน SSRF)
 12. **SOCKS5 ปลายทางต้องผ่าน allowlist ฝั่ง Server** (IPv4/CIDR + port) และ
     server ต้องตรวจ **ทุก IP ที่ resolve ได้** ก่อนเชื่อมต่อ
+13. **mux channel ต้องผ่านการตรวจเดียวกับ stream ปกติ** — `OPEN` ส่งได้แค่ชื่อ
+    target หรือ SOCKS destination; ไม่มี `host:port` ดิบ และต้องถูกตรวจ allowlist
+    ทุกครั้งที่เปิด channel (ไม่ใช่ตรวจครั้งเดียวตอน carrier)
 
 ---
 
@@ -347,12 +362,12 @@ p2pgate unlock --list
 | เรื่อง | สถานะ |
 |---|---|
 | GitHub Actions | **ปิด** เพราะบัญชีติด billing lock — ใช้ `npm test` local |
-| Soak test 24 ชม. | บันทึกผลรอบแรกแล้ว (overnight ผ่าน) — ยังไม่เก็บตัวเลข reconnect/memory ดู `docs/SOAK.md` |
+| Soak test 24 ชม. | บันทึกผลรอบแรกแล้ว (overnight ผ่าน, ยังไม่เก็บ reconnect/memory) ดู `docs/SOAK.md` |
 | Multi-client พร้อมกัน | ยังไม่ stress |
 | Wi-Fi ↔ 4G switching | ยังไม่ทดสอบ |
 | NAT บางรูปแบบ | ยังไม่ครอบคลุม |
-| Multi-port / multi-target | ไม่มี (1 instance = 1 target port) |
-| UDP | ไม่รองรับ |
+| mux บน Termux (จริง) | ยังไม่ทดสอบ (self-test ผ่านบน Windows) |
+| mux กับ trusted/fastpath | ใช้ไม่ได้โดยออกแบบ — fallback per-connection |
 | TUN / subnet routing | ไม่รองรับ (Termux ทำไม่ได้ถ้าไม่ root) |
 | i18n legacy commands | แปลไม่ครบ (setup/server/connect/help แปลแล้ว) |
 
@@ -362,16 +377,16 @@ p2pgate unlock --list
 
 เรียงตามความคุ้ม:
 
-1. **v1.12.0 multiplexing (`--mux`)** — spec ร่างอยู่ที่
-   `docs/specs/phase14-mux.md` (carrier + channels, flow control,
-   ข้อจำกัด fastpath)
+1. **Publish v1.12.0 + ทดสอบ mux จริง** — `npm publish` (OTP), GitHub Release,
+   ติดตั้งบน Termux แล้วทดสอบ `--socks5 --mux` หลาย request + วัดเวลาเทียบ 1.11
 2. **Soak + multi-client** — รอบแรกผ่าน (overnight, ดู `docs/SOAK.md`)
-   รอบถัดไปเก็บ reconnect count + memory และทดสอบหลาย client พร้อมกัน
-2. **Network switching** — ปิด/เปิด Wi-Fi, สลับ 4G, ดูว่า reconnect เองได้
-3. **เปิด CI** — แก้ billing หรือย้ายไป CI อื่น (workflow มีอยู่แต่ disable)
-4. **v1.9.0 SOCKS5 ส่วนขยาย** — IPv6 destinations, UDP ASSOCIATE, per-client allowlist
-5. **แปล legacy CLI/doctor ให้ครบ en/th**
-6. **เตรียม core สำหรับ p2phub** — `p2pgate enroll`, `p2pgate agent`,
+   รอบถัดไปเก็บ reconnect count + memory, ทดสอบหลาย client พร้อมกัน, และ soak mux
+3. **Network switching** — ปิด/เปิด Wi-Fi, สลับ 4G, ดูว่า reconnect เองได้
+4. **เปิด `--mux` เป็น default ของ `--socks5`** — หลัง soak mux ผ่าน (1.12.x)
+5. **เปิด CI** — แก้ billing หรือย้ายไป CI อื่น (workflow มีอยู่แต่ disable)
+6. **SOCKS5 ส่วนขยาย** — IPv6 destinations, UDP ASSOCIATE
+7. **แปล legacy CLI/doctor ให้ครบ en/th**
+8. **เตรียม core สำหรับ p2phub** — `p2pgate enroll`, `p2pgate agent`,
    client config `serverPublicKey`, `connect --name` (ดูข้อ 10)
 
 ---
@@ -411,27 +426,27 @@ npm run docs:check
 git status --short
 
 # 2. เลขรุ่น + docs
-npm version 1.9.0 --no-git-tag-version --ignore-scripts
-# แก้ CHANGELOG.md, README.md, README.th.md, docs/releases/v1.9.0.md,
-# docs/specs/phaseX-v1.9.0.md, TESTING.md (จำนวน checks)
+npm version <version> --no-git-tag-version --ignore-scripts
+# แก้ CHANGELOG.md, README.md, README.th.md, docs/releases/v<version>.md,
+# docs/specs/phaseX-*.md, TESTING.md (จำนวน checks), docs/HANDOFF.md
 
 # 3. commit + tag + push
 git add -A
-git commit -m "feat(release): v1.9.0 <summary>"
-git tag -a v1.9.0 -m "p2pgate v1.9.0"
+git commit -m "feat(release): v<version> <summary>"
+git tag -a v<version> -m "p2pgate v<version>"
 git push origin main
-git push origin v1.9.0
+git push origin v<version>
 
 # 4. npm (ต้องมี OTP จากเจ้าของบัญชี)
 npm publish
 
 # 5. GitHub Release
-gh release create v1.9.0 --draft --title "p2pgate v1.9.0" --notes-file docs/releases/v1.9.0.md
-gh release edit v1.9.0 --draft=false --latest --notes-file docs/releases/v1.9.0.md
+gh release create v<version> --draft --title "p2pgate v<version>" --notes-file docs/releases/v<version>.md
+gh release edit v<version> --draft=false --latest --notes-file docs/releases/v<version>.md
 
 # 6. ตรวจ
 npm view p2pgate version
-npx --yes p2pgate@1.9.0 --version
+npx --yes p2pgate@<version> --version
 ```
 
 หลัง publish ต้องทดสอบบน Termux ด้วย (ติดตั้งจริง + `npm test` ใน
@@ -456,7 +471,7 @@ client config: C:\Users\csuti\.p2pgate\client.json
 ssh: watthumpra@100.76.100.90 -p 8022   (ผ่าน Tailscale)
 key: %USERPROFILE%\.ssh\id_ed25519
 known_hosts: $env:TEMP\p2pgate_known_hosts
-node 24, p2pgate 1.6.1 ติดตั้งแบบ global
+node 24, p2pgate 1.11.4 ติดตั้งแบบ global (ยังไม่ทดสอบ 1.12.0 บนเครื่องนี้)
 ```
 
 คำสั่งตรวจ Termux:
@@ -481,6 +496,8 @@ ssh -p 8022 -o BatchMode=yes -o StrictHostKeyChecking=no `
 | client ค้างโดยไม่ถาม password | ใช้ `p2pgate client` (advanced) ซึ่งไม่บังคับ credential — ต้องมี `-p` หรือ prompt ถ้าใช้ `connect` |
 | trusted ไม่ fastpath | ยังไม่ `devices add --mode trusted`, หมดอายุ, หรือไฟล์สิทธิ์ไม่ใช่ 0600 |
 | `-p` เตือนทุกครั้ง | ตั้งใจ — ใช้ prompt/`--password-stdin`/`P2PGATE_PASSWORD` แทน |
+| `MUX unavailable (fast-path ...)` แม้ใส่ `--mux` | device เป็น trusted/fastpath — ใช้ key แบบ `scram` หรือ password mode |
+| SOCKS ผ่าน mux ขึ้น `SOCKS_DENIED` | ปลายทางไม่อยู่ใน `socks.allow` ฝั่ง Server (mux ตรวจทุก channel) |
 | headless server หา password ไม่เจอ | ดู `~/.p2pgate/quickstart.txt` (0600) แล้วลบหลังคัดลอก |
 | Windows ไม่เตือนสิทธิ์ไฟล์ | Windows ไม่ตรวจ POSIX perms (พฤติกรรมที่รู้อยู่) |
 | npm page แสดง README อังกฤษ | `readmeFilename` ใน metadata เป็น `README.th.md` แต่หน้าเว็บแสดง EN — ไม่ต้องแก้ |
@@ -505,7 +522,7 @@ ssh -p 8022 -o BatchMode=yes -o StrictHostKeyChecking=no `
 cd D:\tunnel\p2pgate
 git status --short          # ต้องรู้ว่ามีไฟล์ค้างไหม
 git log --oneline -3
-npm test                    # ต้องได้ 57 checks (หรือมากกว่า)
+npm test                    # ต้องได้ 60 checks (หรือมากกว่า)
 npm view p2pgate version    # ต้องเป็น 1.6.1
 ```
 
