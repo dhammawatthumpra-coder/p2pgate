@@ -49,7 +49,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | Version | `1.10.0` (feature: UDP forwarding, พร้อม publish) |
 | npm `latest` | `1.9.1` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `__COMMIT__` |
+| Commit | `cf91065 feat(udp): UDP-over-stream forwarding with udpTargets` |
 | Tag | `v1.10.0` |
 | GitHub Release | `v1.9.1` = Latest; `v1.10.0` ยังไม่สร้าง |
 | Working tree | clean |
