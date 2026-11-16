@@ -49,7 +49,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | Version | `1.11.0` (feature: ping + traffic, พร้อม publish) |
 | npm `latest` | `1.10.0` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `__COMMIT__` |
+| Commit | `dd973cd feat(observability): p2pgate ping, traffic counters, status --watch` |
 | Tag | `v1.11.0` |
 | GitHub Release | `v1.10.0` = Latest; `v1.11.0` ยังไม่สร้าง |
 | Working tree | clean |
