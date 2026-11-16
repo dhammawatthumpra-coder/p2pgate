@@ -7,6 +7,16 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.11.3] - 2026-11-16
+
+### Fixed
+
+- `p2pgate ping` ใช้ไม่ได้เมื่อclient เป็น trusted device (server เลือก fastpath
+  และไม่เคยอ่าน proof/ping frame) → เปลี่ยนไปวัด **connect + authenticated handshake**
+  แทนการส่ง ping frame
+- ทำงานได้ทุกโหมด: fastpath, key-only, challenge (PIN/password)
+- `--count N` = จำนวน handshake ที่วัด แล้วรายงาน min/avg/max ของ connect และ auth
+
 ## [1.11.2] - 2026-11-16
 
 ### Fixed

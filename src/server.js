@@ -466,9 +466,6 @@ async function startServer(config, options = {}) {
   const udpIdleTimeoutMs = Number.isInteger(options.udpIdleTimeoutMs)
     ? options.udpIdleTimeoutMs
     : 60_000
-  const pingIdleTimeoutMs = Number.isInteger(options.pingIdleTimeoutMs)
-    ? options.pingIdleTimeoutMs
-    : 30_000
 
   const startedAt = Date.now()
   const log = typeof options.log === 'function'
@@ -783,11 +780,6 @@ async function startServer(config, options = {}) {
           return
         }
 
-        if (result.ping) {
-          startPingSession(stream, entry, remoteHex, result.leftover)
-          return
-        }
-
         if (result.target && result.target.type === 'udp') {
           startUdpSession(stream, entry, remoteHex, result.target, result.leftover)
           return
@@ -1070,9 +1062,7 @@ async function startServer(config, options = {}) {
 
       let selectedTarget
       try {
-        if (response && response.ping === true) {
-          selectedTarget = null
-        } else if (response && response.udp !== undefined) {
+        if (response && response.udp !== undefined) {
           selectedTarget = resolveUdpTarget(response.udp)
         } else if (response && response.socks !== undefined) {
           selectedTarget = await resolveSocksTarget(response.socks, remoteHex)
@@ -1102,100 +1092,33 @@ async function startServer(config, options = {}) {
       }
 
       const serverSig = computeServerSignature(verifier.serverKey, authMessage).toString('hex')
-      const isPing = selectedTarget === null
 
-      const successMessage = {
+      writeAuthMessage(stream, {
         v: AUTH_VERSION,
         ok: true,
-        serverSig
-      }
-
-      if (isPing) {
-        successMessage.ping = true
-      } else {
-        successMessage.target = {
+        serverSig,
+        target: {
           name: selectedTarget.name,
           host: selectedTarget.host,
           port: selectedTarget.port
         }
-      }
-
-      writeAuthMessage(stream, successMessage)
-      writeLog(
-        `AUTH OK client=${remoteHex} method=${mode} target=${isPing ? 'ping' : selectedTarget.name}`
-      )
+      })
+      writeLog(`AUTH OK client=${remoteHex} method=${mode} target=${selectedTarget.name}`)
       void audit.record('auth.success', {
         source: 'server',
         key: remoteHex,
         mode,
-        target: isPing ? 'ping' : selectedTarget.name
+        target: selectedTarget.name
       })
 
       return {
         ok: true,
         leftover: Buffer.concat([readyRead.leftover, read.leftover]),
-        target: selectedTarget,
-        ping: isPing
+        target: selectedTarget
       }
     } finally {
       gate.release()
     }
-  }
-
-  function startPingSession(stream, entry, remoteHex) {
-    let finished = false
-    let pings = 0
-
-    const finish = () => {
-      if (finished) return
-      finished = true
-
-      activeConnections.delete(entry)
-      if (!stream.destroyed) stream.destroy()
-      writeLog(`PING session closed client=${remoteHex} pings=${pings}`)
-    }
-
-    const run = async () => {
-      while (!finished && !stream.destroyed) {
-        let read
-        try {
-          read = await readControlLine(stream, {
-            timeoutMs: pingIdleTimeoutMs,
-            maxBytes: MAX_CONTROL_BYTES
-          })
-        } catch {
-          break
-        }
-
-        let message = null
-        try {
-          message = decodeControl(read.line)
-        } catch {
-          break
-        }
-
-        if (
-          !message ||
-          message.v !== AUTH_VERSION ||
-          !message.ping ||
-          typeof message.ping.nonce !== 'string' ||
-          message.ping.nonce === '' ||
-          message.ping.nonce.length > 64
-        ) {
-          break
-        }
-
-        writeAuthMessage(stream, {
-          v: AUTH_VERSION,
-          ping: { nonce: message.ping.nonce }
-        })
-        pings += 1
-      }
-    }
-
-    stream.on('error', finish)
-    stream.on('close', finish)
-    run().finally(finish)
   }
 
   function startUdpSession(stream, entry, remoteHex, target, leftover) {

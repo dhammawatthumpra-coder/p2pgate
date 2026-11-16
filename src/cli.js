@@ -1666,18 +1666,27 @@ async function commandPing(values) {
         continue
       }
 
-      const min = Math.min(...entry.rtts)
-      const max = Math.max(...entry.rtts)
-      const avg = Math.round(entry.rtts.reduce((sum, value) => sum + value, 0) / entry.rtts.length)
+      const stats = (values) => {
+        const min = Math.min(...values)
+        const max = Math.max(...values)
+        const avg = Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)
+        return `${min}/${avg}/${max}`
+      }
 
       process.stdout.write(t(
         `slot ${entry.slot}  serverKey ${entry.serverKey}\n`,
         `slot ${entry.slot}  serverKey ${entry.serverKey}\n`
       ))
       process.stdout.write(t(
-        `   auth ${entry.authMs} ms   rtt min/avg/max ${min}/${avg}/${max} ms   (${entry.rtts.length} pings)\n`,
-        `   auth ${entry.authMs} ms   rtt min/avg/max ${min}/${avg}/${max} ms   (${entry.rtts.length} pings)\n`
+        `   connect ${stats(entry.connectMs)} ms   auth ${stats(entry.authMs)} ms   (${entry.attempts} attempts)\n`,
+        `   connect ${stats(entry.connectMs)} ms   auth ${stats(entry.authMs)} ms   (${entry.attempts} attempts)\n`
       ))
+      if (entry.target) {
+        process.stdout.write(t(
+          `   target ${entry.target}\n`,
+          `   target ${entry.target}\n`
+        ))
+      }
     }
 
     if (succeeded.length === 0) {

@@ -741,11 +741,13 @@ p2pgate ping --count 5 --json
 ```
 
 ```text
-slot 498557  serverKey 16db1bcb…
-   auth 92 ms   rtt min/avg/max 0/1/1 ms   (2 pings)
+slot 498558  serverKey 1f0ea5c2…
+   connect 170/1092/2013 ms   auth 24/31/38 ms   (2 attempts)
 ```
 
-- `auth` = เวลา SCRAM, `rtt` = เวลา ping ไป-กลับ
+- `connect` = เวลาเปิด DHT stream, `auth` = เวลา SCRAM handshake
+- `--count N` ทำ handshake ซ้ำ N ครั้ง แล้วรายงาน min/avg/max
+- ใช้ได้กับ fastpath, key-only และ challenge
 - ไม่เปิด listener และไม่ทิ้งพอร์ตค้าง
 - exit code `1` เมื่อไม่พบ Server
 
@@ -1271,7 +1273,8 @@ p2pgate/
 │   │   ├── v1.10.0.md
 │   │   ├── v1.11.0.md
 │   │   ├── v1.11.1.md
-│   │   └── v1.11.2.md
+│   │   ├── v1.11.2.md
+│   │   └── v1.11.3.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md

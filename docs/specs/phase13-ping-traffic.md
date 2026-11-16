@@ -19,23 +19,24 @@ Output:
 
 ```text
 === p2pgate ping ===
-slot 498557  serverKey 16db1bcb…
-   auth 92 ms   rtt min/avg/max 0/1/1 ms   (2 pings)
+slot 498558  serverKey 1f0ea5c2…
+   connect 170/1092/2013 ms   auth 24/31/38 ms   (2 attempts)
 ```
 
 ### Flow
 
 ```text
-client → connect(slot) → SCRAM handshake with { ping: true }
-server → { ok, serverSig, ping: true }
-client → { v, ping: { nonce } }
-server → { v, ping: { nonce } }          ← RTT measured here
-client → close
+for each slot (current, then previous):
+  for N attempts:
+    connect DHT stream           → measure connectMs
+    SCRAM handshake (or fastpath)→ measure authMs
+    close stream
 ```
 
-- `authMs` measures the SCRAM round trip separately from the ping RTT
-- the server closes the stream after the client disconnects; idle timeout 30 s
-- slots: current, then previous (mirrors normal connect behaviour)
+- `auth` is the real authentication round trip; with a trusted device the
+  server answers `FASTPATH_READY` and the value is effectively one RTT
+- no extra ping frame is used: fast-path streams are piped straight to the
+  target, so a post-auth frame would be forwarded to the service
 - exit code `1` when no slot answers
 
 Security: ping uses the same authentication as a normal session; unauthenticated

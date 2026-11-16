@@ -776,10 +776,6 @@ async function startClient(config, options = {}) {
         proofMessage.udp = { target: authOptions.udp.target }
       }
 
-      if (authOptions.ping === true) {
-        proofMessage.ping = true
-      }
-
       encrypted.write(encodeControl(proofMessage))
     } catch {
       throw new AuthError('ไม่สามารถส่งข้อมูลยืนยันตัวตนได้', 'AUTH_PROTOCOL')
@@ -1035,56 +1031,55 @@ async function startClient(config, options = {}) {
         continue
       }
 
-      let stream = null
-      const startedAt = nowMs()
+      const samples = []
+      let lastError = null
+      let targetName = null
 
-      try {
-        stream = await connectEncrypted(dht, publicKey, keyPair, connectTimeoutMs)
+      for (let i = 0; i < count; i += 1) {
+        const startedAt = nowMs()
+        let stream = null
 
-        if (!stream) {
-          results.push({ slot, ok: false, error: 'PEER_NOT_FOUND' })
-          continue
-        }
+        try {
+          stream = await connectEncrypted(dht, publicKey, keyPair, connectTimeoutMs)
 
-        stream.on('error', noop)
-
-        const authStart = nowMs()
-        await authenticateEncrypted(stream, { ping: true })
-        const authMs = nowMs() - authStart
-        const rtts = []
-
-        for (let i = 0; i < count; i += 1) {
-          const nonce = crypto.randomBytes(8).toString('hex')
-          const t0 = nowMs()
-
-          stream.write(encodeControl({ v: AUTH_VERSION, ping: { nonce } }))
-          const read = await readControlLine(stream, {
-            timeoutMs: authTimeoutMs,
-            maxBytes: MAX_CONTROL_BYTES
-          })
-          const message = decodeControl(read.line)
-
-          if (!message || !message.ping || message.ping.nonce !== nonce) {
-            throw new AuthError('unexpected ping reply', 'AUTH_PROTOCOL')
+          if (!stream) {
+            lastError = 'PEER_NOT_FOUND'
+            break
           }
 
-          rtts.push(nowMs() - t0)
-        }
+          stream.on('error', noop)
+          const connectMs = nowMs() - startedAt
+          const authStart = nowMs()
+          const authResult = await authenticateEncrypted(stream)
+          const authMs = nowMs() - authStart
 
+          if (authResult.target && authResult.target.name) {
+            targetName = authResult.target.name
+          }
+
+          samples.push({ connectMs, authMs })
+        } catch (err) {
+          lastError = err.code || err.message
+          break
+        } finally {
+          if (stream && !stream.destroyed) stream.destroy()
+        }
+      }
+
+      if (samples.length > 0) {
         results.push({
           slot,
           ok: true,
           serverKey: publicKey.toString('hex'),
-          authMs,
-          totalMs: nowMs() - startedAt,
-          rtts
+          target: targetName,
+          connectMs: samples.map((sample) => sample.connectMs),
+          authMs: samples.map((sample) => sample.authMs),
+          attempts: samples.length
         })
         break
-      } catch (err) {
-        results.push({ slot, ok: false, error: err.code || err.message })
-      } finally {
-        if (stream && !stream.destroyed) stream.destroy()
       }
+
+      results.push({ slot, ok: false, error: lastError || 'UNKNOWN' })
     }
 
     return results

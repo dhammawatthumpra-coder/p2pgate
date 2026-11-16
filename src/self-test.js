@@ -938,9 +938,10 @@ async function main() {
     )
     const pingOk = (pingSession.results || []).find((entry) => entry.ok)
     assert.ok(pingOk, 'ping must reach the server')
-    assert.equal(pingOk.rtts.length, 2)
+    assert.equal(pingOk.attempts, 2)
+    assert.equal(pingOk.authMs.length, 2)
     await pingSession.close()
-    checks.push('ping measures RTT without opening a listener')
+    checks.push('ping measures the authenticated handshake per attempt')
 
     const revokeClient = await startTestClient(revokeKeyPath, unattendedPassword)
     const revokeSocket = await connectLocal(revokeClient.address().port)

@@ -761,11 +761,13 @@ p2pgate ping --count 5 --json
 ```
 
 ```text
-slot 498557  serverKey 16db1bcb…
-   auth 92 ms   rtt min/avg/max 0/1/1 ms   (2 pings)
+slot 498558  serverKey 1f0ea5c2…
+   connect 170/1092/2013 ms   auth 24/31/38 ms   (2 attempts)
 ```
 
-- `auth` is the SCRAM round trip; `rtt` is the ping round trip
+- `connect` is the DHT stream setup time; `auth` is the SCRAM handshake
+- `--count N` repeats the handshake and reports min/avg/max
+- works with trusted fast-path, key-only, and challenge modes
 - nothing listens and no port stays open
 - exit code `1` when no slot answers
 
@@ -1297,7 +1299,8 @@ p2pgate/
 │   │   ├── v1.10.0.md
 │   │   ├── v1.11.0.md
 │   │   ├── v1.11.1.md
-│   │   └── v1.11.2.md
+│   │   ├── v1.11.2.md
+│   │   └── v1.11.3.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
