@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-16
-สถานะ: **v1.11.1 released** (npm + GitHub Release)
+สถานะ: **v1.11.2 prepared** (fix: client config fallback; npm เป็น 1.11.1)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -13,7 +13,7 @@
 วางข้อความนี้ใน session ใหม่:
 
 ```text
-โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.11.1)
+โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.11.2)
 อ่าน docs/HANDOFF.md ก่อน แล้วสรุปสถานะปัจจุบันและรอคำสั่ง
 ```
 
@@ -38,7 +38,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 |---|---|
 | Repo | https://github.com/dhammawatthumpra-coder/p2pgate |
 | npm | https://www.npmjs.com/package/p2pgate |
-| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.11.1 |
+| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.11.2 |
 
 ---
 
@@ -46,12 +46,12 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.11.1` (fix: self-test, พร้อม publish) |
-| npm `latest` | `1.11.1` |
+| Version | `1.11.2` (fix: client config fallback, พร้อม publish) |
+| npm `latest` | `1.11.1` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `69aef6c fix(test): use a temp client key and exit after the self-test` |
-| Tag | `v1.11.1` |
-| GitHub Release | `v1.11.1` = Latest |
+| Commit | `__COMMIT__` |
+| Tag | `v1.11.2` |
+| GitHub Release | `v1.11.1` = Latest; `v1.11.2` ยังไม่สร้าง |
 | Working tree | clean |
 | Tests | `npm test` → **54 checks PASSED** (Windows + Termux) |
 | src | 19 ไฟล์, `src/self-test.js` ~1,700 บรรทัด |
@@ -69,6 +69,12 @@ npm view p2pgate version
 ---
 
 ## 3. ประวัติรุ่น (สรุป)
+
+### v1.11.2 (fix)
+
+- คำสั่งฝั่ง client ใช้ fallback `client.json` เมื่อไม่มี `config.json`
+  (`ping`, `client`, `udp`, `config`, `doctor`, `master`, `keygen`)
+- `ping` แสดงคำใบ้เมื่อ Server เก่ากว่า 1.11 (`AUTH_PROTOCOL`)
 
 ### v1.11.1 (fix)
 

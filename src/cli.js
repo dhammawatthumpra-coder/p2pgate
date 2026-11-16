@@ -24,6 +24,7 @@ const {
   sendControlCommand
 } = require('./control')
 const { promptHidden } = require('./auth')
+const fs = require('node:fs')
 const { createAuditLog } = require('./audit-log')
 const { rotateMasterSecret, fingerprint } = require('./master')
 const { redactConfig, summarizeConfig } = require('./config-tools')
@@ -385,6 +386,23 @@ function printError(err) {
   }
 }
 
+/**
+ * Client-side commands fall back to ~/.p2pgate/client.json when the default
+ * Server config (config.json) does not exist on this machine.
+ */
+function resolveClientConfigPath(explicitPath) {
+  if (explicitPath !== undefined && explicitPath !== null && String(explicitPath).trim() !== '') {
+    return resolveConfigPath(explicitPath)
+  }
+
+  const serverPath = resolveConfigPath(undefined)
+
+  if (fs.existsSync(serverPath)) return serverPath
+  if (fs.existsSync(DEFAULT_CLIENT_CONFIG_PATH)) return DEFAULT_CLIENT_CONFIG_PATH
+
+  return serverPath
+}
+
 async function resolveKeyPath(configPath) {
   try {
     const raw = await readConfigRaw(configPath)
@@ -469,7 +487,7 @@ async function getKeygenPassphrase(values) {
 }
 
 async function commandKeygen(values) {
-  const configPath = resolveConfigPath(values.config)
+  const configPath = resolveClientConfigPath(values.config)
   const keyPath = await resolveKeyPath(configPath)
   const exists = clientKeyExists(keyPath)
 
@@ -708,7 +726,7 @@ async function commandServer(values) {
 }
 
 async function commandClient(values) {
-  const configPath = resolveConfigPath(values.config)
+  const configPath = resolveClientConfigPath(values.config)
   const config = await loadConfig(configPath)
 
   if (values.port !== undefined) {
@@ -1609,7 +1627,7 @@ function makeCredentialProvider(values) {
 }
 
 async function commandPing(values) {
-  const configPath = resolveConfigPath(values.config)
+  const configPath = resolveClientConfigPath(values.config)
   const config = await loadConfig(configPath)
 
   const count = values.count === undefined ? 3 : Number(values.count)
@@ -1638,9 +1656,12 @@ async function commandPing(values) {
 
     for (const entry of results) {
       if (!entry.ok) {
+        const reason = entry.error === 'AUTH_PROTOCOL'
+          ? 'AUTH_PROTOCOL — server อาจเป็นรุ่นเก่ากว่า 1.11'
+          : entry.error
         process.stdout.write(t(
-          `slot ${entry.slot}  ไม่พบ (${entry.error})\n`,
-          `slot ${entry.slot}  not found (${entry.error})\n`
+          `slot ${entry.slot}  ไม่พบ (${reason})\n`,
+          `slot ${entry.slot}  not found (${reason})\n`
         ))
         continue
       }
@@ -1673,7 +1694,7 @@ async function commandPing(values) {
 }
 
 async function commandUdp(values) {
-  const configPath = resolveConfigPath(values.config)
+  const configPath = resolveClientConfigPath(values.config)
   const config = await loadConfig(configPath)
 
   const target = values.target === undefined
@@ -1736,7 +1757,7 @@ async function commandUdp(values) {
 
 async function commandConfig(values, positionals) {
   const subcommand = positionals[1]
-  const configPath = resolveConfigPath(values.config)
+  const configPath = resolveClientConfigPath(values.config)
 
   if (subcommand !== 'validate' && subcommand !== 'show') {
     process.stderr.write(t(
@@ -1827,7 +1848,7 @@ async function commandConfig(values, positionals) {
 }
 
 async function commandDoctor(values) {
-  const configPath = resolveConfigPath(values.config)
+  const configPath = resolveClientConfigPath(values.config)
   const result = await runDoctor({
     configPath,
     json: values.json === true
@@ -1839,7 +1860,7 @@ async function commandDoctor(values) {
 
 async function commandMaster(values, positionals) {
   const subcommand = positionals[1]
-  const configPath = resolveConfigPath(values.config)
+  const configPath = resolveClientConfigPath(values.config)
 
   if (subcommand === 'show') {
     const config = await loadConfig(configPath)

@@ -709,6 +709,10 @@ p2pgate config show --json
 passes here will load at startup. `config show` prints what the daemon sees,
 with `masterSecret`, the SCRAM verifier and the Telegram token masked.
 
+Client-side commands (`ping`, `client`, `udp`, `config`, `doctor`, `master`,
+`keygen`) use `config.json` when it exists, otherwise they fall back to
+`client.json` automatically. `--config` always wins.
+
 `p2pgate doctor` additionally:
 
 - prints the `masterSecret` fingerprint and warns when the config has not
@@ -1292,7 +1296,8 @@ p2pgate/
 │   │   ├── v1.9.1.md
 │   │   ├── v1.10.0.md
 │   │   ├── v1.11.0.md
-│   │   └── v1.11.1.md
+│   │   ├── v1.11.1.md
+│   │   └── v1.11.2.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md

@@ -7,6 +7,17 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.11.2] - 2026-11-16
+
+### Fixed
+
+- คำสั่งฝั่ง client (`ping`, `client`, `udp`, `config`, `doctor`, `master`, `keygen`)
+  ใช้ `config.json` เป็นค่าเริ่มต้นเสมอ ทำให้บนเครื่อง client ขึ้น
+  "configuration file not found"
+- เพิ่ม fallback: ถ้า `config.json` ไม่มีแต่ `client.json` มี → ใช้ `client.json`
+  อัตโนมัติ (ยังใช้ `--config` เพื่อระบุเองได้)
+- `ping` แสดงคำใบ้เมื่อเจอ `AUTH_PROTOCOL` ว่า Server อาจเป็นรุ่นเก่ากว่า 1.11
+
 ## [1.11.1] - 2026-11-16
 
 ### Fixed

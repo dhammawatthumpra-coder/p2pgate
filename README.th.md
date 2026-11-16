@@ -690,6 +690,10 @@ p2pgate config show --json
 `config show` แสดงค่าที่ daemon เห็นจริง โดยปิด `masterSecret`, SCRAM verifier
 และ Telegram token
 
+คำสั่งฝั่ง client (`ping`, `client`, `udp`, `config`, `doctor`, `master`,
+`keygen`) ใช้ `config.json` ถ้ามี ไม่งั้น fallback ไป `client.json` อัตโนมัติ
+ถ้าระบุ `--config` จะใช้ค่านั้นเสมอ
+
 `p2pgate doctor` เพิ่มการตรวจ:
 
 - fingerprint ของ `masterSecret` + เตือนถ้า config ไม่ถูกแก้มา 180 วัน
@@ -1266,7 +1270,8 @@ p2pgate/
 │   │   ├── v1.9.1.md
 │   │   ├── v1.10.0.md
 │   │   ├── v1.11.0.md
-│   │   └── v1.11.1.md
+│   │   ├── v1.11.1.md
+│   │   └── v1.11.2.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
