@@ -307,7 +307,7 @@ p2pgate unlock --list
 | เรื่อง | สถานะ |
 |---|---|
 | GitHub Actions | **ปิด** เพราะบัญชีติด billing lock — ใช้ `npm test` local |
-| Soak test 24 ชม. | ยังไม่ทำ |
+| Soak test 24 ชม. | บันทึกผลรอบแรกแล้ว (overnight ผ่าน) — ยังไม่เก็บตัวเลข reconnect/memory ดู `docs/SOAK.md` |
 | Multi-client พร้อมกัน | ยังไม่ stress |
 | Wi-Fi ↔ 4G switching | ยังไม่ทดสอบ |
 | NAT บางรูปแบบ | ยังไม่ครอบคลุม |
@@ -322,7 +322,8 @@ p2pgate unlock --list
 
 เรียงตามความคุ้ม:
 
-1. **Soak + multi-client** — รัน 24 ชม., หลาย client พร้อมกัน, เก็บ log
+1. **Soak + multi-client** — รอบแรกผ่าน (overnight, ดู `docs/SOAK.md`)
+   รอบถัดไปเก็บ reconnect count + memory และทดสอบหลาย client พร้อมกัน
 2. **Network switching** — ปิด/เปิด Wi-Fi, สลับ 4G, ดูว่า reconnect เองได้
 3. **เปิด CI** — แก้ billing หรือย้ายไป CI อื่น (workflow มีอยู่แต่ disable)
 4. **v1.9.0 SOCKS5 ส่วนขยาย** — IPv6 destinations, UDP ASSOCIATE, per-client allowlist
