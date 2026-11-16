@@ -49,7 +49,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | Version | `1.11.2` (fix: client config fallback, พร้อม publish) |
 | npm `latest` | `1.11.1` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `__COMMIT__` |
+| Commit | `8956bd4 fix(cli): fall back to client.json for client-side commands` |
 | Tag | `v1.11.2` |
 | GitHub Release | `v1.11.1` = Latest; `v1.11.2` ยังไม่สร้าง |
 | Working tree | clean |
