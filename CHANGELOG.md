@@ -7,6 +7,22 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.9.1] - 2026-11-16
+
+### Fixed
+
+- README/README.th ยังแสดงหัวเป็น v1.8 หลังออก 1.9.0 — อัปเดตเป็น v1.9
+  พร้อมสรุปฟีเจอร์ 1.9 (config validate, doctor, per-client SOCKS)
+
+### Added
+
+- `scripts/check-docs.js` + `npm run docs:check`: ตรวจว่า README heading
+  (major.minor), โครงสร้างโปรเจกต์, release notes, docs index และ CHANGELOG
+  ตรงกับ version ใน `package.json`
+- ต่อ `docs:check` เข้า `npm run check` → `npm test` → `prepublishOnly`
+  ทำให้ publish ด้วย docs ที่ไม่ตรง version ไม่ได้
+- ข้ามการตรวจ `docs/` อัตโนมัติเมื่อรันจากแพ็กเกจที่ติดตั้ง (npm ไม่ publish docs/)
+
 ## [1.9.0] - 2026-11-16
 
 ### Added

@@ -41,6 +41,13 @@ npm run self-test
 6. **การทดสอบ**
    - เพิ่ม self-test เมื่อเพิ่มพฤติกรรมใหม่
    - รักษา test เดิมไม่ให้พัง
+7. **เอกสารต้องตรงกับรุ่น**
+   - `npm run docs:check` ตรวจ README heading, โครงสร้างโปรเจกต์,
+     release notes, docs index และ CHANGELOG เทียบกับ `package.json`
+   - `npm test` เรียก check นี้อยู่แล้ว จึง publish ด้วย docs เก่าไม่ได้
+   - เวลาออกรุ่นใหม่: bump version → แก้ README (vX.Y), เพิ่ม
+     `docs/releases/vX.Y.Z.md`, เพิ่ม link ใน `docs/README.md`,
+     เพิ่มหัวข้อใน `CHANGELOG.md` → `npm test`
 
 ## รูปแบบ Commit
 

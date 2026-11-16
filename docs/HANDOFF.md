@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-15
-สถานะ: **v1.9.0 released** (npm + GitHub Release)
+สถานะ: **v1.9.1 prepared** (docs fix + docs:check guard; npm ยังเป็น 1.9.0)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -13,7 +13,7 @@
 วางข้อความนี้ใน session ใหม่:
 
 ```text
-โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.9.0)
+โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.9.1)
 อ่าน docs/HANDOFF.md ก่อน แล้วสรุปสถานะปัจจุบันและรอคำสั่ง
 ```
 
@@ -38,7 +38,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 |---|---|
 | Repo | https://github.com/dhammawatthumpra-coder/p2pgate |
 | npm | https://www.npmjs.com/package/p2pgate |
-| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.9.0 |
+| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.9.1 |
 
 ---
 
@@ -46,12 +46,12 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.9.0` (hardening, พร้อม publish) |
-| npm `latest` | `1.9.0` |
+| Version | `1.9.1` (docs fix + guard, พร้อม publish) |
+| npm `latest` | `1.9.0` — ยังไม่อัปเดตจนกว่า `npm publish` |
 | Git branch | `main` |
-| Commit | `a86f854 feat(hardening): config validate/show, doctor upgrades, per-client SOCKS allowlist` |
-| Tag | `v1.9.0` |
-| GitHub Release | `v1.9.0` = Latest |
+| Commit | `__COMMIT__` |
+| Tag | `v1.9.1` |
+| GitHub Release | `v1.9.0` = Latest; `v1.9.1` ยังไม่สร้าง |
 | Working tree | clean |
 | Tests | `npm test` → **50 checks PASSED** (Windows + Termux) |
 | src | 18 ไฟล์, `src/self-test.js` ~1,600 บรรทัด |
@@ -68,7 +68,13 @@ npm view p2pgate version
 
 ---
 
-## 3. v1.6.0 / v1.6.1 ทำอะไรไปแล้ว
+## 3. ประวัติรุ่น (สรุป)
+
+### v1.9.1 (docs + guard)
+
+- README/README.th เปลี่ยนหัวเป็น v1.9 (ค้างจาก 1.9.0)
+- เพิ่ม `scripts/check-docs.js` + `npm run docs:check` ต่อเข้า `npm test`
+  → publish ด้วย docs ที่ไม่ตรง version ไม่ได้
 
 ### v1.9.0 (hardening)
 
@@ -357,6 +363,7 @@ cd D:\tunnel\p2pgate
 
 # 1. ตรวจ
 npm test
+npm run docs:check
 git status --short
 
 # 2. เลขรุ่น + docs

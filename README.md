@@ -1,4 +1,4 @@
-# p2pgate (v1.8)
+# p2pgate (v1.9)
 
 **English** | [ไทย](README.th.md)
 
@@ -14,10 +14,11 @@ registry**, a **local control plane**, **multi-target routing**, and an optional
 
 Works on Termux/Android, Linux, macOS, and Windows with Node.js 20 or newer.
 
-> Version 1.8 adds a **SOCKS5 gateway** with a server-side IP/CIDR allowlist.
-> Version 1.7 added **multi-target routing** (`targets` + `--target`), and 1.6
-> added **zero-setup startup**, a **connection-password mode**, and
-> `p2pgate connect`.
+> Version 1.9 adds **config validation** (`p2pgate config validate|show`), a
+> stronger **doctor** (secret fingerprint/age, target reachability, SOCKS policy
+> warnings), and **per-client SOCKS allowlists** (`socks.perClient`).
+> Version 1.8 added the **SOCKS5 gateway**; 1.7 added **multi-target routing**;
+> 1.6 added **zero-setup startup** and a **connection-password mode**.
 >
 > **Install:** `npm install -g p2pgate`
 >
@@ -1223,7 +1224,8 @@ p2pgate/
 │   │   ├── v1.8.2.md
 │   │   ├── v1.8.3.md
 │   │   ├── v1.8.4.md
-│   │   └── v1.9.0.md
+│   │   ├── v1.9.0.md
+│   │   └── v1.9.1.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md

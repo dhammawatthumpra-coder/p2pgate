@@ -1,4 +1,4 @@
-# p2pgate (v1.8)
+# p2pgate (v1.9)
 
 [English](README.md) | **ไทย**
 
@@ -13,9 +13,11 @@ CGNAT/ไฟร์วอลล์ โดยไม่ต้องเปิดพ�
 
 ใช้ได้กับ Termux/Android, Linux, macOS และ Windows ที่มี Node.js 20 ขึ้นไป
 
-> เวอร์ชัน 1.8 เพิ่ม **SOCKS5 gateway** พร้อม allowlist แบบ IP/CIDR ฝั่ง Server
-> เวอร์ชัน 1.7 เพิ่ม **multi-target routing** (`targets` + `--target`)
-> เวอร์ชัน 1.6 เพิ่ม **zero-setup**, **connection-password mode** และ `p2pgate connect`
+> เวอร์ชัน 1.9 เพิ่ม **config validation** (`p2pgate config validate|show`),
+> **doctor** ที่ตรวจลึกขึ้น (fingerprint/อายุ secret, target ไม่ตอบ, allowlist กว้าง)
+> และ **SOCKS allowlist ต่อ client** (`socks.perClient`)
+> เวอร์ชัน 1.8 เพิ่ม **SOCKS5 gateway**, 1.7 เพิ่ม **multi-target routing**,
+> 1.6 เพิ่ม **zero-setup** และ **connection-password mode**
 >
 > **ติดตั้ง:** `npm install -g p2pgate`
 >
@@ -1197,7 +1199,8 @@ p2pgate/
 │   │   ├── v1.8.2.md
 │   │   ├── v1.8.3.md
 │   │   ├── v1.8.4.md
-│   │   └── v1.9.0.md
+│   │   ├── v1.9.0.md
+│   │   └── v1.9.1.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
