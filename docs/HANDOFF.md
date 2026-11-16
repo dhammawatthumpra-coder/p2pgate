@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-15
-สถานะ: **v1.9.0 prepared** (hardening: config/doctor/per-client SOCKS; npm ยังเป็น 1.8.4)
+สถานะ: **v1.9.0 released** (npm + GitHub Release)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -47,11 +47,11 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | รายการ | ค่า |
 |---|---|
 | Version | `1.9.0` (hardening, พร้อม publish) |
-| npm `latest` | `1.8.4` — ยังไม่อัปเดตจนกว่า `npm publish` |
+| npm `latest` | `1.9.0` |
 | Git branch | `main` |
 | Commit | `a86f854 feat(hardening): config validate/show, doctor upgrades, per-client SOCKS allowlist` |
 | Tag | `v1.9.0` |
-| GitHub Release | `v1.8.4` = Latest; `v1.9.0` ยังไม่สร้าง |
+| GitHub Release | `v1.9.0` = Latest |
 | Working tree | clean |
 | Tests | `npm test` → **50 checks PASSED** (Windows + Termux) |
 | src | 18 ไฟล์, `src/self-test.js` ~1,600 บรรทัด |
