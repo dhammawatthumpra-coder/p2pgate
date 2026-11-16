@@ -102,6 +102,10 @@ Windows เป็น client (`-p` password mode), วัด SHA-256 สองฝ
 
 ## 2. วิธีเก็บตัวเลขสำหรับรอบถัดไป
 
+มีสคริปต์พร้อมใช้แล้วที่ [`scripts/soak/`](../scripts/soak/README.md) —
+`mux-termux.sh` (ฝั่ง server: isolated instance + HTTP target + RSS sampler)
+และ `mux-windows.ps1` (ฝั่ง client: โหลดไฟล์ทุก N นาที + ตรวจ SHA-256 + CSV)
+
 ### Client (Windows)
 
 ```powershell
