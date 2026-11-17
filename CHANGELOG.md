@@ -27,6 +27,11 @@
 ### Tests
 
 - `npm test` → **72 checks** (เพิ่มการตรวจ default ของ mux ต่อโหมด + `--no-mux`)
+- ทดสอบจริงผ่าน SOCKS5 (Termux, 1 MiB × 10 พร้อมกัน):
+  - default (mux): **10/10 สำเร็จ**, carrier เดียว
+  - `--no-mux`: **3/10** — อีก 7 ถูกปฏิเสธ `busy` เพราะแต่ละ connection ต้อง
+    authenticate เองและ auth guard จำกัด 1 ครั้งต่อ key
+  ⇒ default mux ไม่ได้แค่เร็วขึ้น แต่แก้ปัญหา connection หลุดตอนเปิดพร้อมกัน
 
 ## [1.13.0] - 2026-11-17
 
