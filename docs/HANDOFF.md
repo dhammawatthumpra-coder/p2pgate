@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-16
-สถานะ: **v1.13.1 released** (npm + GitHub Release; mux default สำหรับ `--socks5`)
+สถานะ: **v1.13.2 พร้อม publish** (hotfix: fast-path peek ทำข้อมูลแรกหาย)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -13,7 +13,7 @@
 วางข้อความนี้ใน session ใหม่:
 
 ```text
-โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.13.1)
+โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.13.2)
 อ่าน docs/HANDOFF.md ก่อน แล้วสรุปสถานะปัจจุบันและรอคำสั่ง
 ```
 
@@ -38,7 +38,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 |---|---|
 | Repo | https://github.com/dhammawatthumpra-coder/p2pgate |
 | npm | https://www.npmjs.com/package/p2pgate |
-| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.13.1 |
+| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.13.2 |
 
 ---
 
@@ -46,14 +46,14 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.13.1` (`--socks5` ใช้ mux default + `--no-mux`) |
-| npm `latest` | `1.13.1` |
+| Version | `1.13.2` (hotfix: peek ต้อง forward ไบต์ดิบทั้งหมด) |
+| npm `latest` | `1.13.1` (1.13.2 ยังไม่ publish) |
 | Git branch | `main` |
-| Commit | `9a5d83b` + docs commit ล่าสุด — ดู `git log --oneline -1` |
-| Tag | `v1.13.1` |
-| GitHub Release | `v1.13.1` = Latest |
-| Working tree | clean หลัง commit docs |
-| Tests | `npm test` → **72 checks PASSED** (Windows + Termux 1.13.1) |
+| Commit | ดู `git log --oneline -1` |
+| Tag | `v1.13.2` (หลัง commit) |
+| GitHub Release | ยังไม่สร้าง (รอ publish) |
+| Working tree | clean หลัง commit |
+| Tests | `npm test` → **73 checks PASSED** |
 | src | 22 ไฟล์ (`src/mux.js` ใหม่), `src/self-test.js` ~1,900 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
@@ -69,6 +69,15 @@ npm view p2pgate version
 ---
 
 ## 3. ประวัติรุ่น (สรุป)
+
+### v1.13.2 (hotfix)
+
+- **แก้ regression 1.13.0**: server peek แล้ว forward เฉพาะไบต์หลัง newline ทำให้
+  บรรทัดแรกของ client หาย (SSH banner) → `ssh` ขึ้น `Bad packet length` / MAC error
+- `peekControlLine()` คืน `raw` (ทุกไบต์ที่อ่าน) และ server ใช้ `raw` เมื่อไม่ใช่
+  mux upgrade
+- self-test: เขียน payload ทันทีหลัง connect (จำลอง SSH) — fail ก่อนแก้, ผ่านหลังแก้
+- self-test: 73 checks
 
 ### v1.13.1 (default mux for socks)
 
@@ -290,7 +299,7 @@ p2pgate connect -s <masterSecret> -p <password>
 | `src/keygen.js` | client key + passphrase protection |
 | `src/setup-wizard.js` | advanced setup + `--easy` + i18n |
 | `src/i18n.js` | `P2PGATE_LANG` / `--lang` / `t(th, en)` |
-| `src/self-test.js` | 72 checks รวม password, targets, SOCKS5, UDP, ping, hosts, audit, mux, peek, mux default |
+| `src/self-test.js` | 73 checks รวม password, targets, SOCKS5, UDP, ping, hosts, audit, mux, peek |
 | `src/mux.js` | mux framing, `MuxCarrier`, `MuxChannel`, flow control, idle/keepalive |
 
 Docs: `docs/specs/phase7-v1.6.0.md` (spec), `docs/releases/v1.6.3.md` (patch notes),
@@ -359,8 +368,9 @@ p2pgate unlock --list
 15. **ทุกทิศทางต้องมี backpressure** — ถ้าเขียนไม่ทันให้หยุดอ่าน (pause) ไม่ใช่สะสม
     queue ไม่จำกัด และถ้าปล่อย `write()` คืน false ต้องมี `drain` ให้ปลด
 16. **peek บน fast-path ต้องคืนไบต์เสมอ** — `peekControlLine` ห้าม throw และต้องคืน
-    `leftover` ทุกกรณี (timeout/ปิด/เกิน 512 B) เพื่อให้ forward ไบต์ไป target ได้ครบ;
-    ห้ามใช้ `unshift()` แทนการคืน leftover
+    `leftover`/`raw` ทุกกรณี (timeout/ปิด/เกิน 512 B); เมื่อไม่ใช่ mux upgrade
+    server ต้อง forward `raw` (รวมบรรทัดและ newline) — ห้ามใช้ `leftover` อย่างเดียว
+    (เคสนี้ทำให้ SSH พังใน 1.13.0/1.13.1)
 
 ---
 

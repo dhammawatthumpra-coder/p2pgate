@@ -134,7 +134,7 @@ function peekControlLine(stream, options = {}) {
 
   return new Promise((resolve) => {
     if (stream.destroyed) {
-      resolve({ line: null, leftover: Buffer.alloc(0) })
+      resolve({ line: null, leftover: Buffer.alloc(0), raw: Buffer.alloc(0) })
       return
     }
 
@@ -142,7 +142,7 @@ function peekControlLine(stream, options = {}) {
     let timer = null
     let settled = false
 
-    const finish = (line) => {
+    const finish = (line, rawBytes) => {
       if (settled) return
       settled = true
 
@@ -163,7 +163,7 @@ function peekControlLine(stream, options = {}) {
         // Ignore.
       }
 
-      resolve({ line, leftover: buffer })
+      resolve({ line, leftover: buffer, raw: rawBytes || buffer })
     }
 
     const onData = (chunk) => {
@@ -173,25 +173,26 @@ function peekControlLine(stream, options = {}) {
       const newline = buffer.indexOf(0x0a)
       if (newline !== -1) {
         if (newline > maxBytes) {
-          finish(null)
+          finish(null, buffer)
           return
         }
 
+        const raw = buffer.subarray(0, newline + 1)
         const line = buffer.subarray(0, newline).toString('utf8').replace(/\r$/, '')
         buffer = buffer.subarray(newline + 1)
-        finish(line)
+        finish(line, raw)
         return
       }
 
-      if (buffer.length >= maxBytes) finish(null)
+      if (buffer.length >= maxBytes) finish(null, buffer)
     }
 
-    const onError = () => finish(null)
-    const onClose = () => finish(null)
-    const onEnd = () => finish(null)
+    const onError = () => finish(null, buffer)
+    const onClose = () => finish(null, buffer)
+    const onEnd = () => finish(null, buffer)
 
     if (timeoutMs > 0) {
-      timer = setTimeout(() => finish(null), timeoutMs)
+      timer = setTimeout(() => finish(null, buffer), timeoutMs)
     }
 
     stream.on('data', onData)

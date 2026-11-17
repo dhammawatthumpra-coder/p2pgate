@@ -976,7 +976,9 @@ async function startServer(config, options = {}) {
 
       if (!upgraded) {
         writeLog(`FASTPATH mux=0 client=${remoteHex}`)
-        return { ok: true, leftover: peek.leftover }
+        // Forward everything we read, including the line and its newline: a
+        // non-mux client's first bytes (e.g. an SSH banner) are payload.
+        return { ok: true, leftover: peek.raw }
       }
 
       writeAuthMessage(stream, {

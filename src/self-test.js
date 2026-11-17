@@ -2415,6 +2415,23 @@ async function main() {
     assert.deepEqual(await echoThrough(fastPlainClient, jsonPayload), jsonPayload)
     assert.equal(fastPlainClient.muxActive, false)
     checks.push('fast-path peek forwards payload that starts with {')
+
+    // Regression guard: an SSH client writes its banner immediately, i.e. inside
+    // the peek window. The peek must forward the whole line, not just the tail.
+    const immediateSocket = await connectLocal(fastPlainClient.address().port)
+    immediateSocket.write('SSH-2.0-TEST\r\n')
+    assert.deepEqual(
+      await readExactly(immediateSocket, echoBanner.length, 15_000),
+      echoBanner
+    )
+    const immediateEcho = await readExactly(
+      immediateSocket,
+      Buffer.byteLength('SSH-2.0-TEST\r\n'),
+      15_000
+    )
+    assert.equal(immediateEcho.toString(), 'SSH-2.0-TEST\r\n')
+    immediateSocket.destroy()
+    checks.push('fast-path peek forwards an immediate line payload (SSH banner)')
     await fastPlainClient.close()
     await fastMuxServer.close()
 

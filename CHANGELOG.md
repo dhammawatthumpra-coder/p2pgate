@@ -7,6 +7,26 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.13.2] - 2026-11-17
+
+### Fixed
+
+- **ข้อมูลแรกของ client หายบน fast path (regression ตั้งแต่ 1.13.0)** — server
+  peek 200 ms แล้ว forward เฉพาะไบต์ *หลัง* newline ทำให้บรรทัดแรกที่ client ส่ง
+  มาหายไป อาการที่เจอ: `ssh` ขึ้น
+  `Bad packet length …` / `message authentication code incorrect`
+  เพราะ SSH banner (`SSH-2.0-…\r\n`) ถูกกินไป
+- `peekControlLine()` คืน `raw` (ไบต์ทั้งหมดที่อ่าน รวมบรรทัดและ newline) และ server
+  ใช้ `raw` เมื่อไม่ใช่ mux upgrade → ข้อมูลทุกไบต์ถึง target
+- self-test เพิ่มเคส "เขียน payload ทันทีหลัง connect" (จำลอง SSH banner) ซึ่งfail
+  ก่อนแก้และผ่านหลังแก้
+
+### Notes
+
+- กระทบเฉพาะ client ที่ **ไม่ใช้ mux** บน trusted device; ถ้าใช้ `--mux`
+  เส้นทาง upgrade จะไม่ผ่าน peek จึงไม่โดน
+- แนะนำอัปเกรดจาก 1.13.0/1.13.1 เป็น 1.13.2
+
 ## [1.13.1] - 2026-11-17
 
 ### Changed
