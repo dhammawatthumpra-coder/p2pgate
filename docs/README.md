@@ -27,6 +27,7 @@ Markdown for easier review and diffing.
 ## Other documents
 
 - [Session handoff](HANDOFF.md) — current state, invariants, next steps
+- [Product handoff](PRODUCT-HANDOFF.md) — product-oriented briefing for a new agent (what exists, constraints, directions)
 - [Soak test record](SOAK.md) — overnight run results and next-round template
 - [Running as a service](SERVICE.md) — Termux, systemd, Windows
 - [Release notes v1.13.2](releases/v1.13.2.md)
