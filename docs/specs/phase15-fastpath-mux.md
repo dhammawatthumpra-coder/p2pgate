@@ -88,17 +88,27 @@ and is forwarded byte-for-byte.
 
 1. `fastpath` branch writes `FASTPATH_READY` with the capability (config-gated).
 2. New helper `peekControlLine(stream, { timeoutMs, maxBytes })`:
-   - resolves `{ line: string|null, leftover: Buffer }`,
-   - **never rejects on timeout or on non-JSON bytes**; it resolves with what it read,
-   - detaches its listeners and never leaves the stream paused.
+   - reuses the `readControlLine()` pattern (see `src/auth.js`): accumulate on `data`,
+     resolve as soon as a `\n` arrives, **always** `clearTimeout`, remove all four
+     listeners, and `stream.pause()` before resolving,
+   - resolves `{ line: string|null, leftover: Buffer }` and **never rejects** on
+     timeout or on non-JSON bytes; a timeout resolves `{ line: null, leftover: buffer }`,
+   - returns the read bytes as `leftover` instead of calling `stream.unshift()`:
+     `unshift` combined with a later `pipe()` can reorder or double-deliver bytes,
+     and `leftover` is already how the auth flow passes bytes forward.
 3. If the line is a valid upgrade:
    - reply with the acceptance message,
    - `startMuxSession(stream, entry, remoteHex, leftover)`,
    - log `FASTPATH mux=1`, audit `auth.fastpath` with `mux: true`.
 4. Otherwise `forwardToTarget(stream, entry, remoteHex, slot, leftover)` (no change),
    log `FASTPATH mux=0` at most once per connection.
-5. Timeout default `muxPeekMs = 300` (env `P2PGATE_MUX_PEEK_MS` for tests); `0` disables
-   the peek entirely (exactly 1.12 behaviour).
+   `forwardToTarget` already accepts and flushes `leftover` before piping
+   (`src/server.js:1595`, `socket.write(leftover)` ahead of `stream.pipe(socket)`),
+   so no change is needed there.
+5. Timeout default `muxPeekMs = 200`, a **server config value / `startServer()`
+   option** (dependency injection for tests, same style as `AuthGuard`); no
+   `P2PGATE_TEST_*` environment variable. `0` disables the peek entirely (exactly
+   1.12 behaviour).
 
 ### 5.1 State machine
 
@@ -107,7 +117,7 @@ connected
   -> decideDevice()
      -> decline      : DECLINED, close
      -> fastpath     : FASTPATH_READY(+mux?)
-                       -> peek (<=300 ms, <=512 B)
+                       -> peek (<=200 ms, <=512 B)
                           -> upgrade OK      : MUX_READY, mux session
                           -> anything else   : forward leftover to target
      -> challenge    : CHALLENGE_REQUIRED -> proof -> (mux as in 1.12)
@@ -122,8 +132,10 @@ connected
      acceptance line, then build `MuxCarrier` with the remaining leftover bytes;
    - fastpath **without** capability (old server) → `muxUnsupported`, one quiet log line;
    - challenged → unchanged.
-3. The upgrade must be written before any payload; `handleLocalSocket` already defers
-   payload until auth completes, so no reordering is needed.
+3. **Ordering is mandatory**: the upgrade line must be written before any payload and
+   before the carrier starts sending frames. `handleLocalSocket()` already defers local
+   payload until authentication completes, so the upgrade simply goes first; a test
+   asserts that the target receives the first payload byte unchanged.
 4. Failure to get an acceptance within `muxOpenTimeout` (10 s) → destroy the stream and
    fall back to a dedicated stream (never leave the local socket hanging).
 
@@ -145,7 +157,11 @@ it can set `muxPeekMs` to `0` (server) or `mux: false`.
   unchanged, so this adds no new authentication path.
 - Channels still pass `resolveTarget` / `resolveSocksTarget` per open; a fast-path
   device gains no new authority by using mux.
-- Peek is capped (512 B, 300 ms) and never buffers unbounded input.
+- Peek is capped (512 B, 200 ms) and never buffers unbounded input.
+- Peek does **not** consume the auth concurrency guard: `AuthGuard`'s 1-per-key /
+  3-total limit covers the authentication phase and `gate.release()` runs before the
+  fastpath branch. The cost of a peek is one timer plus at most 512 B per connection,
+  bounded by the carrier limits (64 carriers / 512 channels).
 - Upgrade after payload started is impossible: the window closes on the first
   non-matching byte.
 - Server-side carrier/channel caps from 1.12.1 still apply (64 / 512).
@@ -165,14 +181,14 @@ it can set `muxPeekMs` to `0` (server) or `mux: false`.
 | Knob | Where | Default | Meaning |
 |---|---|---|---|
 | `mux` | server config | `true` | advertise mux on fast-path |
-| `muxPeekMs` | server config | `300` | peek window; `0` disables |
+| `muxPeekMs` | server config (or `startServer` option) | `200` | peek window; `0` disables |
 | `--mux` | client | off | opt-in, unchanged in 1.13.0 |
 | `--no-mux` | client | — | force dedicated streams |
 
 ## 11. Tests (self-test additions)
 
 1. fastpath + mux: trusted registry key, `--mux` → `muxActive === true`, 1 MiB echo intact.
-2. payload starting with `{`: target expects `{"a":1}\n` → arrives intact (peek must not eat it).
+2. payload starting with `{`: target expects `{"a":1}\n` → arrives intact (peek must not eat it). This also proves the upgrade is written before payload.
 3. server-first target with a non-mux client: banner arrives within 1 s.
 4. oversized "upgrade" (600 B, no newline) → treated as payload, no hang.
 5. old-client simulation (`mux: false`) on a 1.13 server → bytes intact.
@@ -187,11 +203,15 @@ it can set `muxPeekMs` to `0` (server) or `mux: false`.
 3. If clean, consider enabling mux by default **for `--socks5` only** in 1.13.x.
 4. Rollback is config-only: `mux: false` on the server, or `--no-mux` on the client.
 
-## 13. Open questions
+## 13. Decided (was open)
 
-- Is 300 ms the right peek? Measure on 4G; 150 ms may be enough.
-- Should `maxChannels` come from server config rather than a constant?
-- Should `two-step` (always-challenge) sessions also advertise mux? Not needed today.
+- **Peek window: 200 ms.** 300 ms is safe on 4G but noticeably sticky on LAN for
+  server-first protocols; 200 ms keeps a 2× margin over a typical 4G RTT.
+- **`maxChannels` stays hardcoded at 128 in 1.13.0.** Move it to config only if
+  resource-limit complaints appear.
+- **`two-step` sessions do not advertise mux.** The challenged flow stays exactly as
+  in 1.12; unifying them is a v2 topic.
+- **No test-only environment variables.** `muxPeekMs` is injected via config/options.
 
 ## 14. Effort
 
