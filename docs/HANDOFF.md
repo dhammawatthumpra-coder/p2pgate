@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-16
-สถานะ: **v1.13.1 พร้อม publish** (`--socks5` ใช้ mux เป็นค่าเริ่มต้น)
+สถานะ: **v1.13.1 released** (npm + GitHub Release; mux default สำหรับ `--socks5`)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -38,7 +38,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 |---|---|
 | Repo | https://github.com/dhammawatthumpra-coder/p2pgate |
 | npm | https://www.npmjs.com/package/p2pgate |
-| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.13.0 |
+| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.13.1 |
 
 ---
 
@@ -47,13 +47,13 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | รายการ | ค่า |
 |---|---|
 | Version | `1.13.1` (`--socks5` ใช้ mux default + `--no-mux`) |
-| npm `latest` | `1.13.0` (1.13.1 ยังไม่ publish) |
+| npm `latest` | `1.13.1` |
 | Git branch | `main` |
-| Commit | ดู `git log --oneline -1` |
-| Tag | `v1.13.1` (หลัง commit) |
-| GitHub Release | ยังไม่สร้าง (รอ publish) |
-| Working tree | clean หลัง commit |
-| Tests | `npm test` → **72 checks PASSED** |
+| Commit | `9a5d83b` + docs commit ล่าสุด — ดู `git log --oneline -1` |
+| Tag | `v1.13.1` |
+| GitHub Release | `v1.13.1` = Latest |
+| Working tree | clean หลัง commit docs |
+| Tests | `npm test` → **72 checks PASSED** (Windows + Termux 1.13.1) |
 | src | 22 ไฟล์ (`src/mux.js` ใหม่), `src/self-test.js` ~1,900 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
@@ -406,6 +406,7 @@ p2pgate unlock --list
 | mux บนอุปกรณ์จริง | ✅ 1.12.1 (Windows→Termux, 1 carrier/3 channels) และ 1.13.0 trusted device (`fastpath=1`) |
 | mux โอนไฟล์ใหญ่ | ✅ 1.12.1: 8/32 MiB upload+echo, 16 MiB download, 8 channels × 4 MiB — SHA-256 ตรง |
 | 1.13.0 บนอุปกรณ์จริง | ✅ Termux + Windows global 1.13.0; trusted device จริงได้ `MUX carrier established … fastpath=1` และ SSH banner ผ่าน |
+| 1.13.1 บนอุปกรณ์จริง | ✅ npm ผ่าน validation, Termux/Windows 1.13.1, server หลักรีสตาร์ต, `ping` ผ่าน, `--mux` trusted ได้ `fastpath=1` |
 | mux กับ trusted/fastpath | ✅ 1.13.0 — capability + peek 200 ms; client/server 1.12 ยังทำงานเดิม |
 | TUN / subnet routing | ไม่รองรับ (Termux ทำไม่ได้ถ้าไม่ root) |
 | i18n legacy commands | แปลไม่ครบ (setup/server/connect/help แปลแล้ว) |
