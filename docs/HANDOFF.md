@@ -411,10 +411,12 @@ p2pgate unlock --list
 1. **Publish v1.13.0 + soak trusted device** — `npm publish` (OTP), GitHub Release,
    อัปเกรด Termux/server หลักเป็น 1.13.0, แล้ว soak ด้วย trusted device 4 ชม.
    (`scripts/soak/`, ต้องตั้ง `allowedClientKeys` ของ soak server ให้ตรงกับ key ที่ใช้)
-2. **ตัดสินใจเปิด default ของ `--mux`** — ตอนนี้ fastpath ใช้ได้แล้ว จึงมีเหตุผล
-   พิจารณาอีกครั้งหลัง soak 1.13.x (ผู้ใช้ทั่วไปยังคง 1–2 session)
+2. **ตัดสินใจเปิด default ของ `--mux`** — หลักฐานครบแล้ว: 4 ชม. trusted device
+   ผ่าน 80/80, carrier เดียว, RSS ลดลง (`docs/SOAK.md` §1.6) และ password mode
+   ผ่าน 79/79 (§1.5) — เสนอทำใน 1.13.x: default เฉพาะ `--socks5`, มี `--no-mux`
+   และ config `mux: false` สำหรับถอยกลับ
 3. **Network switching** — ปิด/เปิด Wi-Fi, สลับ 4G, ดูว่า reconnect เองได้
-4. **Soak mux 24 ชม. + multi-client** — ต่อยอดจาก 4 ชม. (§1.5)
+4. **Soak mux 24 ชม. + multi-client** — ต่อยอดจาก 4 ชม. (§1.5–1.6)
 3. **เปิด `--mux` เป็น default ของ `--socks5`** — หลัง soak mux ผ่าน (1.12.x)
 4. **เปิด CI** — แก้ billing หรือย้ายไป CI อื่น (workflow มีอยู่แต่ disable)
 5. **SOCKS5 ส่วนขยาย** — IPv6 destinations, UDP ASSOCIATE

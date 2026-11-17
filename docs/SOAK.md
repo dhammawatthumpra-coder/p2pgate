@@ -147,6 +147,27 @@ carrier เดียวอยู่ได้ทั้ง 4 ชั่วโมง
 
 ---
 
+## 1.6) mux บน trusted device 4 ชม. — 2026-11-17 (1.13.0)
+
+รันผ่าน Task Scheduler, 4 MiB ทุก 3 นาที, server เป็น `registry` + `key-only`
+(ไม่ใช้ password) เพื่อบังคับเส้นทาง **fast path + mux**
+
+| รายการ | ค่า |
+|---|---|
+| รอบ | **80/80 ผ่าน** (0 failure) |
+| carriers | **1** — ไม่มี reconnect ตลอด 4 ชม. (`fastpath=1` ทั้ง carrier) |
+| throughput | min 0.91 / avg 2.05 / max 3.50 MB/s |
+| client RSS | 22.4 – 67.2 MB (10 รอบแรกเฉลี่ย 40.9 → 10 รอบท้าย 28.3) |
+| server RSS | 42.8 – 74.1 MB (66.6 → 51.9) |
+| ข้อมูล | ~335 MB ผ่าน carrier เดียว (`in=5,760 out=335,559,760`) |
+| runner | `END exit=0 elapsed=243m` + `REPORT written` |
+| watchdog | ไม่ทำงาน (ไม่มี `watchdog.log`) |
+
+สรุป: mux บน fast path (phase 15) นิ่งทั้ง 4 ชั่วโมง, memory ไม่ไต่ (ลดลงด้วยซ้ำ),
+และไม่มีการสร้าง carrier ใหม่เลย — เป็นหลักฐานพอจะพิจารณาเปิด default ในรุ่นถัดไป
+
+---
+
 ## 2. วิธีเก็บตัวเลขสำหรับรอบถัดไป
 
 มีสคริปต์พร้อมใช้แล้วที่ [`scripts/soak/`](../scripts/soak/README.md) —
