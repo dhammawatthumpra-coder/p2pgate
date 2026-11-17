@@ -395,13 +395,15 @@ p2pgate unlock --list
 
 เรียงตามความคุ้ม:
 
-1. **ตัดสินใจเปิด `--mux` เป็น default ของ `--socks5`** — soak ผ่านแล้ว:
-   4 ชม. 79/79 รอบ, carrier เดียว, RSS นิ่ง (`docs/SOAK.md` §1.5);
-   รอบ 9 ชม. ที่ถูกตัดกลางคันก็ฟื้นตัวเองเมื่อเน็ตกลับ (`§1.4`)
-   ข้อเสนอ: เปิด default ใน 1.12.2 พร้อม flag `--no-mux` สำหรับถอยกลับ
-2. **Network switching** — ปิด/เปิด Wi-Fi, สลับ 4G, ดูว่า reconnect เองได้
-   (รวมถึงพฤติกรรมของ carrier เมื่อเน็ตขาด: carrier ตาย → client สร้างใหม่)
-3. **Soak mux 24 ชม. + multi-client** — ต่อยอดจาก 4 ชม. และทดสอบหลาย client พร้อมกัน
+1. **fastpath + mux (1.13.0)** — spec เขียนแล้วที่
+   `docs/specs/phase15-fastpath-mux.md`: server ประกาศ capability ใน
+   `FASTPATH_READY`, client ขอ upgrade ทันที, server peek ≤300 ms/≤512 B
+   แล้วจึงเลือก mux หรือ forward ตามเดิม (เข้ากันได้กับ client/server 1.12)
+   เมื่อทำเสร็จ mux จะมีผลกับ trusted device ซึ่งเป็นกลุ่มผู้ใช้ส่วนใหญ่
+2. **ตัดสินใจเปิด default ของ `--mux`** — ยังไม่ทำ: ผู้ใช้ทั่วไปมักมี 1–2
+   session และใช้ trusted device (mux ใช้ไม่ได้จนกว่า phase 15 จะเสร็จ)
+3. **Network switching** — ปิด/เปิด Wi-Fi, สลับ 4G, ดูว่า reconnect เองได้
+4. **Soak mux 24 ชม. + multi-client** — ต่อยอดจาก 4 ชม. (§1.5)
 3. **เปิด `--mux` เป็น default ของ `--socks5`** — หลัง soak mux ผ่าน (1.12.x)
 4. **เปิด CI** — แก้ billing หรือย้ายไป CI อื่น (workflow มีอยู่แต่ disable)
 5. **SOCKS5 ส่วนขยาย** — IPv6 destinations, UDP ASSOCIATE

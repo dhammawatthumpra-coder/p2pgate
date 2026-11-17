@@ -19,6 +19,7 @@
 | [Phase 12 — UDP](specs/phase12-udp.md) | v1.10.0 | UDP-over-stream with `udpTargets` |
 | [Phase 13 — Ping/traffic](specs/phase13-ping-traffic.md) | v1.11.0 | `p2pgate ping`, traffic counters, `status --watch` |
 | [Phase 14 — Multiplexing](specs/phase14-mux.md) | v1.12.0 | `--mux` carrier with channels (opt-in) |
+| [Phase 15 — mux over fast-path](specs/phase15-fastpath-mux.md) | draft | capability + bounded peek for trusted devices (v1.13.0) |
 
 The Phase 4 document was converted from the original `.docx` handoff file to
 Markdown for easier review and diffing.
