@@ -25,12 +25,31 @@ bash ~/soak/mux-termux.sh 8      # 8 MiB test file, target port 18081
 It prints `SECRET`, `PASSWORD`, `SHA`, `BYTES` (also saved to
 `~/.p2pgate-soak/creds.txt`, mode 0600).
 
+### Trusted-device mode (fast path)
+
+Pass a client public key as the 4th argument; the server is then registry +
+key-only and the client uses the 1.13 fast-path mux:
+
+```sh
+bash ~/soak/mux-termux.sh 4 18081 "$HOME/.p2pgate-soak" <clientPublicKeyHex>
+```
+
+`creds.txt` then has `MODE=trusted` and an empty `PASSWORD`.
+
 ## 2. Client device (Windows)
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\soak\mux-windows.ps1 `
   -Secret <SECRET> -Password <PASSWORD> `
   -ExpectedSha <SHA> -ExpectedBytes <BYTES> -MB 8 -Hours 9
+```
+
+Trusted mode (needs `.p2pgate\client-key.json` in `%USERPROFILE%\.p2pgate-soak-mux`
+whose public key was passed to the server script):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\soak\mux-windows.ps1 -Mode trusted `
+  -Secret <SECRET> -ExpectedSha <SHA> -ExpectedBytes <BYTES> -MB 4 -Hours 4
 ```
 
 Every iteration appends to `%USERPROFILE%\.p2pgate-soak-mux\client.csv`:

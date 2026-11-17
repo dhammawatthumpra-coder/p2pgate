@@ -36,11 +36,13 @@ Write-RunnerLog ("START hours={0} interval={1}m port={2} repo={3}" -f $Hours, $I
 try {
   & (Join-Path $PSScriptRoot 'mux-windows.ps1') `
     -Secret $settings.secret `
-    -Password $settings.password `
+    -Password $(if ($settings.password) { $settings.password } else { '' }) `
+    -Mode $(if ($settings.mode) { $settings.mode } else { 'password' }) `
     -ExpectedSha $settings.expectedSha `
     -ExpectedBytes ([long]$settings.expectedBytes) `
     -MB ([int]$settings.mb) `
     -Port ([int]$settings.port) `
+    -TargetPort $(if ($settings.targetPort) { [int]$settings.targetPort } else { 18081 }) `
     -IntervalMinutes $IntervalMinutes `
     -Hours $Hours
 

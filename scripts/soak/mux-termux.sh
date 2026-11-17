@@ -1,12 +1,18 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# Mux soak: isolated p2pgate server + HTTP target for an overnight run.
+# Mux soak: isolated p2pgate server + HTTP target for an unattended run.
 # Leaves three processes: target-http, p2pgate server, RSS sampler.
-# usage: bash mux-termux.sh [sizeMB] [targetPort] [soakDir]
+#
+#   bash mux-termux.sh [sizeMB] [targetPort] [soakDir] [clientPublicKeyHex]
+#
+# Without a client key the server is zero-setup password mode. With a key it is
+# registry + key-only, so the client takes the trusted fast path (the 1.13 mux
+# path this run is meant to exercise).
 set -u
 
 MB="${1:-8}"
 TARGET_PORT="${2:-18081}"
 D="${3:-$HOME/.p2pgate-soak}"
+CLIENT_KEY="${4:-}"
 STATE="$D/state"
 SRC_HTTP="$(cd "$(dirname "$0")" && pwd)/target-http.js"
 
@@ -28,7 +34,34 @@ if ! pgrep -f "target-http.js $D/big.bin" > /dev/null 2>&1; then
 fi
 TARGET_PID="$(pgrep -f "target-http.js $D/big.bin" | head -n 1)"
 
-# --- p2pgate server ------------------------------------------------------
+# --- server config -------------------------------------------------------
+if [ -n "$CLIENT_KEY" ]; then
+  SECRET="$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")"
+  cat > "$D/server.json" <<JSON
+{
+  "mode": "server",
+  "masterSecret": "$SECRET",
+  "authMode": "registry",
+  "targetHost": "127.0.0.1",
+  "targetPort": $TARGET_PORT,
+  "localPort": 8022,
+  "clientKeyPath": "$D/server-key.json",
+  "allowedClientKeys": ["$CLIENT_KEY"],
+  "verificationMode": "key-only",
+  "trustedDevicesFile": "$D/trusted_devices",
+  "auditLog": { "enabled": false },
+  "customBootstrap": [],
+  "authPin": { "enabled": false, "unattended": null },
+  "telegramAlert": { "enabled": false, "botToken": "", "chatId": "" },
+  "mux": true,
+  "muxPeekMs": 200
+}
+JSON
+  MODE="trusted"
+else
+  MODE="password"
+fi
+
 if ! pgrep -f "$D/server.json" > /dev/null 2>&1; then
   HOME="$STATE" setsid nohup p2pgate server \
     --config "$D/server.json" --target-port "$TARGET_PORT" \
@@ -43,10 +76,15 @@ if [ -z "${SERVER_PID:-}" ]; then
 fi
 
 # --- credentials ---------------------------------------------------------
-SECRET="$(grep -m1 '^masterSecret:' "$STATE/.p2pgate/quickstart.txt" | awk '{print $2}')"
-PASSWORD="$(grep -m1 '^password:' "$STATE/.p2pgate/quickstart.txt" | awk '{print $2}')"
+if [ "$MODE" = "password" ]; then
+  SECRET="$(grep -m1 '^masterSecret:' "$STATE/.p2pgate/quickstart.txt" | awk '{print $2}')"
+  PASSWORD="$(grep -m1 '^password:' "$STATE/.p2pgate/quickstart.txt" | awk '{print $2}')"
+else
+  PASSWORD=""
+fi
 
 cat > "$D/creds.txt" <<CREDS
+MODE=$MODE
 SECRET=$SECRET
 PASSWORD=$PASSWORD
 SHA=$SHA
@@ -74,17 +112,15 @@ if ! pgrep -f "soak-rss $D" > /dev/null 2>&1; then
   sleep 1
 fi
 
-echo "=== soak ready ==="
+echo "=== soak ready ($MODE) ==="
 echo "dir:      $D"
 echo "server:   pid $SERVER_PID (log $D/server.log)"
 echo "target:   pid ${TARGET_PID:-?} on 127.0.0.1:$TARGET_PORT"
 echo "file:     $MB MiB, sha256 $SHA"
+if [ "$MODE" = "trusted" ]; then
+  echo "auth:     registry + key-only (fast path)"
+else
+  echo "auth:     password (challenged)"
+fi
 echo
-echo "run this on the Windows machine:"
-echo
-echo "  powershell -ExecutionPolicy Bypass -File scripts\\soak\\mux-windows.ps1 \\"
-echo "    -Secret $SECRET -Password $PASSWORD \\"
-echo "    -ExpectedSha $SHA -ExpectedBytes $BYTES -MB $MB"
-echo
-echo "morning summary:"
-echo "  node scripts/soak/summarize.js <csv>   # client csv is on Windows"
+echo "creds file: $D/creds.txt"
