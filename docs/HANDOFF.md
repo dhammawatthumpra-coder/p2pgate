@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-16
-สถานะ: **v1.13.0 พร้อม publish** (mux บน fast-path; ทดสอบข้ามเครื่องแล้ว)
+สถานะ: **v1.13.0 released** (npm + GitHub Release; Termux/Windows อัปเกรดแล้ว)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -47,13 +47,13 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | รายการ | ค่า |
 |---|---|
 | Version | `1.13.0` (mux บน fast-path: capability + peek 200 ms) |
-| npm `latest` | `1.12.1` (1.13.0 ยังไม่ publish) |
+| npm `latest` | `1.13.0` |
 | Git branch | `main` |
-| Commit | ดู `git log --oneline -1` |
-| Tag | `v1.13.0` (หลัง commit) |
-| GitHub Release | ยังไม่สร้าง (รอ publish) |
-| Working tree | clean หลัง commit |
-| Tests | `npm test` → **71 checks PASSED** (Windows + self-test) |
+| Commit | `08d96b6 feat(mux): negotiate mux on the fast path; ship v1.13.0` |
+| Tag | `v1.13.0` |
+| GitHub Release | `v1.13.0` = Latest |
+| Working tree | clean หลัง commit docs |
+| Tests | `npm test` → **71 checks PASSED** (Windows + Termux 1.13.0) |
 | src | 22 ไฟล์ (`src/mux.js` ใหม่), `src/self-test.js` ~1,900 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
@@ -397,7 +397,7 @@ p2pgate unlock --list
 | NAT บางรูปแบบ | ยังไม่ครอบคลุม |
 | mux บนอุปกรณ์จริง | ✅ 1.12.1 (Windows→Termux, 1 carrier/3 channels) และ 1.13.0 trusted device (`fastpath=1`) |
 | mux โอนไฟล์ใหญ่ | ✅ 1.12.1: 8/32 MiB upload+echo, 16 MiB download, 8 channels × 4 MiB — SHA-256 ตรง |
-| 1.12.1 บน Termux | ✅ ติดตั้ง + `npm test` 66 checks + โอน 8 MiB (mux/dedicated) SHA-256 ตรง (`docs/SOAK.md` §1.3) |
+| 1.13.0 บนอุปกรณ์จริง | ✅ Termux + Windows global 1.13.0; trusted device จริงได้ `MUX carrier established … fastpath=1` และ SSH banner ผ่าน |
 | mux กับ trusted/fastpath | ✅ 1.13.0 — capability + peek 200 ms; client/server 1.12 ยังทำงานเดิม |
 | TUN / subnet routing | ไม่รองรับ (Termux ทำไม่ได้ถ้าไม่ root) |
 | i18n legacy commands | แปลไม่ครบ (setup/server/connect/help แปลแล้ว) |
