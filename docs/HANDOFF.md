@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-16
-สถานะ: **v1.13.2 พร้อม publish** (hotfix: fast-path peek ทำข้อมูลแรกหาย)
+สถานะ: **v1.13.2 released** (hotfix: fast-path peek ทำข้อมูลแรกหาย)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -47,13 +47,13 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | รายการ | ค่า |
 |---|---|
 | Version | `1.13.2` (hotfix: peek ต้อง forward ไบต์ดิบทั้งหมด) |
-| npm `latest` | `1.13.1` (1.13.2 ยังไม่ publish) |
+| npm `latest` | `1.13.2` |
 | Git branch | `main` |
-| Commit | ดู `git log --oneline -1` |
-| Tag | `v1.13.2` (หลัง commit) |
-| GitHub Release | ยังไม่สร้าง (รอ publish) |
-| Working tree | clean หลัง commit |
-| Tests | `npm test` → **73 checks PASSED** |
+| Commit | `1fb901a fix(auth): forward every peeked byte on fast path; ship v1.13.2` |
+| Tag | `v1.13.2` |
+| GitHub Release | `v1.13.2` = Latest |
+| Working tree | clean หลัง commit docs |
+| Tests | `npm test` → **73 checks PASSED** (Windows + Termux 1.13.2) |
 | src | 22 ไฟล์ (`src/mux.js` ใหม่), `src/self-test.js` ~1,900 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
@@ -417,6 +417,7 @@ p2pgate unlock --list
 | mux โอนไฟล์ใหญ่ | ✅ 1.12.1: 8/32 MiB upload+echo, 16 MiB download, 8 channels × 4 MiB — SHA-256 ตรง |
 | 1.13.0 บนอุปกรณ์จริง | ✅ Termux + Windows global 1.13.0; trusted device จริงได้ `MUX carrier established … fastpath=1` และ SSH banner ผ่าน |
 | 1.13.1 บนอุปกรณ์จริง | ✅ npm ผ่าน validation, Termux/Windows 1.13.1, server หลักรีสตาร์ต, `ping` ผ่าน, `--mux` trusted ได้ `fastpath=1` |
+| 1.13.2 (hotfix) | ✅ SSH จริงผ่าน tunnel แบบไม่ใช้ mux (`ssh … 'echo SSH_OK'` → exit 0) บน setup จริง Windows↔Termux |
 | mux กับ trusted/fastpath | ✅ 1.13.0 — capability + peek 200 ms; client/server 1.12 ยังทำงานเดิม |
 | TUN / subnet routing | ไม่รองรับ (Termux ทำไม่ได้ถ้าไม่ root) |
 | i18n legacy commands | แปลไม่ครบ (setup/server/connect/help แปลแล้ว) |
