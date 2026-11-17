@@ -11,8 +11,9 @@ if (!file || !fs.existsSync(file)) {
   process.exit(1)
 }
 
-const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean)
-const header = lines.shift().split(',')
+const rawLines = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean)
+const header = rawLines[0].split(',')
+const lines = rawLines.slice(1)
 
 if (header[0] === 'time' && header.includes('ok')) {
   const rows = lines.map((line) => {
@@ -104,8 +105,8 @@ if (header[0] === 'time' && header.includes('ok')) {
   process.exit(failed.length === 0 || clusters.every((c) => c.recovered) ? 0 : 1)
 }
 
-if (header.includes('rss_kb') || header[0] === 'time') {
-  const rows = lines.map((line) => line.split(',')).filter((cells) => cells.length >= 2)
+if (header[0] !== 'time' || header.includes('rss_kb')) {
+  const rows = rawLines.map((line) => line.split(',')).filter((cells) => cells.length >= 3)
   const values = rows
     .map((cells) => Number(cells[2]))
     .filter((value) => Number.isFinite(value) && value > 0)

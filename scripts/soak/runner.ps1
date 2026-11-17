@@ -49,5 +49,12 @@ try {
 } catch {
   Write-RunnerLog ("CRASH {0}" -f ($_.Exception.Message -replace "`r?`n", ' | '))
   Write-RunnerLog ("CRASH at {0}" -f $_.ScriptStackTrace.Split("`n")[0])
-  exit 1
+}
+
+# Always leave a report behind, even after a crash.
+try {
+  & (Join-Path $PSScriptRoot 'report.ps1') | Out-Null
+  Write-RunnerLog 'REPORT written to report.txt'
+} catch {
+  Write-RunnerLog ("REPORT failed: {0}" -f $_.Exception.Message)
 }
