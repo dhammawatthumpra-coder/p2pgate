@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-16
-สถานะ: **v1.13.0 released** (npm + GitHub Release; Termux/Windows อัปเกรดแล้ว)
+สถานะ: **v1.13.1 พร้อม publish** (`--socks5` ใช้ mux เป็นค่าเริ่มต้น)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -13,7 +13,7 @@
 วางข้อความนี้ใน session ใหม่:
 
 ```text
-โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.13.0)
+โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.13.1)
 อ่าน docs/HANDOFF.md ก่อน แล้วสรุปสถานะปัจจุบันและรอคำสั่ง
 ```
 
@@ -46,14 +46,14 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.13.0` (mux บน fast-path: capability + peek 200 ms) |
-| npm `latest` | `1.13.0` |
+| Version | `1.13.1` (`--socks5` ใช้ mux default + `--no-mux`) |
+| npm `latest` | `1.13.0` (1.13.1 ยังไม่ publish) |
 | Git branch | `main` |
-| Commit | `08d96b6 feat(mux): negotiate mux on the fast path; ship v1.13.0` |
-| Tag | `v1.13.0` |
-| GitHub Release | `v1.13.0` = Latest |
-| Working tree | clean หลัง commit docs |
-| Tests | `npm test` → **71 checks PASSED** (Windows + Termux 1.13.0) |
+| Commit | ดู `git log --oneline -1` |
+| Tag | `v1.13.1` (หลัง commit) |
+| GitHub Release | ยังไม่สร้าง (รอ publish) |
+| Working tree | clean หลัง commit |
+| Tests | `npm test` → **72 checks PASSED** |
 | src | 22 ไฟล์ (`src/mux.js` ใหม่), `src/self-test.js` ~1,900 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
@@ -69,6 +69,14 @@ npm view p2pgate version
 ---
 
 ## 3. ประวัติรุ่น (สรุป)
+
+### v1.13.1 (default mux for socks)
+
+- `--socks5` เปิด mux เป็นค่าเริ่มต้น (tunnel ปกติยัง opt-in), เพิ่ม `--no-mux`
+  (ชนะ `--mux`/config) และ client config `"mux": false`
+- logic อยู่ใน `resolveMuxEnabled()` (client) ทดสอบได้ด้วย unit test
+- แก้ self-test harness `readExactly()` ที่ทิ้งไบต์ส่วนเกิน (reply+banner มา packet เดียว)
+- self-test: 72 checks
 
 ### v1.13.0 (fast-path mux)
 
@@ -282,7 +290,7 @@ p2pgate connect -s <masterSecret> -p <password>
 | `src/keygen.js` | client key + passphrase protection |
 | `src/setup-wizard.js` | advanced setup + `--easy` + i18n |
 | `src/i18n.js` | `P2PGATE_LANG` / `--lang` / `t(th, en)` |
-| `src/self-test.js` | 71 checks รวม password, targets, SOCKS5, UDP, ping, hosts, audit, mux, peek |
+| `src/self-test.js` | 72 checks รวม password, targets, SOCKS5, UDP, ping, hosts, audit, mux, peek, mux default |
 | `src/mux.js` | mux framing, `MuxCarrier`, `MuxChannel`, flow control, idle/keepalive |
 
 Docs: `docs/specs/phase7-v1.6.0.md` (spec), `docs/releases/v1.6.3.md` (patch notes),
@@ -408,15 +416,12 @@ p2pgate unlock --list
 
 เรียงตามความคุ้ม:
 
-1. **Publish v1.13.0 + soak trusted device** — `npm publish` (OTP), GitHub Release,
-   อัปเกรด Termux/server หลักเป็น 1.13.0, แล้ว soak ด้วย trusted device 4 ชม.
-   (`scripts/soak/`, ต้องตั้ง `allowedClientKeys` ของ soak server ให้ตรงกับ key ที่ใช้)
-2. **ตัดสินใจเปิด default ของ `--mux`** — หลักฐานครบแล้ว: 4 ชม. trusted device
-   ผ่าน 80/80, carrier เดียว, RSS ลดลง (`docs/SOAK.md` §1.6) และ password mode
-   ผ่าน 79/79 (§1.5) — เสนอทำใน 1.13.x: default เฉพาะ `--socks5`, มี `--no-mux`
-   และ config `mux: false` สำหรับถอยกลับ
-3. **Network switching** — ปิด/เปิด Wi-Fi, สลับ 4G, ดูว่า reconnect เองได้
-4. **Soak mux 24 ชม. + multi-client** — ต่อยอดจาก 4 ชม. (§1.5–1.6)
+1. **Publish v1.13.1 + ทดสอบ SOCKS จริง** — `npm publish` (OTP), GitHub Release,
+   อัปเกรด Termux/Windows, แล้วลอง `connect --socks5` ด้วยเบราว์เซอร์จริง
+   (mux default) เทียบกับ `--no-mux`
+2. **Network switching** — ปิด/เปิด Wi-Fi, สลับ 4G, ดูว่า reconnect เองได้
+   (สำคัญขึ้นเมื่อ mux เป็น default เพราะ carrier ตาย = ทุก channel ตายพร้อมกัน)
+3. **Soak mux 24 ชม. + multi-client** — ต่อยอดจาก 4 ชม. (§1.5–1.6)
 3. **เปิด `--mux` เป็น default ของ `--socks5`** — หลัง soak mux ผ่าน (1.12.x)
 4. **เปิด CI** — แก้ billing หรือย้ายไป CI อื่น (workflow มีอยู่แต่ disable)
 5. **SOCKS5 ส่วนขยาย** — IPv6 destinations, UDP ASSOCIATE

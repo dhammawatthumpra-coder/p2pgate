@@ -29,6 +29,7 @@ Markdown for easier review and diffing.
 - [Session handoff](HANDOFF.md) — current state, invariants, next steps
 - [Soak test record](SOAK.md) — overnight run results and next-round template
 - [Running as a service](SERVICE.md) — Termux, systemd, Windows
+- [Release notes v1.13.1](releases/v1.13.1.md)
 - [Release notes v1.13.0](releases/v1.13.0.md)
 - [Release notes v1.12.1](releases/v1.12.1.md)
 - [Release notes v1.12.0](releases/v1.12.0.md)

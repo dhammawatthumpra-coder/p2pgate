@@ -64,11 +64,12 @@ const HELP_TEXT = `p2pgate v${version} — อุโมงค์ TCP/UDP แบ�
       --port: เปลี่ยนพอร์ตปลายทางเฉพาะรอบนี้ (ไม่บันทึก)
 
   p2pgate connect [-s <masterSecret>] [-p <password>] [--port <localPort>]
-      [--target <name>] [--socks5 <port>] [--mux]
+      [--target <name>] [--socks5 <port>] [--mux | --no-mux]
       เชื่อมต่อจาก Client และสร้าง client key อัตโนมัติ
       --target: เลือก service ที่ประกาศไว้ใน targets ของ Server
       --socks5: เปิด SOCKS5 gateway ในเครื่อง (allowlist อยู่ที่ Server)
       --mux: ใช้ carrier เดียวหลาย channels (ได้ทั้ง password และ trusted device)
+      --no-mux: ปิด mux (SOCKS5 เปิด mux เป็นค่าเริ่มต้นตั้งแต่ 1.13.1)
 
   p2pgate setup [--easy] [--mode server|client] [--config <path>]
       ตั้งค่าแบบ advanced
@@ -79,7 +80,7 @@ const HELP_TEXT = `p2pgate v${version} — อุโมงค์ TCP/UDP แบ�
       --passphrase: ตั้ง/เปลี่ยน passphrase สำหรับ client key
 
   p2pgate client [--config <path>] [--port <localPort>] [--pin-stdin]
-      [--key-passphrase-stdin] [--target <name>] [--mux]
+      [--key-passphrase-stdin] [--target <name>] [--mux | --no-mux]
       เริ่มอุโมงค์แบบ advanced (ใช้ config ที่ตั้งไว้แล้ว)
 
   p2pgate devices list [--config <path>]
@@ -628,6 +629,16 @@ function parseSocksFlag(value) {
   return port
 }
 
+/**
+ * CLI mux flag -> startClient option. undefined means "let startClient decide"
+ * (socks5 defaults to mux, everything else stays opt-in).
+ */
+function resolveMuxFlag(values) {
+  if (values['no-mux'] === true) return false
+  if (values.mux === true) return true
+  return undefined
+}
+
 async function waitForShutdownSignal() {
   return new Promise((resolve) => {
     const signals = ['SIGINT', 'SIGTERM']
@@ -840,7 +851,7 @@ async function commandClient(values) {
     keyPassphrase,
     target: values.target === undefined ? undefined : String(values.target),
     socksPort: parseSocksFlag(values.socks5),
-    mux: values.mux === true
+    mux: resolveMuxFlag(values)
   })
   const address = client.address()
 
@@ -1093,7 +1104,7 @@ async function commandConnect(values, positionals) {
   const client = await startClient(config, {
     credential: password,
     socksPort,
-    mux: values.mux === true
+    mux: resolveMuxFlag(values)
   })
   const address = client.address()
 
@@ -2483,6 +2494,7 @@ async function main(argv) {
         count: { type: 'string' },
         watch: { type: 'boolean' },
         mux: { type: 'boolean' },
+  'no-mux': { type: 'boolean' },
         ttl: { type: 'string' },
         idle: { type: 'string' },
         once: { type: 'boolean' },

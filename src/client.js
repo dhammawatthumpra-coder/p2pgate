@@ -905,7 +905,7 @@ async function startClient(config, options = {}) {
   let muxCarrier = null
   let muxPending = null
   let muxUnsupported = false
-  const muxEnabled = options.mux === true
+  const muxEnabled = resolveMuxEnabled(options, config, socksMode)
 
   async function requestMuxUpgrade(stream, capability) {
     try {
@@ -1650,6 +1650,20 @@ async function startClient(config, options = {}) {
   }
 }
 
+/**
+ * mux is opt-in for plain tunnels and on by default for the SOCKS5 gateway:
+ * a browser page opens 20-40 connections, each of which would otherwise pay a
+ * full DHT lookup. `--no-mux` or `"mux": false` in the client config turn it off.
+ */
+function resolveMuxEnabled(options, config, socksMode) {
+  if (options.mux === true) return true
+  if (options.mux === false) return false
+  if (config.mux === false) return false
+
+  return socksMode === true
+}
+
 module.exports = {
-  startClient
+  startClient,
+  resolveMuxEnabled
 }

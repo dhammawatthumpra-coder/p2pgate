@@ -635,7 +635,7 @@ function normalizeConfig(raw) {
     udpTargets: mode === 'server' ? normalizeUdpTargets(raw.udpTargets) : undefined,
     udpTarget,
     udpListen,
-    mux: mode === 'server' ? parseBoolean(raw.mux, 'mux', true) : undefined,
+    mux: parseBoolean(raw.mux, 'mux', true),
     muxPeekMs: mode === 'server' ? parseMuxPeekMs(raw.muxPeekMs) : undefined,
     localPort: parsePort(
       raw.localPort === undefined ? base.localPort : raw.localPort,

@@ -828,10 +828,12 @@ sessions. Timers are in memory only.
 ## 9.11) Multiplexing (`--mux`)
 
 ```sh
-p2pgate connect -s <secret> -p <password> --socks5 1080 --mux
+p2pgate connect -s <secret> -p <password> --socks5 1080
 p2pgate client --config client.json --mux
 ```
 
+- `--socks5` uses mux by default since 1.13.1; plain tunnels stay opt-in
+- `--no-mux` (or `"mux": false` in `client.json`) turns it off
 - one authenticated carrier, up to **128 channels**
 - each channel carries one target or one SOCKS destination
 - 16 KiB frames, 256 KiB window per direction, 64 KiB queue cap
@@ -1134,7 +1136,8 @@ Messages never contain the PIN or password.
 | `p2pgate connect -s <secret> -p <password>` | One-line client connect |
 | `p2pgate connect --target <name>` | Connect to a named target declared on the Server |
 | `p2pgate connect --socks5 <port>` | Start a local SOCKS5 gateway (server allowlist) |
-| `p2pgate connect --socks5 <port> --mux` | Reuse one carrier for many channels |
+| `p2pgate connect --socks5 <port>` | Start a local SOCKS5 gateway (mux on by default) |
+| `p2pgate connect --socks5 <port> --no-mux` | SOCKS5 without multiplexing |
 | `p2pgate master show [--reveal]` | Print the masterSecret fingerprint |
 | `p2pgate master reset --yes` | Rotate masterSecret with a timestamped backup |
 | `p2pgate config validate` | Validate a config file (exit 1 when invalid) |
@@ -1373,7 +1376,8 @@ p2pgate/
 │   │   ├── v1.11.4.md
 │   │   ├── v1.12.0.md
 │   │   ├── v1.12.1.md
-│   │   └── v1.13.0.md
+│   │   ├── v1.13.0.md
+│   │   └── v1.13.1.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md

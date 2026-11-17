@@ -7,6 +7,27 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.13.1] - 2026-11-17
+
+### Changed
+
+- **`--socks5` เปิด mux เป็นค่าเริ่มต้น** — `p2pgate connect --socks5 <port>` และ
+  `p2pgate client --socks5` ใช้ carrier เดียวโดยไม่ต้องใส่ `--mux` (โหมด tunnel ปกติ
+  ยังเป็น opt-in เหมือนเดิม) เพราะหน้าเว็บหนึ่งหน้าอาจเปิด 20–40 connection
+- เพิ่ม `--no-mux` (ชนะ `--mux` และ config) และ client config `"mux": false`
+  สำหรับผู้ที่ต้องการปิด
+- help/README อัปเดต: ตาราง flag และคำอธิบาย default ต่อโหมด
+
+### Fixed
+
+- self-test harness: `readExactly()` เคยทิ้งไบต์ส่วนเกินเมื่อ reply กับข้อมูลแรก
+  มาใน packet เดียว (เจอตอน socks+mux ที่ reply 10 ไบต์กับ banner 20 ไบต์ coalesce)
+  — ตอนนี้เก็บส่วนเกินไว้ต่อ socket และใช้ต่อใน read ถัดไป
+
+### Tests
+
+- `npm test` → **72 checks** (เพิ่มการตรวจ default ของ mux ต่อโหมด + `--no-mux`)
+
 ## [1.13.0] - 2026-11-17
 
 ### Added

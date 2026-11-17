@@ -28,7 +28,7 @@ const {
   unprotectClientKey
 } = require('./keygen')
 const { startServer, AlertRateLimiter } = require('./server')
-const { startClient } = require('./client')
+const { startClient, resolveMuxEnabled } = require('./client')
 const { AuthGuard } = require('./auth-guard')
 const {
   DeviceRegistry,
@@ -129,10 +129,20 @@ async function sendAndExpectNoEcho(port, payload, timeoutMs = 8_000) {
   return { closed, received }
 }
 
+const leftoverBySocket = new WeakMap()
+
 function readExactly(socket, length, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const chunks = []
-    let total = 0
+    const buffered = leftoverBySocket.get(socket)
+    if (buffered && buffered.length >= length) {
+      leftoverBySocket.set(socket, buffered.subarray(length))
+      resolve(buffered.subarray(0, length))
+      return
+    }
+
+    const chunks = buffered && buffered.length > 0 ? [buffered] : []
+    let total = buffered ? buffered.length : 0
+    leftoverBySocket.delete(socket)
 
     const cleanup = () => {
       clearTimeout(timer)
@@ -146,8 +156,10 @@ function readExactly(socket, length, timeoutMs) {
       total += chunk.length
 
       if (total >= length) {
+        const all = Buffer.concat(chunks)
+        leftoverBySocket.set(socket, all.subarray(length))
         cleanup()
-        resolve(Buffer.concat(chunks).subarray(0, length))
+        resolve(all.subarray(0, length))
       }
     }
 
@@ -2209,6 +2221,13 @@ async function main() {
     assert.equal(bigPeek.line, null)
     assert.equal(bigPeek.leftover.length, 600)
     checks.push('peekControlLine stops at the byte limit and keeps the payload')
+
+    assert.equal(resolveMuxEnabled({}, { mux: true }, true), true)
+    assert.equal(resolveMuxEnabled({}, { mux: true }, false), false)
+    assert.equal(resolveMuxEnabled({ mux: false }, { mux: true }, true), false)
+    assert.equal(resolveMuxEnabled({}, { mux: false }, true), false)
+    assert.equal(resolveMuxEnabled({ mux: true }, { mux: false }, false), true)
+    checks.push('mux defaults on for socks5, off for plain tunnels, --no-mux wins')
 
     // mux backpressure: a full window must stop accepting and later drain
     const unitFrames = []

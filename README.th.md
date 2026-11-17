@@ -809,10 +809,12 @@ timer อยู่ในหน่วยความจำเท่านั้�
 ## 9.11) Multiplexing (`--mux`)
 
 ```sh
-p2pgate connect -s <secret> -p <password> --socks5 1080 --mux
+p2pgate connect -s <secret> -p <password> --socks5 1080
 p2pgate client --config client.json --mux
 ```
 
+- `--socks5` ใช้ mux เป็นค่าเริ่มต้นตั้งแต่ 1.13.1; tunnel ปกติยังเป็น opt-in
+- `--no-mux` (หรือ `"mux": false` ใน `client.json`) ปิด mux
 - carrier เดียว authenticate ครั้งเดียว, สูงสุด **128 channels**
 - 1 channel = 1 target หรือ 1 SOCKS destination
 - frame 16 KiB, window 256 KiB ต่อทิศ, queue cap 64 KiB
@@ -1109,7 +1111,8 @@ tail -f ~/.p2pgate/server.log
 | `p2pgate connect -s <secret> -p <password>` | เชื่อมต่อแบบบรรทัดเดียว |
 | `p2pgate connect --target <name>` | เชื่อมต่อ target ที่ประกาศไว้บน Server |
 | `p2pgate connect --socks5 <port>` | เปิด SOCKS5 gateway ในเครื่อง (allowlist อยู่ที่ Server) |
-| `p2pgate connect --socks5 <port> --mux` | ใช้ carrier เดียวหลาย channels |
+| `p2pgate connect --socks5 <port>` | เปิด SOCKS5 gateway (mux เปิดเป็นค่าเริ่มต้น) |
+| `p2pgate connect --socks5 <port> --no-mux` | SOCKS5 แบบไม่ใช้ mux |
 | `p2pgate master show [--reveal]` | แสดง fingerprint ของ masterSecret |
 | `p2pgate master reset --yes` | หมุน masterSecret พร้อมสำรอง config |
 | `p2pgate config validate` | ตรวจ config (exit 1 ถ้าผิด) |
@@ -1347,7 +1350,8 @@ p2pgate/
 │   │   ├── v1.11.4.md
 │   │   ├── v1.12.0.md
 │   │   ├── v1.12.1.md
-│   │   └── v1.13.0.md
+│   │   ├── v1.13.0.md
+│   │   └── v1.13.1.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md
