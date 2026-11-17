@@ -42,7 +42,8 @@ const {
 } = require('./control')
 const { AuditLog } = require('./audit-log')
 const { runDoctor } = require('./doctor')
-const { readControlLine, decodeControl, AUTH_STATUS } = require('./auth')
+const { readControlLine, decodeControl, peekControlLine, AUTH_STATUS } = require('./auth')
+const { PassThrough } = require('node:stream')
 const { normalizeConfig } = require('./config-loader')
 const { rotateMasterSecret, fingerprint } = require('./master')
 const { redactConfig } = require('./config-tools')
@@ -2184,6 +2185,31 @@ async function main() {
     assert.equal(muxFrames[0].payload.toString(), 'abc')
     checks.push('mux framing round-trips a frame')
 
+    // fast-path peek: line + trailing bytes, payload without newline, oversized input
+    const peekStream = new PassThrough()
+    const peekResult = peekControlLine(peekStream, { timeoutMs: 50, maxBytes: 512 })
+    peekStream.write('{"v":3,"mux":{"version":1}}\nrest')
+    const peeked = await peekResult
+    assert.equal(peeked.line, '{"v":3,"mux":{"version":1}}')
+    assert.equal(peeked.leftover.toString(), 'rest')
+    checks.push('peekControlLine returns the line and trailing bytes')
+
+    const payloadStream = new PassThrough()
+    const payloadResult = peekControlLine(payloadStream, { timeoutMs: 30, maxBytes: 512 })
+    payloadStream.write(Buffer.from('{"a":1}'))
+    const payloadPeek = await payloadResult
+    assert.equal(payloadPeek.line, null)
+    assert.equal(payloadPeek.leftover.toString(), '{"a":1}')
+    checks.push('peekControlLine keeps newline-less payload as leftover')
+
+    const bigStream = new PassThrough()
+    const bigResult = peekControlLine(bigStream, { timeoutMs: 30, maxBytes: 512 })
+    bigStream.write(Buffer.alloc(600, 0x41))
+    const bigPeek = await bigResult
+    assert.equal(bigPeek.line, null)
+    assert.equal(bigPeek.leftover.length, 600)
+    checks.push('peekControlLine stops at the byte limit and keeps the payload')
+
     // mux backpressure: a full window must stop accepting and later drain
     const unitFrames = []
     const unitStream = new EventEmitter()
@@ -2355,10 +2381,67 @@ async function main() {
     )
     const fastMuxPayload = crypto.randomBytes(32)
     assert.deepEqual(await echoThrough(fastMuxClient, fastMuxPayload), fastMuxPayload)
-    assert.equal(fastMuxClient.muxActive, false)
-    checks.push('mux falls back on a fast-path session')
+    assert.equal(fastMuxClient.muxActive, true)
+    checks.push('mux works on a fast-path session')
     await fastMuxClient.close()
+
+    // A non-mux client on the same server must have its payload forwarded verbatim,
+    // including a first byte of "{" that must not be mistaken for an upgrade.
+    const fastPlainClient = await startTestClient(
+      unauthorizedKeyPath,
+      undefined,
+      { base: { ...clientBase, masterSecret: fastMuxSecret }, mux: false }
+    )
+    const jsonPayload = Buffer.from('{"a":1}\n')
+    assert.deepEqual(await echoThrough(fastPlainClient, jsonPayload), jsonPayload)
+    assert.equal(fastPlainClient.muxActive, false)
+    checks.push('fast-path peek forwards payload that starts with {')
+    await fastPlainClient.close()
     await fastMuxServer.close()
+
+    // Server with mux disabled must not advertise it; the client falls back once.
+    const noMuxSecret = crypto.randomBytes(32).toString('hex')
+    const noMuxConfig = {
+      mode: 'server',
+      masterSecret: noMuxSecret,
+      authMode: 'registry',
+      targetHost: '127.0.0.1',
+      targetPort: echoPort,
+      localPort: 8022,
+      clientKeyPath: path.join(tempDir, 'nomux-server-key.json'),
+      allowedClientKeys: [fastMuxKey.publicKey],
+      verificationMode: 'key-only',
+      mux: false,
+      trustedDevicesFile: path.join(tempDir, 'nomux-devices'),
+      auditLog: { enabled: false },
+      customBootstrap: bootstrap,
+      authPin: { enabled: false, unattended: null },
+      telegramAlert: { enabled: false, botToken: '', chatId: '' }
+    }
+    const noMuxServer = await startServer(noMuxConfig, {
+      log: quiet,
+      showSessionPin: false,
+      sendStartupAlert: false,
+      failDelayMs: [10, 20],
+      lockoutStatePath: path.join(tempDir, 'nomux-lockout.json'),
+      authTimeoutMs: 4_000,
+      interactive: false,
+      controlSocketPath: controlPathFor('nomux'),
+      controlTokenPath: path.join(tempDir, 'control-nomux.token')
+    })
+    extraServers.push(noMuxServer)
+
+    const noMuxClient = await startTestClient(
+      unauthorizedKeyPath,
+      undefined,
+      { base: { ...clientBase, masterSecret: noMuxSecret }, mux: true }
+    )
+    const noMuxPayload = crypto.randomBytes(32)
+    assert.deepEqual(await echoThrough(noMuxClient, noMuxPayload), noMuxPayload)
+    assert.equal(noMuxClient.muxActive, false)
+    checks.push('mux is not advertised when the server disables it')
+    await noMuxClient.close()
+    await noMuxServer.close()
   } finally {
     if (originalSocket) {
       try {

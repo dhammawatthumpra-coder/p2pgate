@@ -124,6 +124,84 @@ function readControlLine(stream, options = {}) {
 }
 
 /**
+ * Reads one control line for the fast-path mux peek. Unlike readControlLine this
+ * never rejects: on timeout, close or oversized input it resolves with
+ * { line: null, leftover } so the caller can forward the bytes it read as payload.
+ */
+function peekControlLine(stream, options = {}) {
+  const timeoutMs = Number.isInteger(options.timeoutMs) ? options.timeoutMs : 200
+  const maxBytes = Number.isInteger(options.maxBytes) ? options.maxBytes : 512
+
+  return new Promise((resolve) => {
+    if (stream.destroyed) {
+      resolve({ line: null, leftover: Buffer.alloc(0) })
+      return
+    }
+
+    let buffer = Buffer.alloc(0)
+    let timer = null
+    let settled = false
+
+    const finish = (line) => {
+      if (settled) return
+      settled = true
+
+      if (timer !== null) {
+        clearTimeout(timer)
+        timer = null
+      }
+
+      stream.removeListener('data', onData)
+      stream.removeListener('error', onError)
+      stream.removeListener('close', onClose)
+      stream.removeListener('end', onEnd)
+
+      // Keep the stream paused until the caller attaches the real pipe/mux parser.
+      try {
+        stream.pause()
+      } catch {
+        // Ignore.
+      }
+
+      resolve({ line, leftover: buffer })
+    }
+
+    const onData = (chunk) => {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      buffer = Buffer.concat([buffer, bytes])
+
+      const newline = buffer.indexOf(0x0a)
+      if (newline !== -1) {
+        if (newline > maxBytes) {
+          finish(null)
+          return
+        }
+
+        const line = buffer.subarray(0, newline).toString('utf8').replace(/\r$/, '')
+        buffer = buffer.subarray(newline + 1)
+        finish(line)
+        return
+      }
+
+      if (buffer.length >= maxBytes) finish(null)
+    }
+
+    const onError = () => finish(null)
+    const onClose = () => finish(null)
+    const onEnd = () => finish(null)
+
+    if (timeoutMs > 0) {
+      timer = setTimeout(() => finish(null), timeoutMs)
+    }
+
+    stream.on('data', onData)
+    stream.once('error', onError)
+    stream.once('close', onClose)
+    stream.once('end', onEnd)
+  })
+}
+
+/**
  * Reads a secret without echoing it to the terminal. Requires a TTY; for
  * non-interactive use, pass --pin-stdin or P2PGATE_PIN instead.
  */
@@ -225,5 +303,6 @@ module.exports = {
   encodeControl,
   decodeControl,
   readControlLine,
+  peekControlLine,
   promptHidden
 }

@@ -68,7 +68,7 @@ const HELP_TEXT = `p2pgate v${version} — อุโมงค์ TCP/UDP แบ�
       เชื่อมต่อจาก Client และสร้าง client key อัตโนมัติ
       --target: เลือก service ที่ประกาศไว้ใน targets ของ Server
       --socks5: เปิด SOCKS5 gateway ในเครื่อง (allowlist อยู่ที่ Server)
-      --mux: ใช้ carrier เดียวหลาย channels (เฉพาะ session ที่ถูก challenge)
+      --mux: ใช้ carrier เดียวหลาย channels (ได้ทั้ง password และ trusted device)
 
   p2pgate setup [--easy] [--mode server|client] [--config <path>]
       ตั้งค่าแบบ advanced

@@ -1,6 +1,6 @@
 # Phase 15 — mux over fast-path (trusted devices)
 
-**Status:** design draft (target v1.13.0)
+**Status:** implemented in v1.13.0 (opt-in `--mux`, now also on fast-path)
 **Baseline:** `p2pgate v1.12.1`
 **Related:** [`phase14-mux.md`](phase14-mux.md)
 

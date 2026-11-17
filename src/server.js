@@ -25,7 +25,8 @@ const {
   AUTH_STATUS,
   encodeControl,
   decodeControl,
-  readControlLine
+  readControlLine,
+  peekControlLine
 } = require('./auth')
 const { AuthGuard } = require('./auth-guard')
 const {
@@ -71,6 +72,31 @@ const LOCAL_CONNECT_TIMEOUT_MS = 10_000
 const TELEGRAM_TIMEOUT_MS = 5_000
 const MAX_ALERT_TRACKED_KEYS = 1000
 const PRE_AUTH_TIMEOUT_MS = 120_000
+const DEFAULT_MUX_PEEK_MS = 200
+const MAX_MUX_UPGRADE_BYTES = 512
+
+/**
+ * True only for a well-formed mux upgrade line from a fast-path client:
+ * JSON object, matching protocol version, and a supported mux version.
+ */
+function isMuxUpgradeLine(line) {
+  if (typeof line !== 'string' || line.trim() === '') return false
+
+  let parsed
+  try {
+    parsed = JSON.parse(line)
+  } catch {
+    return false
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false
+  if (parsed.v !== AUTH_VERSION) return false
+
+  const mux = parsed.mux
+  if (!mux || typeof mux !== 'object' || Array.isArray(mux)) return false
+
+  return Number(mux.version) === MUX_VERSION
+}
 
 function noop() {}
 
@@ -501,6 +527,12 @@ async function startServer(config, options = {}) {
   const localConnectTimeoutMs = Number.isInteger(options.localConnectTimeoutMs)
     ? options.localConnectTimeoutMs
     : LOCAL_CONNECT_TIMEOUT_MS
+  const muxPeekMs = Number.isInteger(options.muxPeekMs)
+    ? options.muxPeekMs
+    : (Number.isInteger(config.muxPeekMs) ? config.muxPeekMs : DEFAULT_MUX_PEEK_MS)
+  const muxAllowed = options.mux === undefined
+    ? config.mux !== false
+    : options.mux !== false
   const nowMs = typeof options.now === 'function' ? options.now : Date.now
 
   const dhtOptions = {}
@@ -907,16 +939,53 @@ async function startServer(config, options = {}) {
     }
 
     if (decision.action === 'fastpath') {
+      const advertiseMux = muxAllowed && muxPeekMs > 0
+      const capability = {
+        version: MUX_VERSION,
+        maxChannels: DEFAULT_MAX_CHANNELS
+      }
+
       writeAuthMessage(stream, {
         v: AUTH_VERSION,
-        status: AUTH_STATUS.FASTPATH_READY
+        status: AUTH_STATUS.FASTPATH_READY,
+        ...(advertiseMux ? { mux: capability } : {})
       })
       writeLog(`FASTPATH client=${remoteHex}`)
+
+      if (!advertiseMux) {
+        void audit.record('auth.fastpath', {
+          source: 'server',
+          key: remoteHex
+        })
+        return { ok: true, leftover: Buffer.alloc(0) }
+      }
+
+      // Bounded peek: an upgraded client asks for mux immediately, anything else
+      // (including old clients that start sending payload at once) is forwarded.
+      const peek = await peekControlLine(stream, {
+        timeoutMs: muxPeekMs,
+        maxBytes: MAX_MUX_UPGRADE_BYTES
+      })
+      const upgraded = isMuxUpgradeLine(peek.line)
+
       void audit.record('auth.fastpath', {
         source: 'server',
-        key: remoteHex
+        key: remoteHex,
+        mux: upgraded
       })
-      return { ok: true, leftover: Buffer.alloc(0) }
+
+      if (!upgraded) {
+        writeLog(`FASTPATH mux=0 client=${remoteHex}`)
+        return { ok: true, leftover: peek.leftover }
+      }
+
+      writeAuthMessage(stream, {
+        v: AUTH_VERSION,
+        mux: capability
+      })
+      writeLog(`FASTPATH mux=1 client=${remoteHex}`)
+
+      return { ok: true, mux: true, leftover: peek.leftover }
     }
 
     writeAuthMessage(stream, {

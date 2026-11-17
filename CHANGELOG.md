@@ -7,6 +7,36 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.13.0] - 2026-11-17
+
+### Added
+
+- **mux บน fast-path (trusted device)** — server ประกาศ `mux` capability ใน
+  `FASTPATH_READY`, client ขอ upgrade ทันที, server รอไม่เกิน `muxPeekMs` (200 ms)
+  แล้วจึงเลือก mux หรือ forward ไบต์ตามเดิม
+- `peekControlLine()` (auth): อ่านบรรทัดแบบไม่ throw — timeout/ปิด/ไบต์เกิน limit
+  จะคืน `{ line: null, leftover }` เพื่อให้ส่งไบต์ต่อได้ครบ
+- config ฝั่ง server: `mux` (default `true`) และ `muxPeekMs` (0–5000, default 200;
+  `0` = พฤติกรรม 1.12)
+- log `FASTPATH mux=1|0` และ audit `auth.fastpath` มี field `mux`
+
+### Changed
+
+- ข้อความ help/README: `--mux` ใช้ได้ทั้ง password และ trusted device
+- ข้อความ fallback ของ client เป็นกลาง: `MUX not available on this server or
+  device; using one stream per connection`
+
+### Compatibility
+
+- client 1.12 + server 1.13: ไม่มี upgrade → server peek แล้ว forward เหมือนเดิม
+- client 1.13 + server 1.12: ไม่มี capability → fallback เงียบ ๆ
+- protocol เดิมไม่เปลี่ยน (`AUTH_VERSION` ยังเป็น 3; capability เป็น field เพิ่ม)
+
+### Tests
+
+- `npm test` → **71 checks** (เพิ่ม peek 3 เคส, mux บน fastpath, payload ขึ้นต้น `{`,
+  server ปิด mux)
+
 ## [1.12.1] - 2026-11-16
 
 ### Fixed

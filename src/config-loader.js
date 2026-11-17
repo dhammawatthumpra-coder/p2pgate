@@ -200,8 +200,19 @@ function parsePort(value, field, { allowZero = false } = {}) {
   return numeric
 }
 
-function parseBoolean(value, field, fallback = false) {
-  if (value === undefined) return fallback
+function parseMuxPeekMs(value) {
+  if (value === undefined || value === null) return undefined
+
+  const numeric = typeof value === 'string' ? Number(value.trim()) : value
+
+  if (!Number.isInteger(numeric) || numeric < 0 || numeric > 5000) {
+    throw new ConfigError('muxPeekMs must be an integer between 0 and 5000', 'CONFIG_INVALID')
+  }
+
+  return numeric
+}
+
+function parseBoolean(value, field, fallback = false) {  if (value === undefined) return fallback
   if (typeof value !== 'boolean') {
     throw new ConfigError(`${field} must be true or false`, 'CONFIG_INVALID')
   }
@@ -624,6 +635,8 @@ function normalizeConfig(raw) {
     udpTargets: mode === 'server' ? normalizeUdpTargets(raw.udpTargets) : undefined,
     udpTarget,
     udpListen,
+    mux: mode === 'server' ? parseBoolean(raw.mux, 'mux', true) : undefined,
+    muxPeekMs: mode === 'server' ? parseMuxPeekMs(raw.muxPeekMs) : undefined,
     localPort: parsePort(
       raw.localPort === undefined ? base.localPort : raw.localPort,
       'localPort',

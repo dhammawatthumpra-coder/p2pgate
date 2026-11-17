@@ -1,4 +1,4 @@
-# p2pgate (v1.12)
+# p2pgate (v1.13)
 
 **English** | [ไทย](README.th.md)
 
@@ -15,10 +15,12 @@ registry**, a **local control plane**, **multi-target routing**, and an optional
 
 Works on Termux/Android, Linux, macOS, and Windows with Node.js 20 or newer.
 
-> Version 1.12 adds **stream multiplexing** (`--mux`): one authenticated carrier
-> with up to 128 channels, so SOCKS5 requests skip the ~2 s DHT lookup.
-> Version 1.11 added ping/traffic counters; 1.10 UDP; 1.9 config validation and
-> per-client SOCKS; 1.8 SOCKS5; 1.7 multi-target; 1.6 zero-setup.
+> Version 1.13 lets **trusted devices use `--mux`** as well: the server advertises
+> mux in `FASTPATH_READY` and waits at most 200 ms for the client's upgrade, so the
+> fast path no longer falls back to one stream per connection.
+> Version 1.12 added stream multiplexing (`--mux`, 128 channels per carrier);
+> 1.11 ping/traffic counters; 1.10 UDP; 1.9 config validation and per-client SOCKS;
+> 1.8 SOCKS5; 1.7 multi-target; 1.6 zero-setup.
 >
 > **Install:** `npm install -g p2pgate`
 >
@@ -837,10 +839,10 @@ p2pgate client --config client.json --mux
 - channel errors keep their codes (`TARGET_UNKNOWN`, `SOCKS_DENIED`, `MUX_BUSY`)
   and fall back to a dedicated stream
 
-**Fast-path limitation:** a trusted device is answered with `FASTPATH_READY`
-before the server reads the proof, so mux cannot be negotiated. `--mux` logs a
-warning and uses one stream per connection. Use a `scram`-profile key (or
-password mode) for mux.
+**Trusted devices:** since 1.13.0 `--mux` also works on the fast path. The server
+advertises mux in `FASTPATH_READY`, the client asks for the upgrade immediately, and
+the server waits at most 200 ms for that line before forwarding bytes to the target.
+Older servers simply do not advertise it and the client falls back quietly.
 
 ---
 
@@ -1370,7 +1372,8 @@ p2pgate/
 │   │   ├── v1.11.3.md
 │   │   ├── v1.11.4.md
 │   │   ├── v1.12.0.md
-│   │   └── v1.12.1.md
+│   │   ├── v1.12.1.md
+│   │   └── v1.13.0.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md

@@ -305,6 +305,10 @@ class MuxCarrier extends EventEmitter {
       (err) => this._fail(err)
     )
 
+    if (Buffer.isBuffer(options.leftover) && options.leftover.length > 0) {
+      this._parser.push(options.leftover)
+    }
+
     stream.on('data', (chunk) => this._parser.push(chunk))
     stream.on('error', (err) => this._fail(err))
     stream.on('close', () => this._fail(new Error('carrier closed')))

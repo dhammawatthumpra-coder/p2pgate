@@ -1,4 +1,4 @@
-# p2pgate (v1.12)
+# p2pgate (v1.13)
 
 [English](README.md) | **ไทย**
 
@@ -14,9 +14,11 @@ CGNAT/ไฟร์วอลล์ โดยไม่ต้องเปิดพ�
 
 ใช้ได้กับ Termux/Android, Linux, macOS และ Windows ที่มี Node.js 20 ขึ้นไป
 
-> เวอร์ชัน 1.12 เพิ่ม **stream multiplexing** (`--mux`): carrier เดียวสูงสุด 128
-> channels ทำให้คำขอ SOCKS5 ไม่ต้องจ่ายค่า DHT lookup ~2 วินาที
-> เวอร์ชัน 1.11 เพิ่ม ping/traffic, 1.10 UDP, 1.9 config validation + SOCKS ต่อ client,
+> เวอร์ชัน 1.13 ทำให้ **trusted device ใช้ `--mux` ได้**: server ประกาศ mux ใน
+> `FASTPATH_READY` และรอ upgrade จาก client ไม่เกิน 200 ms — fast path จึงไม่ต้อง
+> fallback เป็น 1 stream ต่อ connection อีก
+> เวอร์ชัน 1.12 เพิ่ม stream multiplexing (`--mux`, 128 channels ต่อ carrier),
+> 1.11 ping/traffic, 1.10 UDP, 1.9 config validation + SOCKS ต่อ client,
 > 1.8 SOCKS5, 1.7 multi-target, 1.6 zero-setup
 >
 > **ติดตั้ง:** `npm install -g p2pgate`
@@ -818,9 +820,9 @@ p2pgate client --config client.json --mux
 - channel error คงรหัสเดิม (`TARGET_UNKNOWN`, `SOCKS_DENIED`, `MUX_BUSY`)
   และ fallback ไป dedicated stream
 
-**ข้อจำกัด fastpath:** trusted device จะได้ `FASTPATH_READY` ก่อน server อ่าน proof
-จึงใช้ mux ไม่ได้ — `--mux` จะเตือนและใช้ 1 stream ต่อ connection  
-ถ้าต้องการ mux ให้ใช้ key แบบ `scram` หรือ password mode
+**trusted device:** ตั้งแต่ 1.13.0 `--mux` ใช้ได้บน fast path ด้วย — server ประกาศ
+capability ใน `FASTPATH_READY`, client ขอ upgrade ทันที, server รอไม่เกิน 200 ms
+ก่อน forward ไบต์ไป target ถ้า server เก่ากว่า (ไม่ประกาศ) client จะ fallback เงียบ ๆ
 
 ---
 
@@ -1344,7 +1346,8 @@ p2pgate/
 │   │   ├── v1.11.3.md
 │   │   ├── v1.11.4.md
 │   │   ├── v1.12.0.md
-│   │   └── v1.12.1.md
+│   │   ├── v1.12.1.md
+│   │   └── v1.13.0.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md

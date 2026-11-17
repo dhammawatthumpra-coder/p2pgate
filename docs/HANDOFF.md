@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-16
-สถานะ: **v1.12.1 released** (npm + GitHub Release; Termux อัปเกรดและทดสอบแล้ว)
+สถานะ: **v1.13.0 พร้อม publish** (mux บน fast-path; ทดสอบข้ามเครื่องแล้ว)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -13,7 +13,7 @@
 วางข้อความนี้ใน session ใหม่:
 
 ```text
-โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.12.1)
+โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.13.0)
 อ่าน docs/HANDOFF.md ก่อน แล้วสรุปสถานะปัจจุบันและรอคำสั่ง
 ```
 
@@ -38,7 +38,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 |---|---|
 | Repo | https://github.com/dhammawatthumpra-coder/p2pgate |
 | npm | https://www.npmjs.com/package/p2pgate |
-| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.12.1 |
+| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.13.0 |
 
 ---
 
@@ -46,14 +46,14 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.12.1` (แก้ truncation ตอนปิด + backpressure + half-close) |
-| npm `latest` | `1.12.1` |
+| Version | `1.13.0` (mux บน fast-path: capability + peek 200 ms) |
+| npm `latest` | `1.12.1` (1.13.0 ยังไม่ publish) |
 | Git branch | `main` |
-| Commit | `c78ae72` (1.12.1) + docs commit ถัดมา — ดู `git log --oneline -1` |
-| Tag | `v1.12.1` |
-| GitHub Release | `v1.12.1` = Latest |
-| Working tree | clean หลัง commit docs |
-| Tests | `npm test` → **66 checks PASSED** (Windows + Termux 1.12.1) |
+| Commit | ดู `git log --oneline -1` |
+| Tag | `v1.13.0` (หลัง commit) |
+| GitHub Release | ยังไม่สร้าง (รอ publish) |
+| Working tree | clean หลัง commit |
+| Tests | `npm test` → **71 checks PASSED** (Windows + self-test) |
 | src | 22 ไฟล์ (`src/mux.js` ใหม่), `src/self-test.js` ~1,900 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
@@ -69,6 +69,16 @@ npm view p2pgate version
 ---
 
 ## 3. ประวัติรุ่น (สรุป)
+
+### v1.13.0 (fast-path mux)
+
+- mux ใช้ได้บน trusted device: `FASTPATH_READY` พก `mux` capability,
+  client ขอ upgrade ทันที, server peek ≤200 ms / ≤512 B แล้วจึงเลือก mux หรือ forward
+- `peekControlLine()` (auth) — ไม่ throw, คืน `{ line: null, leftover }` เมื่อ timeout
+- config: `mux` (default true), `muxPeekMs` (0 = พฤติกรรม 1.12)
+- log `FASTPATH mux=1|0`, audit `auth.fastpath` มี field `mux`
+- ทดสอบข้ามเครื่อง (Windows → Termux 1.13.0): `fastpath=1`, โหลด 4 MiB SHA-256 ตรง
+- self-test: 71 checks
 
 ### v1.12.1 (fix)
 
@@ -272,7 +282,7 @@ p2pgate connect -s <masterSecret> -p <password>
 | `src/keygen.js` | client key + passphrase protection |
 | `src/setup-wizard.js` | advanced setup + `--easy` + i18n |
 | `src/i18n.js` | `P2PGATE_LANG` / `--lang` / `t(th, en)` |
-| `src/self-test.js` | 66 checks รวม password, targets, SOCKS5, UDP, ping, hosts, audit, mux |
+| `src/self-test.js` | 71 checks รวม password, targets, SOCKS5, UDP, ping, hosts, audit, mux, peek |
 | `src/mux.js` | mux framing, `MuxCarrier`, `MuxChannel`, flow control, idle/keepalive |
 
 Docs: `docs/specs/phase7-v1.6.0.md` (spec), `docs/releases/v1.6.3.md` (patch notes),
@@ -340,6 +350,9 @@ p2pgate unlock --list
     (1.11.x–1.12.0 ทำพลาดข้อนี้ → ไฟล์ใหญ่ขาดท้ายเงียบ ๆ)
 15. **ทุกทิศทางต้องมี backpressure** — ถ้าเขียนไม่ทันให้หยุดอ่าน (pause) ไม่ใช่สะสม
     queue ไม่จำกัด และถ้าปล่อย `write()` คืน false ต้องมี `drain` ให้ปลด
+16. **peek บน fast-path ต้องคืนไบต์เสมอ** — `peekControlLine` ห้าม throw และต้องคืน
+    `leftover` ทุกกรณี (timeout/ปิด/เกิน 512 B) เพื่อให้ forward ไบต์ไป target ได้ครบ;
+    ห้ามใช้ `unshift()` แทนการคืน leftover
 
 ---
 
@@ -382,10 +395,10 @@ p2pgate unlock --list
 | Multi-client พร้อมกัน | ยังไม่ stress |
 | Wi-Fi ↔ 4G switching | ยังไม่ทดสอบ |
 | NAT บางรูปแบบ | ยังไม่ครอบคลุม |
-| mux บนอุปกรณ์จริง | ✅ ทดสอบ 2026-11-16 (Windows→Termux, 1 carrier/3 channels, 100 ms ต่อ connection — ดู `docs/SOAK.md` §1.1) ยังไม่มี soak 24 ชม. |
+| mux บนอุปกรณ์จริง | ✅ 1.12.1 (Windows→Termux, 1 carrier/3 channels) และ 1.13.0 trusted device (`fastpath=1`) |
 | mux โอนไฟล์ใหญ่ | ✅ 1.12.1: 8/32 MiB upload+echo, 16 MiB download, 8 channels × 4 MiB — SHA-256 ตรง |
 | 1.12.1 บน Termux | ✅ ติดตั้ง + `npm test` 66 checks + โอน 8 MiB (mux/dedicated) SHA-256 ตรง (`docs/SOAK.md` §1.3) |
-| mux กับ trusted/fastpath | ใช้ไม่ได้โดยออกแบบ — fallback per-connection |
+| mux กับ trusted/fastpath | ✅ 1.13.0 — capability + peek 200 ms; client/server 1.12 ยังทำงานเดิม |
 | TUN / subnet routing | ไม่รองรับ (Termux ทำไม่ได้ถ้าไม่ root) |
 | i18n legacy commands | แปลไม่ครบ (setup/server/connect/help แปลแล้ว) |
 
@@ -395,13 +408,11 @@ p2pgate unlock --list
 
 เรียงตามความคุ้ม:
 
-1. **fastpath + mux (1.13.0)** — spec เขียนแล้วที่
-   `docs/specs/phase15-fastpath-mux.md`: server ประกาศ capability ใน
-   `FASTPATH_READY`, client ขอ upgrade ทันที, server peek ≤300 ms/≤512 B
-   แล้วจึงเลือก mux หรือ forward ตามเดิม (เข้ากันได้กับ client/server 1.12)
-   เมื่อทำเสร็จ mux จะมีผลกับ trusted device ซึ่งเป็นกลุ่มผู้ใช้ส่วนใหญ่
-2. **ตัดสินใจเปิด default ของ `--mux`** — ยังไม่ทำ: ผู้ใช้ทั่วไปมักมี 1–2
-   session และใช้ trusted device (mux ใช้ไม่ได้จนกว่า phase 15 จะเสร็จ)
+1. **Publish v1.13.0 + soak trusted device** — `npm publish` (OTP), GitHub Release,
+   อัปเกรด Termux/server หลักเป็น 1.13.0, แล้ว soak ด้วย trusted device 4 ชม.
+   (`scripts/soak/`, ต้องตั้ง `allowedClientKeys` ของ soak server ให้ตรงกับ key ที่ใช้)
+2. **ตัดสินใจเปิด default ของ `--mux`** — ตอนนี้ fastpath ใช้ได้แล้ว จึงมีเหตุผล
+   พิจารณาอีกครั้งหลัง soak 1.13.x (ผู้ใช้ทั่วไปยังคง 1–2 session)
 3. **Network switching** — ปิด/เปิด Wi-Fi, สลับ 4G, ดูว่า reconnect เองได้
 4. **Soak mux 24 ชม. + multi-client** — ต่อยอดจาก 4 ชม. (§1.5)
 3. **เปิด `--mux` เป็น default ของ `--socks5`** — หลัง soak mux ผ่าน (1.12.x)

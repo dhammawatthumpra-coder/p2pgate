@@ -690,7 +690,20 @@ async function startClient(config, options = {}) {
     }
 
     if (status.status === AUTH_STATUS.FASTPATH_READY) {
-      return { leftover: statusRead.leftover }
+      const cap = status.mux
+
+      return {
+        fastpath: true,
+        leftover: statusRead.leftover,
+        muxCapability: cap && Number(cap.version) === MUX_VERSION
+          ? {
+              version: MUX_VERSION,
+              maxChannels: Number.isInteger(cap.maxChannels)
+                ? cap.maxChannels
+                : DEFAULT_MAX_CHANNELS
+            }
+          : null
+      }
     }
 
     if (status.status !== AUTH_STATUS.CHALLENGE_REQUIRED) {
@@ -894,6 +907,41 @@ async function startClient(config, options = {}) {
   let muxUnsupported = false
   const muxEnabled = options.mux === true
 
+  async function requestMuxUpgrade(stream, capability) {
+    try {
+      stream.write(encodeControl({
+        v: AUTH_VERSION,
+        mux: { version: capability.version }
+      }))
+
+      const ack = await readControlLine(stream, {
+        timeoutMs: 10_000,
+        maxBytes: 512
+      })
+
+      let parsed = null
+      try {
+        parsed = decodeControl(ack.line)
+      } catch {
+        parsed = null
+      }
+
+      if (!parsed || !parsed.mux || Number(parsed.mux.version) !== MUX_VERSION) {
+        return null
+      }
+
+      return {
+        version: MUX_VERSION,
+        maxChannels: Number.isInteger(parsed.mux.maxChannels)
+          ? parsed.mux.maxChannels
+          : capability.maxChannels,
+        leftover: ack.leftover
+      }
+    } catch {
+      return null
+    }
+  }
+
   async function getMuxCarrier() {
     if (muxCarrier && !muxCarrier.closed) return muxCarrier
     if (muxUnsupported) return null
@@ -917,15 +965,30 @@ async function startClient(config, options = {}) {
             mux: { version: MUX_VERSION, maxChannels: DEFAULT_MAX_CHANNELS }
           })
 
-          if (!authResult.mux) {
+          let muxInfo = authResult.mux || null
+          let leftover = authResult.leftover || null
+
+          // Trusted device: the server already announced mux support, so ask for
+          // the upgrade before any payload is written.
+          if (!muxInfo && authResult.fastpath && authResult.muxCapability) {
+            const upgraded = await requestMuxUpgrade(stream, authResult.muxCapability)
+
+            if (upgraded) {
+              muxInfo = upgraded
+              leftover = upgraded.leftover
+            }
+          }
+
+          if (!muxInfo) {
             if (!stream.destroyed) stream.destroy()
             muxUnsupported = true
-            writeLog('MUX unavailable (fast-path or older server); using dedicated streams')
+            writeLog('MUX not available on this server or device; using one stream per connection')
             return null
           }
 
           const carrier = new MuxCarrier(stream, {
-            maxChannels: authResult.mux.maxChannels
+            maxChannels: muxInfo.maxChannels,
+            leftover
           })
 
           carrier.on('close', () => {
@@ -934,7 +997,8 @@ async function startClient(config, options = {}) {
 
           muxCarrier = carrier
           writeLog(
-            `MUX carrier established slot=${slot} maxChannels=${authResult.mux.maxChannels}`
+            `MUX carrier established slot=${slot} maxChannels=${muxInfo.maxChannels}` +
+            `${authResult.fastpath ? ' fastpath=1' : ''}`
           )
           return carrier
         } catch (err) {
