@@ -126,6 +126,27 @@ Windows เป็น client (`-p` password mode), วัด SHA-256 สองฝ
 
 ---
 
+## 1.5) mux soak 4 ชม. ผ่านสะอาด — 2026-11-17
+
+รันผ่าน Task Scheduler (ไม่ผูกกับ shell ใด ๆ), 4 MiB ทุก 3 นาที, 4 ชั่วโมง
+
+| รายการ | ค่า |
+|---|---|
+| รอบ | **79/79 ผ่าน** (0 failure) |
+| carriers | **1** (ไม่มี reconnect ตลอด 4 ชม.) |
+| throughput | min 0.92 / avg 1.90 / max 3.04 MB/s |
+| client RSS | 21.8 – 67.3 MB (ไม่ไต่) |
+| server RSS | 55.2 – 68.6 MB (49 samples, ไม่ไต่) |
+| ปริมาณข้อมูล | ~316 MB ผ่าน carrier เดียว (`in=5,688 out=331,365,263`) |
+| runner | `END exit=0 elapsed=240m` |
+| watchdog | ไม่ทำงาน (ไม่มี `watchdog.log`) |
+
+เทียบกับ run 1 (9 ชม. ตั้งใจ, ถูกฆ่าตอน 02:39): 109/119 ผ่าน, มี outage
+47 นาทีจากเน็ตฝั่ง Windows และฟื้นเอง — run 2 แสดงว่าเมื่อเส้นทางนิ่ง
+carrier เดียวอยู่ได้ทั้ง 4 ชั่วโมงโดยไม่มี error และ memory ไม่รั่ว
+
+---
+
 ## 2. วิธีเก็บตัวเลขสำหรับรอบถัดไป
 
 มีสคริปต์พร้อมใช้แล้วที่ [`scripts/soak/`](../scripts/soak/README.md) —

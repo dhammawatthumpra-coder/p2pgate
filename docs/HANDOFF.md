@@ -395,11 +395,13 @@ p2pgate unlock --list
 
 เรียงตามความคุ้ม:
 
-1. **Soak mux 24 ชม. + multi-client** — รอบแรก (non-mux) ผ่าน overnight
-   (`docs/SOAK.md` §1); mux/1.12.1 ผ่านการโอนไฟล์ข้ามเครื่อง (§1.1–1.3)
-   รอบถัดไป: เปิด `--socks5 --mux` ทิ้งไว้ เก็บ reconnect count + memory
+1. **ตัดสินใจเปิด `--mux` เป็น default ของ `--socks5`** — soak ผ่านแล้ว:
+   4 ชม. 79/79 รอบ, carrier เดียว, RSS นิ่ง (`docs/SOAK.md` §1.5);
+   รอบ 9 ชม. ที่ถูกตัดกลางคันก็ฟื้นตัวเองเมื่อเน็ตกลับ (`§1.4`)
+   ข้อเสนอ: เปิด default ใน 1.12.2 พร้อม flag `--no-mux` สำหรับถอยกลับ
 2. **Network switching** — ปิด/เปิด Wi-Fi, สลับ 4G, ดูว่า reconnect เองได้
    (รวมถึงพฤติกรรมของ carrier เมื่อเน็ตขาด: carrier ตาย → client สร้างใหม่)
+3. **Soak mux 24 ชม. + multi-client** — ต่อยอดจาก 4 ชม. และทดสอบหลาย client พร้อมกัน
 3. **เปิด `--mux` เป็น default ของ `--socks5`** — หลัง soak mux ผ่าน (1.12.x)
 4. **เปิด CI** — แก้ billing หรือย้ายไป CI อื่น (workflow มีอยู่แต่ disable)
 5. **SOCKS5 ส่วนขยาย** — IPv6 destinations, UDP ASSOCIATE
