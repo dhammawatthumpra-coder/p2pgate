@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-16
-สถานะ: **v1.13.4 พร้อม publish** (fast-path matrix 82 checks + badge cache-bust)
+สถานะ: **v1.13.4 released** (fast-path matrix 82 checks + badge cache-bust)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -50,13 +50,13 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | รายการ | ค่า |
 |---|---|
 | Version | `1.13.4` (fast-path matrix + badge cache-bust) |
-| npm `latest` | `1.13.3` (1.13.4 ยังไม่ publish) |
+| npm `latest` | `1.13.4` |
 | Git branch | `main` |
-| Commit | ดู `git log --oneline -1` |
-| Tag | `v1.13.4` (หลัง commit) |
-| GitHub Release | ยังไม่สร้าง (รอ publish) |
-| Working tree | clean หลัง commit |
-| Tests | `npm test` → **82 checks PASSED** |
+| Commit | `d9bfe42 chore(release): v1.13.4 with fast-path matrix and badge cache-bust` |
+| Tag | `v1.13.4` |
+| GitHub Release | `v1.13.4` = Latest |
+| Working tree | clean หลัง commit docs |
+| Tests | `npm test` → **82 checks PASSED** (Windows + Termux 1.13.4) |
 | src | 22 ไฟล์ (`src/mux.js` ใหม่), `src/self-test.js` ~1,900 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
