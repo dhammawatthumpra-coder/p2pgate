@@ -11,7 +11,7 @@
 | [Phase 5 — Control plane](specs/phase5-v1.4.0.md) | v1.4.0 | Local control socket, doctor, trusted-device expiry enforcement |
 | [Phase 6 — Auditability](specs/phase6-v1.5.0.md) | v1.5.0 | Audit log, encrypted keys, JSON output, control token |
 | [Phase 7 — Zero-setup](specs/phase7-v1.6.0.md) | v1.6.0 | Zero-setup server, password auth, one-line connect |
-| [Phase 8 — `p2phub`](https://github.com/dhammawatthumpra-coder/p2phub/blob/main/docs/spec.md) | draft | Separate repository: optional control plane (inventory, directory, policy, enrollment, secret custody) |
+| [Phase 8 — `p2phub`](https://github.com/incognitums/p2phub/blob/main/docs/spec.md) | draft | Separate repository: optional control plane (inventory, directory, policy, enrollment, secret custody) |
 | [Phase 8 — Multi-target](specs/phase8-targets.md) | v1.7.0 | `targets` map, `--target`, per-target allowlist |
 | [Phase 9 — SOCKS5](specs/phase9-socks5.md) | v1.8.0 | SOCKS5 gateway with an IP/CIDR allowlist |
 | [Phase 10 — masterSecret rotation](specs/phase10-master.md) | v1.8.3 | `master show` / `master reset` with backup |
@@ -30,6 +30,7 @@ Markdown for easier review and diffing.
 - [Product handoff](PRODUCT-HANDOFF.md) — product-oriented briefing for a new agent (what exists, constraints, directions)
 - [Soak test record](SOAK.md) — overnight run results and next-round template
 - [Running as a service](SERVICE.md) — Termux, systemd, Windows
+- [Release notes v1.13.5](releases/v1.13.5.md)
 - [Release notes v1.13.4](releases/v1.13.4.md)
 - [Release notes v1.13.3](releases/v1.13.3.md)
 - [Release notes v1.13.2](releases/v1.13.2.md)

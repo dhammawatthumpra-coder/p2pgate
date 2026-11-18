@@ -7,6 +7,17 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.13.5] - 2026-11-19
+
+### Changed
+
+- **ย้าย repository ไป `github.com/incognitums/p2pgate`** (เปลี่ยน GitHub username)
+  - `package.json`: `author`, `repository.url`, `bugs.url`, `homepage`
+  - README (EN/TH), `docs/HANDOFF.md`, `docs/PRODUCT-HANDOFF.md`,
+    `docs/README.md` (ลิงก์ p2phub), systemd unit `Documentation=`
+  - `NOTICE` และบรรทัด copyright ใน README
+- ไม่มีการเปลี่ยนโค้ดหรือพฤติกรรมใด ๆ — รีลีสนี้เพื่อให้ metadata บน npm ชี้ repo ใหม่
+
 ## [1.13.4] - 2026-11-18
 
 ### Changed

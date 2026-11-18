@@ -1,6 +1,6 @@
 [Unit]
 Description=p2pgate server (P2P tunnel to local SSH)
-Documentation=https://github.com/dhammawatthumpra-coder/p2pgate/blob/main/docs/SERVICE.md
+Documentation=https://github.com/incognitums/p2pgate/blob/main/docs/SERVICE.md
 After=network-online.target
 Wants=network-online.target
 

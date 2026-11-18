@@ -1,8 +1,8 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-16
-สถานะ: **v1.13.4 released** (fast-path matrix 82 checks + badge cache-bust)
-เจ้าของโปรเจกต์: dhammawatthumpra-coder
+สถานะ: **v1.13.5 released** (fast-path matrix 82 checks + badge cache-bust)
+เจ้าของโปรเจกต์: incognitums
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
 
@@ -16,7 +16,7 @@
 วางข้อความนี้ใน session ใหม่:
 
 ```text
-โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.13.4)
+โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.13.5)
 อ่าน docs/HANDOFF.md ก่อน แล้วสรุปสถานะปัจจุบันและรอคำสั่ง
 ```
 
@@ -39,9 +39,9 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | URL |
 |---|---|
-| Repo | https://github.com/dhammawatthumpra-coder/p2pgate |
+| Repo | https://github.com/incognitums/p2pgate |
 | npm | https://www.npmjs.com/package/p2pgate |
-| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.13.4 |
+| Release | https://github.com/incognitums/p2pgate/releases/tag/v1.13.5 |
 
 ---
 
@@ -52,9 +52,9 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | Version | `1.13.4` (fast-path matrix + badge cache-bust) |
 | npm `latest` | `1.13.4` |
 | Git branch | `main` |
-| Commit | `d9bfe42 chore(release): v1.13.4 with fast-path matrix and badge cache-bust` |
-| Tag | `v1.13.4` |
-| GitHub Release | `v1.13.4` = Latest |
+| Commit | `d9bfe42 chore(release): v1.13.5 with fast-path matrix and badge cache-bust` |
+| Tag | `v1.13.5` |
+| GitHub Release | `v1.13.5` = Latest |
 | Working tree | clean หลัง commit docs |
 | Tests | `npm test` → **82 checks PASSED** (Windows + Termux 1.13.4) |
 | src | 22 ไฟล์ (`src/mux.js` ใหม่), `src/self-test.js` ~1,900 บรรทัด |
@@ -73,7 +73,7 @@ npm view p2pgate version
 
 ## 3. ประวัติรุ่น (สรุป)
 
-### v1.13.4 (tests + docs)
+### v1.13.5 (tests + docs)
 
 - fast-path matrix +6 checks (รวม **82**): mux+target+1 MiB, no-mux+target+eager,
   no-mux+binary, mux+parallel, socks+mux default, socks+no-mux, mux:false+target

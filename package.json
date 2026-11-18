@@ -1,17 +1,17 @@
 {
   "name": "p2pgate",
-  "version": "1.13.4",
+  "version": "1.13.5",
   "description": "Lightweight P2P TCP gateway for SSH over HyperDHT (single dependency)",
   "license": "Apache-2.0",
-  "author": "dhammawatthumpra-coder",
+  "author": "incognitums",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dhammawatthumpra-coder/p2pgate.git"
+    "url": "git+https://github.com/incognitums/p2pgate.git"
   },
   "bugs": {
-    "url": "https://github.com/dhammawatthumpra-coder/p2pgate/issues"
+    "url": "https://github.com/incognitums/p2pgate/issues"
   },
-  "homepage": "https://github.com/dhammawatthumpra-coder/p2pgate#readme",
+  "homepage": "https://github.com/incognitums/p2pgate#readme",
   "keywords": [
     "p2p",
     "ssh",

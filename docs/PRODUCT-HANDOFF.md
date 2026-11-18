@@ -5,7 +5,7 @@
 
 - อัปเดตล่าสุด: 2026-11-18
 - เวอร์ชัน: **1.13.2** (npm `latest` + GitHub Release)
-- เจ้าของ: dhammawatthumpra-coder
+- เจ้าของ: incognitums
 - เอกสารเทคนิคคู่กัน: [`HANDOFF.md`](HANDOFF.md) (สถานะ/invariants/รีลีส) และ [`SOAK.md`](SOAK.md) (ผลทดสอบระยะยาว)
 
 ---
