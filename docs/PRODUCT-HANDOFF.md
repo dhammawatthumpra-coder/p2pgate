@@ -31,7 +31,7 @@
 |---|---|
 | Version | 1.13.2 |
 | npm | `p2pgate@1.13.2` (ผ่าน validation แล้ว) |
-| Tests | `npm test` → **73 checks** (Windows + Termux) |
+| Tests | `npm test` → **82 checks** (รวม fast-path matrix) (Windows + Termux) |
 | Dependency | `hyperdht@6.36.0` เท่านั้น (transitive 58 แพ็กเกจ) |
 | Node | ≥ 20 (ทดสอบ Node 24) |
 | Platforms | Termux/Android, Linux, macOS, Windows |
@@ -78,7 +78,7 @@ client (127.0.0.1 listener)
 | `src/mux.js` | framing, `MuxCarrier`, `MuxChannel`, flow control |
 | `src/config-loader.js` | normalize config (รวม `mux`, `muxPeekMs`) |
 | `src/cli.js` | ทุกคำสั่ง, help, i18n |
-| `src/self-test.js` | 73 checks (เป็น regression suite จริง) |
+| `src/self-test.js` | 82 checks (เป็น regression suite จริง) |
 | `scripts/soak/` | ชุดทดสอบระยะยาว (termux/windows/runner/watchdog/report) |
 
 ---
@@ -185,7 +185,7 @@ client (127.0.0.1 listener)
 
 ```powershell
 cd D:\tunnel\p2pgate
-npm test                       # 73 checks + docs check
+npm test                       # 82 checks + docs check
 git log --oneline -5
 npm view p2pgate version
 gh release list --limit 3

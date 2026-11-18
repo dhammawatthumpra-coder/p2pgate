@@ -56,7 +56,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | Tag | `v1.13.3` |
 | GitHub Release | `v1.13.3` = Latest |
 | Working tree | clean หลัง commit docs |
-| Tests | `npm test` → **76 checks PASSED** (Windows + Termux 1.13.3) |
+| Tests | `npm test` → **82 checks PASSED** (main; npm 1.13.3 มี 76 — matrix จะไปกับรีลีสถัดไป) |
 | src | 22 ไฟล์ (`src/mux.js` ใหม่), `src/self-test.js` ~1,900 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
@@ -80,6 +80,12 @@ npm view p2pgate version
 - ไม่เพิ่ม round-trip (ใช้ peek 200 ms เดิม), client ส่งได้แค่ **ชื่อ** target
 - server เก่า: client fail ด้วย `TARGET_UNSUPPORTED` แทนการใช้ default เงียบ ๆ
 - self-test: 76 checks (เพิ่ม target จริง + unknown target)
+
+**หลังรีลีส (บน main, ยังไม่ publish):** เพิ่ม fast-path matrix อีก 6 checks
+(mux+target+1 MiB, no-mux+target+eager line, no-mux+binary ใน peek, mux+parallel,
+socks+mux default, socks+no-mux, mux:false server + target) → รวม **82 checks**
+เหตุผล: บั๊ก 1.13.2 และ 1.13.3 เกิดบน fast path ทั้งคู่ จึงล็อกทุก combination
+ที่ผู้ใช้เลือกได้ไว้ในชุดทดสอบ
 
 ### v1.13.2 (hotfix)
 

@@ -2388,6 +2388,7 @@ async function main() {
       allowedClientKeys: [fastMuxKey.publicKey],
       verificationMode: 'key-only',
       trustedDevicesFile: path.join(tempDir, 'muxfast-devices'),
+      socks: { enabled: true, allow: [`127.0.0.1:${echoPort}`] },
       auditLog: { enabled: false },
       customBootstrap: bootstrap,
       authPin: { enabled: false, unattended: null },
@@ -2545,7 +2546,125 @@ async function main() {
     await noPeekClient.close()
     await noPeekServer.close()
 
-    altServer.close()
+    // ---------------------------------------------------------------------
+    // fast-path matrix: every user-selectable combination on the path that
+    // real deployments use most (trusted device). Both fast-path regressions
+    // fixed in 1.13.2/1.13.3 hid here, so each combo is asserted explicitly.
+    // ---------------------------------------------------------------------
+
+    // mux + target + a large transfer
+    const muxTargetClient = await startTestClient(
+      unauthorizedKeyPath,
+      undefined,
+      {
+        base: { ...clientBase, masterSecret: fastMuxSecret },
+        mux: true,
+        target: 'alt'
+      }
+    )
+    assert.equal(muxTargetClient.muxActive, false) // carrier opens on first connection
+    const muxTargetSocket = await connectLocal(muxTargetClient.address().port)
+    assert.equal(
+      (await readExactly(muxTargetSocket, Buffer.byteLength('ALT-TARGET\n'), 15_000)).toString(),
+      'ALT-TARGET\n'
+    )
+    const muxTargetBody = crypto.randomBytes(1024 * 1024)
+    muxTargetSocket.write(muxTargetBody)
+    assert.deepEqual(
+      await readExactly(muxTargetSocket, muxTargetBody.length, 20_000),
+      muxTargetBody
+    )
+    muxTargetSocket.destroy()
+    assert.equal(muxTargetClient.muxActive, true)
+    checks.push('fast-path matrix: mux + target + 1 MiB')
+    await muxTargetClient.close()
+
+    // no-mux + target + payload written before the target banner (SSH style)
+    const eagerTargetClient = await startTestClient(
+      unauthorizedKeyPath,
+      undefined,
+      {
+        base: { ...clientBase, masterSecret: fastMuxSecret },
+        mux: false,
+        target: 'alt'
+      }
+    )
+    const eagerSocket = await connectLocal(eagerTargetClient.address().port)
+    eagerSocket.write('SSH-2.0-MATRIX\r\n')
+    assert.equal(
+      (await readExactly(eagerSocket, Buffer.byteLength('ALT-TARGET\n'), 15_000)).toString(),
+      'ALT-TARGET\n'
+    )
+    assert.equal(
+      (await readExactly(eagerSocket, Buffer.byteLength('SSH-2.0-MATRIX\r\n'), 15_000)).toString(),
+      'SSH-2.0-MATRIX\r\n'
+    )
+    eagerSocket.destroy()
+    checks.push('fast-path matrix: no-mux + target + eager line payload')
+    await eagerTargetClient.close()
+
+    // no-mux + binary payload that arrives inside the peek window
+    const binaryClient = await startTestClient(
+      unauthorizedKeyPath,
+      undefined,
+      { base: { ...clientBase, masterSecret: fastMuxSecret }, mux: false }
+    )
+    const binarySocket = await connectLocal(binaryClient.address().port)
+    const binaryPayload = Buffer.from([0x00, 0xff, 0x01, 0x02])
+    binarySocket.write(binaryPayload)
+    assert.deepEqual(
+      await readExactly(binarySocket, echoBanner.length, 15_000),
+      echoBanner
+    )
+    assert.deepEqual(
+      await readExactly(binarySocket, binaryPayload.length, 15_000),
+      binaryPayload
+    )
+    binarySocket.destroy()
+    checks.push('fast-path matrix: no-mux + binary payload inside the peek')
+    await binaryClient.close()
+
+    // mux + two parallel connections on one carrier
+    const parallelFastClient = await startTestClient(
+      unauthorizedKeyPath,
+      undefined,
+      { base: { ...clientBase, masterSecret: fastMuxSecret }, mux: true }
+    )
+    const parallelBodies = await Promise.all([0, 1].map(async () => {
+      const s = await connectLocal(parallelFastClient.address().port)
+      await readExactly(s, echoBanner.length, 15_000)
+      const body = crypto.randomBytes(64 * 1024)
+      s.write(body)
+      const echo = await readExactly(s, body.length, 20_000)
+      s.destroy()
+      return echo.equals(body)
+    }))
+    assert.deepEqual(parallelBodies, [true, true])
+    assert.equal(parallelFastClient.muxActive, true)
+    checks.push('fast-path matrix: mux + parallel channels')
+    await parallelFastClient.close()
+
+    // socks + mux default (the exact combination that used to break) and --no-mux
+    for (const variant of [
+      { name: 'mux default', options: { socksPort: 0 } },
+      { name: 'no-mux', options: { socksPort: 0, mux: false } }
+    ]) {
+      const socksFast = await startTestClient(
+        unauthorizedKeyPath,
+        undefined,
+        { base: { ...clientBase, masterSecret: fastMuxSecret }, ...variant.options }
+      )
+      const handshake = await socksHandshake(socksFast.address().port, '127.0.0.1', echoPort)
+      assert.equal(handshake.code, 0)
+      assert.deepEqual(await readExactly(handshake.socket, echoBanner.length, 15_000), echoBanner)
+      const body = crypto.randomBytes(32 * 1024)
+      handshake.socket.write(body)
+      assert.deepEqual(await readExactly(handshake.socket, body.length, 15_000), body)
+      handshake.socket.destroy()
+      checks.push(`fast-path matrix: socks + ${variant.name}`)
+      await socksFast.close()
+    }
+
     await fastMuxServer.close()
 
     // Server with mux disabled must not advertise it; the client falls back once.
@@ -2556,6 +2675,11 @@ async function main() {
       authMode: 'registry',
       targetHost: '127.0.0.1',
       targetPort: echoPort,
+      targets: {
+        default: { host: '127.0.0.1', port: echoPort },
+        alt: { host: '127.0.0.1', port: altPort }
+      },
+      defaultTarget: 'default',
       localPort: 8022,
       clientKeyPath: path.join(tempDir, 'nomux-server-key.json'),
       allowedClientKeys: [fastMuxKey.publicKey],
@@ -2590,6 +2714,27 @@ async function main() {
     assert.equal(noMuxClient.muxActive, false)
     checks.push('mux is not advertised when the server disables it')
     await noMuxClient.close()
+
+    // Target requests must work even when mux is disabled server-side.
+    const noMuxTargetClient = await startTestClient(
+      unauthorizedKeyPath,
+      undefined,
+      {
+        base: { ...clientBase, masterSecret: noMuxSecret },
+        mux: false,
+        target: 'alt'
+      }
+    )
+    const noMuxTargetSocket = await connectLocal(noMuxTargetClient.address().port)
+    assert.equal(
+      (await readExactly(noMuxTargetSocket, Buffer.byteLength('ALT-TARGET\n'), 15_000)).toString(),
+      'ALT-TARGET\n'
+    )
+    noMuxTargetSocket.destroy()
+    checks.push('fast-path matrix: mux disabled server still routes --target')
+    await noMuxTargetClient.close()
+
+    altServer.close()
     await noMuxServer.close()
   } finally {
     if (originalSocket) {
