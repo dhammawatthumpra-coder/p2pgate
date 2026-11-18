@@ -2362,12 +2362,27 @@ async function main() {
     const fastMuxSecret = crypto.randomBytes(32).toString('hex')
     const fastMuxControlPath = controlPathFor('muxfast')
     const fastMuxKey = await loadClientKey(unauthorizedKeyPath)
+
+    // second target with a distinct banner, to prove --target routing on fast path
+    const altServer = net.createServer((socket) => {
+      socket.on('error', noop)
+      socket.write('ALT-TARGET\n')
+      socket.pipe(socket)
+    })
+    await new Promise((resolve) => altServer.listen(0, '127.0.0.1', resolve))
+    const altPort = altServer.address().port
+
     const fastMuxServer = await startServer({
       mode: 'server',
       masterSecret: fastMuxSecret,
       authMode: 'registry',
       targetHost: '127.0.0.1',
       targetPort: echoPort,
+      targets: {
+        default: { host: '127.0.0.1', port: echoPort },
+        alt: { host: '127.0.0.1', port: altPort }
+      },
+      defaultTarget: 'default',
       localPort: 8022,
       clientKeyPath: path.join(tempDir, 'muxfast-server-key.json'),
       allowedClientKeys: [fastMuxKey.publicKey],
@@ -2433,6 +2448,104 @@ async function main() {
     immediateSocket.destroy()
     checks.push('fast-path peek forwards an immediate line payload (SSH banner)')
     await fastPlainClient.close()
+
+    // --target must be honored on the fast path. It used to fall back to
+    // defaultTarget because the target only travelled inside the SCRAM proof.
+    const altClient = await startTestClient(
+      unauthorizedKeyPath,
+      undefined,
+      {
+        base: { ...clientBase, masterSecret: fastMuxSecret },
+        mux: false,
+        target: 'alt'
+      }
+    )
+    const altSocket = await connectLocal(altClient.address().port)
+    assert.equal(
+      (await readExactly(altSocket, Buffer.byteLength('ALT-TARGET\n'), 15_000)).toString(),
+      'ALT-TARGET\n'
+    )
+    altSocket.destroy()
+    checks.push('fast-path --target reaches the requested target')
+    await altClient.close()
+
+    const badTargetClient = await startTestClient(
+      unauthorizedKeyPath,
+      undefined,
+      {
+        base: { ...clientBase, masterSecret: fastMuxSecret },
+        mux: false,
+        target: 'nope'
+      }
+    )
+    const badSocket = await connectLocal(badTargetClient.address().port)
+    const badClosed = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), 8_000)
+      badSocket.on('close', () => { clearTimeout(timer); resolve(true) })
+      badSocket.on('error', () => {})
+    })
+    assert.equal(badClosed, true)
+    checks.push('fast-path rejects an unknown target instead of using the default')
+    await badTargetClient.close()
+
+    // A server with the peek disabled cannot accept target requests; the client
+    // must fail loudly instead of using defaultTarget.
+    const noPeekSecret = crypto.randomBytes(32).toString('hex')
+    const noPeekServer = await startServer({
+      mode: 'server',
+      masterSecret: noPeekSecret,
+      authMode: 'registry',
+      targetHost: '127.0.0.1',
+      targetPort: echoPort,
+      targets: {
+        default: { host: '127.0.0.1', port: echoPort },
+        alt: { host: '127.0.0.1', port: altPort }
+      },
+      defaultTarget: 'default',
+      localPort: 8022,
+      clientKeyPath: path.join(tempDir, 'nopeek-server-key.json'),
+      allowedClientKeys: [fastMuxKey.publicKey],
+      verificationMode: 'key-only',
+      trustedDevicesFile: path.join(tempDir, 'nopeek-devices'),
+      auditLog: { enabled: false },
+      customBootstrap: bootstrap,
+      authPin: { enabled: false, unattended: null },
+      telegramAlert: { enabled: false, botToken: '', chatId: '' },
+      muxPeekMs: 0
+    }, {
+      log: quiet,
+      showSessionPin: false,
+      sendStartupAlert: false,
+      failDelayMs: [10, 20],
+      lockoutStatePath: path.join(tempDir, 'nopeek-lockout.json'),
+      authTimeoutMs: 4_000,
+      interactive: false,
+      controlSocketPath: controlPathFor('nopeek'),
+      controlTokenPath: path.join(tempDir, 'control-nopeek.token')
+    })
+    extraServers.push(noPeekServer)
+
+    const noPeekClient = await startTestClient(
+      unauthorizedKeyPath,
+      undefined,
+      {
+        base: { ...clientBase, masterSecret: noPeekSecret },
+        mux: false,
+        target: 'alt'
+      }
+    )
+    const noPeekSocket = await connectLocal(noPeekClient.address().port)
+    const noPeekClosed = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), 8_000)
+      noPeekSocket.on('close', () => { clearTimeout(timer); resolve(true) })
+      noPeekSocket.on('error', () => {})
+    })
+    assert.equal(noPeekClosed, true)
+    checks.push('fast-path --target fails when the server has no peek')
+    await noPeekClient.close()
+    await noPeekServer.close()
+
+    altServer.close()
     await fastMuxServer.close()
 
     // Server with mux disabled must not advertise it; the client falls back once.

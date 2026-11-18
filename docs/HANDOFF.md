@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-16
-สถานะ: **v1.13.2 released** (hotfix: fast-path peek ทำข้อมูลแรกหาย)
+สถานะ: **v1.13.3 พร้อม publish** (hotfix: `--target` บน fast path)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -16,7 +16,7 @@
 วางข้อความนี้ใน session ใหม่:
 
 ```text
-โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.13.2)
+โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.13.3)
 อ่าน docs/HANDOFF.md ก่อน แล้วสรุปสถานะปัจจุบันและรอคำสั่ง
 ```
 
@@ -41,7 +41,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 |---|---|
 | Repo | https://github.com/dhammawatthumpra-coder/p2pgate |
 | npm | https://www.npmjs.com/package/p2pgate |
-| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.13.2 |
+| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.13.3 |
 
 ---
 
@@ -49,14 +49,14 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.13.2` (hotfix: peek ต้อง forward ไบต์ดิบทั้งหมด) |
-| npm `latest` | `1.13.2` |
+| Version | `1.13.3` (`--target` บน fast path) |
+| npm `latest` | `1.13.2` (1.13.3 ยังไม่ publish) |
 | Git branch | `main` |
-| Commit | `1fb901a fix(auth): forward every peeked byte on fast path; ship v1.13.2` |
-| Tag | `v1.13.2` |
-| GitHub Release | `v1.13.2` = Latest |
-| Working tree | clean หลัง commit docs |
-| Tests | `npm test` → **73 checks PASSED** (Windows + Termux 1.13.2) |
+| Commit | ดู `git log --oneline -1` |
+| Tag | `v1.13.3` (หลัง commit) |
+| GitHub Release | ยังไม่สร้าง (รอ publish) |
+| Working tree | clean หลัง commit |
+| Tests | `npm test` → **76 checks PASSED** |
 | src | 22 ไฟล์ (`src/mux.js` ใหม่), `src/self-test.js` ~1,900 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
@@ -72,6 +72,14 @@ npm view p2pgate version
 ---
 
 ## 3. ประวัติรุ่น (สรุป)
+
+### v1.13.3 (fast-path target)
+
+- แก้ `--target` ถูกเมินบน trusted device: server ประกาศ `"target": true` ใน
+  `FASTPATH_READY`, client ส่งชื่อ target ใน peek window, server resolve แล้วตอบกลับ
+- ไม่เพิ่ม round-trip (ใช้ peek 200 ms เดิม), client ส่งได้แค่ **ชื่อ** target
+- server เก่า: client fail ด้วย `TARGET_UNSUPPORTED` แทนการใช้ default เงียบ ๆ
+- self-test: 76 checks (เพิ่ม target จริง + unknown target)
 
 ### v1.13.2 (hotfix)
 
@@ -302,7 +310,7 @@ p2pgate connect -s <masterSecret> -p <password>
 | `src/keygen.js` | client key + passphrase protection |
 | `src/setup-wizard.js` | advanced setup + `--easy` + i18n |
 | `src/i18n.js` | `P2PGATE_LANG` / `--lang` / `t(th, en)` |
-| `src/self-test.js` | 73 checks รวม password, targets, SOCKS5, UDP, ping, hosts, audit, mux, peek |
+| `src/self-test.js` | 76 checks รวม password, targets, SOCKS5, UDP, ping, hosts, audit, mux, peek |
 | `src/mux.js` | mux framing, `MuxCarrier`, `MuxChannel`, flow control, idle/keepalive |
 
 Docs: `docs/specs/phase7-v1.6.0.md` (spec), `docs/releases/v1.6.3.md` (patch notes),
@@ -374,6 +382,9 @@ p2pgate unlock --list
     `leftover`/`raw` ทุกกรณี (timeout/ปิด/เกิน 512 B); เมื่อไม่ใช่ mux upgrade
     server ต้อง forward `raw` (รวมบรรทัดและ newline) — ห้ามใช้ `leftover` อย่างเดียว
     (เคสนี้ทำให้ SSH พังใน 1.13.0/1.13.1)
+17. **`--target` บน fast path ต้องเป็นชื่อที่ server resolve เอง** — client ส่งได้
+    เฉพาะไบต์ใน peek window; ถ้า server ไม่ประกาศ `target` capability ต้อง fail
+    ชัดเจน (`TARGET_UNSUPPORTED`) ห้าม fallback ไป `defaultTarget` เงียบ ๆ
 
 ---
 
@@ -431,9 +442,8 @@ p2pgate unlock --list
 
 เรียงตามความคุ้ม:
 
-1. **Publish v1.13.1 + ทดสอบ SOCKS จริง** — `npm publish` (OTP), GitHub Release,
-   อัปเกรด Termux/Windows, แล้วลอง `connect --socks5` ด้วยเบราว์เซอร์จริง
-   (mux default) เทียบกับ `--no-mux`
+1. **Publish v1.13.3** — `npm publish` (OTP), GitHub Release, อัปเกรด Termux/Windows,
+   ทดสอบ `--target` ข้ามเครื่องบน trusted device (mcp 8787 vs sshd 8022)
 2. **Network switching** — ปิด/เปิด Wi-Fi, สลับ 4G, ดูว่า reconnect เองได้
    (สำคัญขึ้นเมื่อ mux เป็น default เพราะ carrier ตาย = ทุก channel ตายพร้อมกัน)
 3. **Soak mux 24 ชม. + multi-client** — ต่อยอดจาก 4 ชม. (§1.5–1.6)

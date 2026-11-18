@@ -695,6 +695,7 @@ async function startClient(config, options = {}) {
       return {
         fastpath: true,
         leftover: statusRead.leftover,
+        targetCapability: status.target === true,
         muxCapability: cap && Number(cap.version) === MUX_VERSION
           ? {
               version: MUX_VERSION,
@@ -942,6 +943,40 @@ async function startClient(config, options = {}) {
     }
   }
 
+  async function requestFastpathTarget(stream, name) {
+    stream.write(encodeControl({ v: AUTH_VERSION, target: name }))
+
+    const ack = await readControlLine(stream, {
+      timeoutMs: 5_000,
+      maxBytes: MAX_CONTROL_BYTES
+    })
+
+    let parsed = null
+    try {
+      parsed = decodeControl(ack.line)
+    } catch {
+      parsed = null
+    }
+
+    if (!parsed || parsed.v !== AUTH_VERSION) {
+      throw new AuthError('คำตอบ target จากเซิร์ฟเวอร์ไม่ถูกต้อง', 'AUTH_PROTOCOL')
+    }
+
+    if (parsed.error) {
+      throw new AuthError(
+        parsed.message || `target ถูกปฏิเสธ: ${parsed.error}`,
+        parsed.error
+      )
+    }
+
+    return {
+      leftover: ack.leftover,
+      target: parsed.target && typeof parsed.target.name === 'string'
+        ? parsed.target
+        : { name }
+    }
+  }
+
   async function getMuxCarrier() {
     if (muxCarrier && !muxCarrier.closed) return muxCarrier
     if (muxUnsupported) return null
@@ -1180,9 +1215,28 @@ async function startClient(config, options = {}) {
           socksRequest ? { socks: socksRequest } : {}
         )
 
+        let authLeftover = authResult.leftover
+        let resolvedTarget = authResult.target || null
+
+        // Fast path has no proof message, so a requested target travels as one
+        // control line inside the server's peek window. Fall back to an explicit
+        // error rather than silently using defaultTarget on an older server.
+        if (requestedTarget !== null && authResult.fastpath) {
+          if (!authResult.targetCapability) {
+            throw new AuthError(
+              'เซิร์ฟเวอร์ไม่รองรับ --target บน fast path; อัปเกรดเซิร์ฟเวอร์หรือใช้ key แบบ scram',
+              'TARGET_UNSUPPORTED'
+            )
+          }
+
+          const ack = await requestFastpathTarget(encrypted, requestedTarget)
+          authLeftover = ack.leftover
+          resolvedTarget = ack.target
+        }
+
         writeLog(
           `TUNNEL established slot=${slot} serverKey=${publicKey.toString('hex')}` +
-            `${authResult.target ? ` target=${authResult.target.name}` : ''}`
+            `${resolvedTarget ? ` target=${resolvedTarget.name}` : ''}`
         )
 
         if (socksRequest) {
@@ -1191,7 +1245,7 @@ async function startClient(config, options = {}) {
 
         pump(encrypted, socket, entry, (finishedEntry) => {
           activeConnections.delete(finishedEntry)
-        }, writeLog, authResult.leftover)
+        }, writeLog, authLeftover)
 
         return
       } catch (err) {

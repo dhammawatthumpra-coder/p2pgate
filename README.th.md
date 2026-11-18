@@ -600,6 +600,8 @@ p2pgate connect -s <secret> -p <password> --target web --port 8080
 - `allow` ไม่บังคับ; `"*"` = client ที่ผ่าน auth ทุกตัว
 - config ที่ไม่มี `targets` ทำงานเหมือน v1.6 ทุกประการ
 - client ที่ไม่ระบุ `--target` ใช้ `defaultTarget`
+- trusted (fast-path) device ใช้ `--target` ได้ตั้งแต่ 1.13.3; client ใหม่กว่าบน
+  server เก่าจะได้ `TARGET_UNSUPPORTED` แทนการเงียบ ๆ ไปใช้ default
 - target ที่ไม่รู้จัก/ไม่อยู่ใน allowlist ถูกปฏิเสธโดยไม่แตะ service
 
 ---
@@ -1352,7 +1354,8 @@ p2pgate/
 │   │   ├── v1.12.1.md
 │   │   ├── v1.13.0.md
 │   │   ├── v1.13.1.md
-│   │   └── v1.13.2.md
+│   │   ├── v1.13.2.md
+│   │   └── v1.13.3.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md

@@ -7,6 +7,26 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.13.3] - 2026-11-17
+
+### Fixed
+
+- **`--target` ถูกเมินบน fast path (trusted device)** — target ถูกส่งเฉพาะใน SCRAM
+  proof ซึ่ง fast path ไม่ได้ทำ ⇒ server forward ไป `defaultTarget` เสมอ
+  อาการ: `--target mcp` แต่ได้ SSH (port 8022) แทน
+- server ประกาศ capability `"target": true` ใน `FASTPATH_READY`; client ส่ง
+  `{"v":3,"target":"<name>"}` ภายใน peek window (200 ms เท่าเดิม) แล้ว server
+  respond ด้วย target ที่ resolve แล้ว
+- target ยังเป็น **ชื่อ** เท่านั้น และ server เป็นคน map เอง (ไม่เพิ่มสิทธิ์)
+- ถ้า server เก่าไม่ประกาศ capability: client **fail ชัดเจน** (`TARGET_UNSUPPORTED`)
+  แทนการเงียบ ๆ ไป default
+- server ที่ตั้ง `muxPeekMs: 0` จะไม่รองรับทั้ง mux และ target บน fast path (ตามดีไซน์)
+
+### Tests
+
+- `npm test` → **76 checks** (เพิ่ม: fast-path `--target` ไปถึง target จริง, และ
+  unknown target ถูกปฏิเสธ)
+
 ## [1.13.2] - 2026-11-17
 
 ### Fixed

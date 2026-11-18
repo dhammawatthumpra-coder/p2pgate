@@ -616,6 +616,9 @@ Rules:
 - a config without `targets` behaves exactly like v1.6
 - clients that omit `--target` use `defaultTarget`
 - unknown/forbidden targets are rejected without contacting the service
+- trusted (fast-path) devices can use `--target` from 1.13.3; a client with a newer
+  version on an older server fails with `TARGET_UNSUPPORTED` instead of silently
+  using the default target
 
 ---
 
@@ -1378,7 +1381,8 @@ p2pgate/
 │   │   ├── v1.12.1.md
 │   │   ├── v1.13.0.md
 │   │   ├── v1.13.1.md
-│   │   └── v1.13.2.md
+│   │   ├── v1.13.2.md
+│   │   └── v1.13.3.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md

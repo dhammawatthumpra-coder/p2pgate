@@ -76,26 +76,36 @@ const DEFAULT_MUX_PEEK_MS = 200
 const MAX_MUX_UPGRADE_BYTES = 512
 
 /**
- * True only for a well-formed mux upgrade line from a fast-path client:
- * JSON object, matching protocol version, and a supported mux version.
+ * Parses the single control line a fast-path client may send inside the peek
+ * window: either a mux upgrade or a target request. Returns null for anything
+ * else (which is then forwarded to the target as payload).
  */
-function isMuxUpgradeLine(line) {
-  if (typeof line !== 'string' || line.trim() === '') return false
+function parseFastpathRequest(line) {
+  if (typeof line !== 'string' || line.trim() === '') return null
 
   let parsed
   try {
     parsed = JSON.parse(line)
   } catch {
-    return false
+    return null
   }
 
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false
-  if (parsed.v !== AUTH_VERSION) return false
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  if (parsed.v !== AUTH_VERSION) return null
 
   const mux = parsed.mux
-  if (!mux || typeof mux !== 'object' || Array.isArray(mux)) return false
+  if (mux && typeof mux === 'object' && !Array.isArray(mux)) {
+    if (Number(mux.version) === MUX_VERSION) return { kind: 'mux' }
+    return null
+  }
 
-  return Number(mux.version) === MUX_VERSION
+  if (typeof parsed.target === 'string' && parsed.target.trim() !== '') {
+    const name = parsed.target.trim()
+    if (!/^[A-Za-z0-9_-]{1,32}$/.test(name)) return null
+    return { kind: 'target', target: name }
+  }
+
+  return null
 }
 
 function noop() {}
@@ -939,7 +949,9 @@ async function startServer(config, options = {}) {
     }
 
     if (decision.action === 'fastpath') {
-      const advertiseMux = muxAllowed && muxPeekMs > 0
+      const peekEnabled = muxPeekMs > 0
+      const advertiseMux = muxAllowed && peekEnabled
+      const advertiseTarget = peekEnabled
       const capability = {
         version: MUX_VERSION,
         maxChannels: DEFAULT_MAX_CHANNELS
@@ -948,11 +960,12 @@ async function startServer(config, options = {}) {
       writeAuthMessage(stream, {
         v: AUTH_VERSION,
         status: AUTH_STATUS.FASTPATH_READY,
-        ...(advertiseMux ? { mux: capability } : {})
+        ...(advertiseMux ? { mux: capability } : {}),
+        ...(advertiseTarget ? { target: true } : {})
       })
       writeLog(`FASTPATH client=${remoteHex}`)
 
-      if (!advertiseMux) {
+      if (!advertiseMux && !advertiseTarget) {
         void audit.record('auth.fastpath', {
           source: 'server',
           key: remoteHex
@@ -960,19 +973,54 @@ async function startServer(config, options = {}) {
         return { ok: true, leftover: Buffer.alloc(0) }
       }
 
-      // Bounded peek: an upgraded client asks for mux immediately, anything else
-      // (including old clients that start sending payload at once) is forwarded.
+      // Bounded peek: an upgrading client asks for mux or a target immediately;
+      // anything else (including old clients that start sending payload at once)
+      // is forwarded untouched.
       const peek = await peekControlLine(stream, {
         timeoutMs: muxPeekMs,
         maxBytes: MAX_MUX_UPGRADE_BYTES
       })
-      const upgraded = isMuxUpgradeLine(peek.line)
+      const request = parseFastpathRequest(peek.line)
+      const upgraded = Boolean(request && request.kind === 'mux' && advertiseMux)
 
       void audit.record('auth.fastpath', {
         source: 'server',
         key: remoteHex,
-        mux: upgraded
+        mux: upgraded,
+        ...(request && request.kind === 'target' ? { target: request.target } : {})
       })
+
+      if (request && request.kind === 'target' && advertiseTarget) {
+        // Fast path used to ignore --target and fall back to defaultTarget.
+        // The client now states the name during the peek; the server still owns
+        // the mapping, so this adds no authority.
+        let target
+        try {
+          target = resolveTarget(request.target, remoteHex)
+        } catch (err) {
+          writeAuthMessage(stream, {
+            v: AUTH_VERSION,
+            error: err.code || 'TARGET_UNKNOWN',
+            message: err.message
+          })
+          writeLog(
+            `FASTPATH target rejected client=${remoteHex} target=${request.target} ` +
+            `code=${err.code || 'TARGET_UNKNOWN'}`
+          )
+          if (!stream.destroyed) stream.destroy()
+          return { ok: false }
+        }
+
+        writeAuthMessage(stream, {
+          v: AUTH_VERSION,
+          target: { name: target.name, host: target.host, port: target.port }
+        })
+        writeLog(
+          `FASTPATH target=${target.name} client=${remoteHex} -> ${target.host}:${target.port}`
+        )
+
+        return { ok: true, target, leftover: peek.leftover }
+      }
 
       if (!upgraded) {
         writeLog(`FASTPATH mux=0 client=${remoteHex}`)
