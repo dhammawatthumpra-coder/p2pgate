@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-16
-สถานะ: **v1.13.3 published** (npm validating; done-test `--target` ผ่านแล้ว)
+สถานะ: **v1.13.3 released** (npm + GitHub Release; `--target` บน fast path ใช้ได้)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -50,13 +50,13 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | รายการ | ค่า |
 |---|---|
 | Version | `1.13.3` (`--target` บน fast path) |
-| npm `latest` | `1.13.2` (1.13.3 รอ npm validation) |
+| npm `latest` | `1.13.3` |
 | Git branch | `main` |
 | Commit | `526d497 fix(fastpath): honor --target via the peek window; ship v1.13.3` |
 | Tag | `v1.13.3` |
 | GitHub Release | `v1.13.3` = Latest |
 | Working tree | clean หลัง commit docs |
-| Tests | `npm test` → **76 checks PASSED** |
+| Tests | `npm test` → **76 checks PASSED** (Windows + Termux 1.13.3) |
 | src | 22 ไฟล์ (`src/mux.js` ใหม่), `src/self-test.js` ~1,900 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
