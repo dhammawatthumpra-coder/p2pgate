@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-16
-สถานะ: **v1.13.3 released** (npm + GitHub Release; `--target` บน fast path ใช้ได้)
+สถานะ: **v1.13.4 พร้อม publish** (fast-path matrix 82 checks + badge cache-bust)
 เจ้าของโปรเจกต์: dhammawatthumpra-coder
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -16,7 +16,7 @@
 วางข้อความนี้ใน session ใหม่:
 
 ```text
-โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.13.3)
+โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.13.4)
 อ่าน docs/HANDOFF.md ก่อน แล้วสรุปสถานะปัจจุบันและรอคำสั่ง
 ```
 
@@ -41,7 +41,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 |---|---|
 | Repo | https://github.com/dhammawatthumpra-coder/p2pgate |
 | npm | https://www.npmjs.com/package/p2pgate |
-| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.13.3 |
+| Release | https://github.com/dhammawatthumpra-coder/p2pgate/releases/tag/v1.13.4 |
 
 ---
 
@@ -49,14 +49,14 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.13.3` (`--target` บน fast path) |
-| npm `latest` | `1.13.3` |
+| Version | `1.13.4` (fast-path matrix + badge cache-bust) |
+| npm `latest` | `1.13.3` (1.13.4 ยังไม่ publish) |
 | Git branch | `main` |
-| Commit | `526d497 fix(fastpath): honor --target via the peek window; ship v1.13.3` |
-| Tag | `v1.13.3` |
-| GitHub Release | `v1.13.3` = Latest |
-| Working tree | clean หลัง commit docs |
-| Tests | `npm test` → **82 checks PASSED** (main; npm 1.13.3 มี 76 — matrix จะไปกับรีลีสถัดไป) |
+| Commit | ดู `git log --oneline -1` |
+| Tag | `v1.13.4` (หลัง commit) |
+| GitHub Release | ยังไม่สร้าง (รอ publish) |
+| Working tree | clean หลัง commit |
+| Tests | `npm test` → **82 checks PASSED** |
 | src | 22 ไฟล์ (`src/mux.js` ใหม่), `src/self-test.js` ~1,900 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
@@ -73,6 +73,13 @@ npm view p2pgate version
 
 ## 3. ประวัติรุ่น (สรุป)
 
+### v1.13.4 (tests + docs)
+
+- fast-path matrix +6 checks (รวม **82**): mux+target+1 MiB, no-mux+target+eager,
+  no-mux+binary, mux+parallel, socks+mux default, socks+no-mux, mux:false+target
+- README Socket badge ใช้ `?v=<version>` และ `docs:check` บังคับให้ตรง version
+  (กันภาพ badge ค้าง "in progress")
+
 ### v1.13.3 (fast-path target)
 
 - แก้ `--target` ถูกเมินบน trusted device: server ประกาศ `"target": true` ใน
@@ -80,12 +87,6 @@ npm view p2pgate version
 - ไม่เพิ่ม round-trip (ใช้ peek 200 ms เดิม), client ส่งได้แค่ **ชื่อ** target
 - server เก่า: client fail ด้วย `TARGET_UNSUPPORTED` แทนการใช้ default เงียบ ๆ
 - self-test: 76 checks (เพิ่ม target จริง + unknown target)
-
-**หลังรีลีส (บน main, ยังไม่ publish):** เพิ่ม fast-path matrix อีก 6 checks
-(mux+target+1 MiB, no-mux+target+eager line, no-mux+binary ใน peek, mux+parallel,
-socks+mux default, socks+no-mux, mux:false server + target) → รวม **82 checks**
-เหตุผล: บั๊ก 1.13.2 และ 1.13.3 เกิดบน fast path ทั้งคู่ จึงล็อกทุก combination
-ที่ผู้ใช้เลือกได้ไว้ในชุดทดสอบ
 
 ### v1.13.2 (hotfix)
 

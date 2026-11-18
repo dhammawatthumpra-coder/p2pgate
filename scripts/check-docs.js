@@ -35,6 +35,13 @@ for (const readme of ['README.md', 'README.th.md']) {
   if (!text.includes(`v${version}.md`)) {
     problems.push(`${readme}: project structure must list "v${version}.md"`)
   }
+
+  // The badge image is cached by GitHub/npm; a stale cache shows "in progress"
+  // for a release that is already analysed. Tie the query to the version so
+  // every release fetches a fresh image.
+  if (!text.includes(`badge.socket.dev/npm/package/p2pgate?v=${version}`)) {
+    problems.push(`${readme}: Socket badge must use "?v=${version}" to bust the image cache`)
+  }
 }
 
 const changelogText = read('CHANGELOG.md')

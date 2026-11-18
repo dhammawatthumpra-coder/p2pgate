@@ -7,6 +7,19 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.13.4] - 2026-11-18
+
+### Changed
+
+- **fast-path matrix ในชุดทดสอบ** (82 checks, จาก 76): mux+target+1 MiB,
+  no-mux+target+eager line, no-mux+binary ใน peek, mux+parallel channels,
+  socks+mux default, socks+no-mux, และ server `mux:false` + `--target`
+  เหตุผล: บั๊ก 1.13.2 และ 1.13.3 อยู่ในเส้นทาง fast path ทั้งคู่ จึงล็อกทุก
+  combination ที่ผู้ใช้เลือกได้
+- README: Socket badge ใช้ `?v=<version>` เป็น cache-buster และ `docs:check`
+  บังคับให้ query ตรงกับ version — กันภาพ badge ค้างเป็น "in progress"
+  หลังอัปเดตแล้ว
+
 ## [1.13.3] - 2026-11-17
 
 ### Fixed
