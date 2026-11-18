@@ -43,6 +43,10 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | npm | https://www.npmjs.com/package/p2pgate |
 | Release | https://github.com/incognitums/p2pgate/releases/tag/v1.13.5 |
 
+**บัญชี npm:** `incognitums` = บัญชีหลัก (publish ทุกครั้ง), `dhammawatthumpra`
+= สำรอง (ยังเป็น owner เพื่อกู้คืน/สลับได้ แต่ไม่ใช้ publish ตามปกติ)
+— อย่าถอด owner ของบัญชีสำรอง เว้นแต่จะตั้งใจลดสิทธิ์
+
 ---
 
 ## 2. สถานะปัจจุบัน
