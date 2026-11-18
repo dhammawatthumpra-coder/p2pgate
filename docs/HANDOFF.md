@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
-อัปเดตล่าสุด: 2026-11-16
-สถานะ: **v1.13.5 released** (fast-path matrix 82 checks + badge cache-bust)
+อัปเดตล่าสุด: 2026-11-19
+สถานะ: **v1.13.5 released** (metadata: repo/npm ใหม่ `incognitums`)
 เจ้าของโปรเจกต์: incognitums
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -53,14 +53,14 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.13.4` (fast-path matrix + badge cache-bust) |
-| npm `latest` | `1.13.4` |
+| Version | `1.13.5` (metadata: repo/npm ใหม่ `incognitums`) |
+| npm `latest` | `1.13.5` |
 | Git branch | `main` |
-| Commit | `d9bfe42 chore(release): v1.13.5 with fast-path matrix and badge cache-bust` |
+| Commit | `10e75e8 docs: record npm primary/backup accounts` |
 | Tag | `v1.13.5` |
 | GitHub Release | `v1.13.5` = Latest |
 | Working tree | clean หลัง commit docs |
-| Tests | `npm test` → **82 checks PASSED** (Windows + Termux 1.13.4) |
+| Tests | `npm test` → **82 checks PASSED** (Windows + Termux 1.13.5) |
 | src | 22 ไฟล์ (`src/mux.js` ใหม่), `src/self-test.js` ~1,900 บรรทัด |
 
 ตรวจสถานะเร็ว ๆ:
@@ -77,7 +77,14 @@ npm view p2pgate version
 
 ## 3. ประวัติรุ่น (สรุป)
 
-### v1.13.5 (tests + docs)
+### v1.13.5 (metadata)
+
+- ย้าย repo → `github.com/incognitums/p2pgate` (author/repository/bugs/homepage,
+  README, NOTICE, docs, systemd `Documentation=`)
+- npm: `incognitums` เป็นบัญชีหลัก, `dhammawatthumpra` เป็น owner สำรอง
+- ไม่มีการเปลี่ยนโค้ด
+
+### v1.13.4 (tests + docs)
 
 - fast-path matrix +6 checks (รวม **82**): mux+target+1 MiB, no-mux+target+eager,
   no-mux+binary, mux+parallel, socks+mux default, socks+no-mux, mux:false+target
