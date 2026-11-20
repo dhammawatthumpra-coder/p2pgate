@@ -61,6 +61,10 @@ const {
   MAX_CARRIERS,
   MAX_TOTAL_CHANNELS
 } = require('./mux')
+const {
+  normalizeCompressConfig,
+  pickAlgorithm
+} = require('./compress')
 
 const noop = () => {}
 const quiet = () => {}
@@ -870,7 +874,8 @@ async function main() {
           credential,
           target: options.target,
           socksPort: options.socksPort,
-          mux: options.mux
+          mux: options.mux,
+          compress: options.compress
         }
       )
       clients.push(client)
@@ -2337,6 +2342,16 @@ async function main() {
     assert.deepEqual(await echoThrough(muxClient, muxBulk), muxBulk)
     checks.push('mux carries a 1 MiB transfer intact')
 
+    const muxCompressAttempt = await startTestClient(
+      unauthorizedKeyPath,
+      unattendedPassword,
+      { base: { ...clientBase, masterSecret: muxSecret }, mux: true, compress: true }
+    )
+    const muxPlainBody = crypto.randomBytes(8 * 1024)
+    assert.deepEqual(await echoThrough(muxCompressAttempt, muxPlainBody), muxPlainBody)
+    checks.push('compression request falls back when the server disables it')
+    await muxCompressAttempt.close()
+
     const muxParallel = await Promise.all(
       [0, 1, 2, 3].map(() => echoThrough(muxClient, crypto.randomBytes(96 * 1024)))
     )
@@ -2357,6 +2372,80 @@ async function main() {
 
     await muxClient.close()
     await muxServer.close()
+
+    // compression: negotiated per mux channel, must be enabled on both ends
+    assert.equal(pickAlgorithm(['zstd', 'gzip'], ['gzip']), 'gzip')
+    assert.equal(pickAlgorithm(['zstd'], ['gzip']), null)
+    assert.equal(normalizeCompressConfig(false).enabled, false)
+    assert.equal(normalizeCompressConfig(true).enabled, true)
+    checks.push('compress negotiation picks a shared algorithm')
+
+    const compressSecret = crypto.randomBytes(32).toString('hex')
+    const compressControlPath = controlPathFor('compress')
+    const compressServer = await startServer({
+      mode: 'server',
+      masterSecret: compressSecret,
+      authMode: 'password',
+      targetHost: '127.0.0.1',
+      targetPort: echoPort,
+      localPort: 8022,
+      clientKeyPath: path.join(tempDir, 'compress-server-key.json'),
+      allowedClientKeys: [],
+      verificationMode: 'hybrid',
+      trustedDevicesFile: path.join(tempDir, 'compress-devices'),
+      auditLog: { enabled: false },
+      customBootstrap: bootstrap,
+      authPin: { enabled: true, unattended: unattendedVerifier },
+      telegramAlert: { enabled: false, botToken: '', chatId: '' },
+      compress: { enabled: true, algorithms: ['zstd', 'gzip'] }
+    }, {
+      log: quiet,
+      showSessionPin: false,
+      sendStartupAlert: false,
+      failDelayMs: [10, 20],
+      lockoutStatePath: path.join(tempDir, 'compress-lockout.json'),
+      authTimeoutMs: 4_000,
+      interactive: false,
+      controlSocketPath: compressControlPath,
+      controlTokenPath: path.join(tempDir, 'control-compress.token')
+    })
+    extraServers.push(compressServer)
+
+    const compressClient = await startTestClient(
+      unauthorizedKeyPath,
+      unattendedPassword,
+      { base: { ...clientBase, masterSecret: compressSecret }, mux: true, compress: true }
+    )
+
+    const compressible = Buffer.from('p2pgate compression check line\n'.repeat(4096))
+    let compressWire = 0
+    const originalMuxSend = MuxCarrier.prototype._send
+    MuxCarrier.prototype._send = function (type, flags, channelId, payload) {
+      if (type === MUX_TYPE.DATA) compressWire += payload.length
+      return originalMuxSend.call(this, type, flags, channelId, payload)
+    }
+
+    let compressEchoed = null
+    try {
+      compressEchoed = await echoThrough(compressClient, compressible)
+    } finally {
+      MuxCarrier.prototype._send = originalMuxSend
+    }
+
+    assert.deepEqual(compressEchoed, compressible)
+    assert.ok(compressWire > 0)
+    assert.ok(
+      compressWire < compressible.length / 2,
+      `compressed wire ${compressWire} should be under half of ${compressible.length}`
+    )
+    checks.push('compressed mux channel round-trips and saves bytes')
+
+    const randomBody = crypto.randomBytes(256 * 1024)
+    assert.deepEqual(await echoThrough(compressClient, randomBody), randomBody)
+    checks.push('compressed mux channel keeps incompressible data intact')
+
+    await compressClient.close()
+    await compressServer.close()
 
     // fast-path cannot negotiate mux: must fall back, not break
     const fastMuxSecret = crypto.randomBytes(32).toString('hex')

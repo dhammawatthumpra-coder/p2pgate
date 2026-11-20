@@ -22,6 +22,7 @@ async function main () {
   const secret = process.env.MASTER_SECRET
   const password = process.env.PASSWORD
   const useMux = process.env.MUX !== '0'
+  const useCompress = process.env.COMPRESS === '1'
   if (!file || !secret || !password) throw new Error('usage: file + MASTER_SECRET + PASSWORD')
 
   const buf = fs.readFileSync(file)
@@ -49,7 +50,7 @@ async function main () {
   }
 
   const client = await startClient(config, {
-    log: () => {}, credential: password, mux: useMux
+    log: () => {}, credential: password, mux: useMux, compress: useCompress
   })
 
   const socket = net.createConnection({ host: '127.0.0.1', port: client.address().port })

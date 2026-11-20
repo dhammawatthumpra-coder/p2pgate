@@ -58,18 +58,20 @@ const { version } = require('../package.json')
 const HELP_TEXT = `p2pgate v${version} — อุโมงค์ TCP/UDP แบบ P2P สำหรับ SSH และ service บน loopback (HyperDHT)
 
 การใช้งาน:
-  p2pgate server [--config <path>] [--port <targetPort>]
+  p2pgate server [--config <path>] [--port <targetPort>] [--compress]
       เริ่มเซิร์ฟเวอร์ ครั้งแรกจะสร้าง config, masterSecret
       และ connection password ให้อัตโนมัติ
       --port: เปลี่ยนพอร์ตปลายทางเฉพาะรอบนี้ (ไม่บันทึก)
+      --compress: ยอมรับ mux channel ที่บีบอัดข้อมูล (ปิดเป็นค่าเริ่มต้น)
 
   p2pgate connect [-s <masterSecret>] [-p <password>] [--port <localPort>]
-      [--target <name>] [--socks5 <port>] [--mux | --no-mux]
+      [--target <name>] [--socks5 <port>] [--mux | --no-mux] [--compress]
       เชื่อมต่อจาก Client และสร้าง client key อัตโนมัติ
       --target: เลือก service ที่ประกาศไว้ใน targets ของ Server
       --socks5: เปิด SOCKS5 gateway ในเครื่อง (allowlist อยู่ที่ Server)
       --mux: ใช้ carrier เดียวหลาย channels (ได้ทั้ง password และ trusted device)
       --no-mux: ปิด mux (SOCKS5 เปิด mux เป็นค่าเริ่มต้นตั้งแต่ 1.13.1)
+      --compress: ขอให้ mux channel บีบอัดข้อมูล (ต้องเปิดฝั่ง Server ด้วย)
 
   p2pgate setup [--easy] [--mode server|client] [--config <path>]
       ตั้งค่าแบบ advanced
@@ -80,7 +82,7 @@ const HELP_TEXT = `p2pgate v${version} — อุโมงค์ TCP/UDP แบ�
       --passphrase: ตั้ง/เปลี่ยน passphrase สำหรับ client key
 
   p2pgate client [--config <path>] [--port <localPort>] [--pin-stdin]
-      [--key-passphrase-stdin] [--target <name>] [--mux | --no-mux]
+      [--key-passphrase-stdin] [--target <name>] [--mux | --no-mux] [--compress]
       เริ่มอุโมงค์แบบ advanced (ใช้ config ที่ตั้งไว้แล้ว)
 
   p2pgate devices list [--config <path>]
@@ -639,6 +641,15 @@ function resolveMuxFlag(values) {
   return undefined
 }
 
+/**
+ * CLI compress flag -> startClient/startServer option. undefined means "use config".
+ */
+function resolveCompressFlag(values) {
+  if (values['no-compress'] === true) return false
+  if (values.compress === true) return true
+  return undefined
+}
+
 async function waitForShutdownSignal() {
   return new Promise((resolve) => {
     const signals = ['SIGINT', 'SIGTERM']
@@ -754,6 +765,11 @@ async function commandServer(values) {
   const idleMs = parseDurationMs(values.idle, '--idle')
   const once = values.once === true
 
+  const compressFlag = resolveCompressFlag(values)
+  if (compressFlag !== undefined) {
+    config.compress = { ...(config.compress || {}), enabled: compressFlag }
+  }
+
   const server = await startServer(config, { ttlMs, idleMs, once })
   const address = server.currentPublicKeyHex()
 
@@ -851,7 +867,8 @@ async function commandClient(values) {
     keyPassphrase,
     target: values.target === undefined ? undefined : String(values.target),
     socksPort: parseSocksFlag(values.socks5),
-    mux: resolveMuxFlag(values)
+    mux: resolveMuxFlag(values),
+    compress: resolveCompressFlag(values)
   })
   const address = client.address()
 
@@ -2494,7 +2511,9 @@ async function main(argv) {
         count: { type: 'string' },
         watch: { type: 'boolean' },
         mux: { type: 'boolean' },
-  'no-mux': { type: 'boolean' },
+        'no-mux': { type: 'boolean' },
+        compress: { type: 'boolean' },
+        'no-compress': { type: 'boolean' },
         ttl: { type: 'string' },
         idle: { type: 'string' },
         once: { type: 'boolean' },

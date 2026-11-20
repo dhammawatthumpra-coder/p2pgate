@@ -11,7 +11,7 @@ const fs = require('node:fs')
 const net = require('node:net')
 const os = require('node:os')
 const path = require('node:path')
-const pkgRoot = '/data/data/com.termux/files/usr/lib/node_modules/p2pgate'
+const pkgRoot = process.env.P2P_PKG || '/data/data/com.termux/files/usr/lib/node_modules/p2pgate'
 const { startServer } = require(path.join(pkgRoot, 'src/server'))
 const { deriveScramVerifier, serializeScramVerifier } = require(path.join(pkgRoot, 'src/crypto-utils'))
 const { generateClientKey } = require(path.join(pkgRoot, 'src/keygen'))
@@ -67,7 +67,10 @@ async function main () {
     auditLog: { enabled: false },
     customBootstrap: [],
     authPin: { enabled: true, unattended: verifier },
-    telegramAlert: { enabled: false, botToken: '', chatId: '' }
+    telegramAlert: { enabled: false, botToken: '', chatId: '' },
+    compress: process.env.COMPRESS === '0'
+      ? false
+      : { enabled: true, algorithms: ['zstd', 'gzip'] }
   }
   await generateClientKey(config.clientKeyPath)
 

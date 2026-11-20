@@ -60,8 +60,16 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | Tag | `v1.13.5` |
 | GitHub Release | `v1.13.5` = Latest |
 | Working tree | clean หลัง commit docs |
-| Tests | `npm test` → **82 checks PASSED** (Windows + Termux 1.13.5) |
-| src | 22 ไฟล์ (`src/mux.js` ใหม่), `src/self-test.js` ~1,900 บรรทัด |
+| Tests | `npm test` → PASSED (รวม compression checks ใหม่) |
+| src | 25 ไฟล์ (`src/mux.js`, `src/compress.js`), `src/self-test.js` ~2,620 บรรทัด |
+
+### 2.1 Prototype: compression บน mux channel (ยังไม่ปล่อย)
+
+- โค้ด: `src/compress.js` + mux negotiation ใน `src/client.js` / `src/server.js` (opt-in ทั้งสองฝั่ง)
+- เปิด: `p2pgate server --compress` และ `p2pgate connect --compress` (ต้อง mux; socks5 ได้ mux อยู่แล้ว)
+- วัดจริงบน 4G: 64 MiB text 11.98s → 4.64s (**2.4×**), log 11.54s → 4.40s (**2.6×**); ผู้ใช้รู้สึก ~1.9× (รวม setup 2.2s)
+- ข้อจำกัด: mux เท่านั้น, Node 20 ได้ gzip, pipeline ฝั่งมือถือจำกัด ~14 MB/s, SSH ได้ ~1.0× (ใช้ `ssh -C`)
+- รายละเอียด + gate ก่อนปล่อย: `docs/spikes/compress-mux.md`
 
 ตรวจสถานะเร็ว ๆ:
 

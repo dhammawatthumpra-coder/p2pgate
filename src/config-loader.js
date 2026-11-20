@@ -18,6 +18,7 @@ const {
   DEFAULT_AUDIT_MAX_BYTES
 } = require('./audit-log')
 const { parseAllowEntry } = require('./allowlist')
+const { normalizeCompressConfig } = require('./compress')
 
 const DEFAULT_CONFIG_DIR = path.join(os.homedir(), '.p2pgate')
 const DEFAULT_CONFIG_PATH = path.join(DEFAULT_CONFIG_DIR, 'config.json')
@@ -637,6 +638,7 @@ function normalizeConfig(raw) {
     udpListen,
     mux: parseBoolean(raw.mux, 'mux', true),
     muxPeekMs: mode === 'server' ? parseMuxPeekMs(raw.muxPeekMs) : undefined,
+    compress: normalizeCompressConfig(raw.compress),
     localPort: parsePort(
       raw.localPort === undefined ? base.localPort : raw.localPort,
       'localPort',

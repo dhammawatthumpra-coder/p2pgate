@@ -31,6 +31,14 @@ const {
   writeReply: writeSocksReply
 } = require('./socks')
 const {
+  COMPRESS_VERSION,
+  availableAlgorithms,
+  normalizeAlgorithmList,
+  createCompressor,
+  createDecompressor,
+  writeAndFlush
+} = require('./compress')
+const {
   AUTH_VERSION,
   AUTH_TIMEOUT_MS,
   MAX_CONTROL_BYTES,
@@ -907,6 +915,8 @@ async function startClient(config, options = {}) {
   let muxPending = null
   let muxUnsupported = false
   const muxEnabled = resolveMuxEnabled(options, config, socksMode)
+  const compressConfig = resolveCompressEnabled(options, config)
+  const compressAlgorithms = compressConfig.algorithms
 
   async function requestMuxUpgrade(stream, capability) {
     try {
@@ -1054,6 +1064,13 @@ async function startClient(config, options = {}) {
   }
 
   function pipeMuxChannel(channel, socket, entry) {
+    const negotiated = channel.meta && channel.meta.compress && channel.meta.compress.algorithm
+
+    if (negotiated) {
+      pipeCompressedMuxChannel(channel, socket, entry, negotiated)
+      return
+    }
+
     const record = entry || { socket, stream: null }
     if (!entry) activeConnections.add(record)
 
@@ -1120,10 +1137,175 @@ async function startClient(config, options = {}) {
       }
     })
     socket.on('end', () => channel.end())
+    // A peer that closes immediately can deliver FIN before the socket is being read,
+    // in which case 'end' was already emitted and will not fire again.
+    if (socket.readableEnded) channel.end()
     socket.on('error', () => {
       if (!socket.destroyed) socket.destroy()
       if (!channel.closed) channel.destroy()
     })
+    socket.on('close', () => {
+      if (!channel.closed) channel.destroy()
+    })
+  }
+
+  function pipeCompressedMuxChannel(channel, socket, entry, algorithm) {
+    const record = entry || { socket, stream: null }
+    if (!entry) activeConnections.add(record)
+    record.stream = channel
+
+    let finished = false
+    let lingerTimer = null
+    let socketPaused = false
+    let channelPaused = false
+    let decompressorEnded = false
+
+    let compressor = null
+    let decompressor = null
+
+    try {
+      compressor = createCompressor(algorithm)
+      decompressor = createDecompressor(algorithm)
+    } catch (err) {
+      writeLog(`compression setup failed (${err.code || err.message}); closing channel`)
+      activeConnections.delete(record)
+      if (!socket.destroyed) socket.destroy()
+      if (!channel.closed) channel.destroy()
+      return
+    }
+
+    const cleanup = () => {
+      if (lingerTimer) {
+        clearTimeout(lingerTimer)
+        lingerTimer = null
+      }
+
+      activeConnections.delete(record)
+
+      try { compressor.destroy() } catch { /* Ignore. */ }
+
+      if (!channel.closed) channel.destroy()
+    }
+
+    // outbound: local socket -> compressor -> channel
+    compressor.on('data', (chunk) => {
+      if (finished || channel.closed) return
+
+      if (!channel.write(chunk)) {
+        channelPaused = true
+        compressor.pause()
+      }
+    })
+
+    compressor.on('drain', () => {
+      if (!socketPaused || finished || socket.destroyed) return
+      socketPaused = false
+      socket.resume()
+    })
+
+    compressor.on('error', () => {
+      if (!socket.destroyed) socket.destroy()
+      if (!channel.closed) channel.destroy()
+    })
+
+    compressor.on('end', () => {
+      if (!channel.closed) channel.end()
+    })
+
+    socket.on('data', (chunk) => {
+      if (finished || compressor.destroyed) return
+
+      if (!writeAndFlush(compressor, chunk)) {
+        socketPaused = true
+        socket.pause()
+      }
+    })
+
+    socket.on('end', () => {
+      if (!compressor.writableEnded && !compressor.destroyed) compressor.end()
+    })
+
+    // A peer that closes immediately can deliver FIN before the socket is being read,
+    // in which case 'end' was already emitted and will not fire again.
+    if (socket.readableEnded && !compressor.writableEnded && !compressor.destroyed) {
+      compressor.end()
+    }
+
+    channel.on('drain', () => {
+      if (!channelPaused) return
+      channelPaused = false
+      compressor.resume()
+    })
+
+    // inbound: channel -> decompressor -> local socket.
+    // The socket write is not throttled here, matching the uncompressed path: the
+    // channel window (256 KiB) bounds how much can be in flight.
+    decompressor.on('data', (chunk) => {
+      if (socket.destroyed || socket.writableEnded) return
+      socket.write(chunk)
+    })
+
+    decompressor.on('error', () => {
+      if (!socket.destroyed) socket.destroy()
+      if (!channel.closed) channel.destroy()
+    })
+
+    decompressor.on('end', () => {
+      decompressorEnded = true
+      if (socket.destroyed || socket.writableEnded) return
+      socket.end()
+    })
+
+    channel.on('data', (chunk) => {
+      if (finished || decompressor.writableEnded || decompressor.destroyed) return
+      decompressor.write(chunk)
+    })
+
+    channel.on('end', () => {
+      if (!decompressor.writableEnded && !decompressor.destroyed) decompressor.end()
+    })
+
+    channel.on('close', () => {
+      if (finished) return
+      finished = true
+
+      if (lingerTimer) {
+        clearTimeout(lingerTimer)
+        lingerTimer = null
+      }
+
+      activeConnections.delete(record)
+      try { compressor.destroy() } catch { /* Ignore. */ }
+
+      // Let the decompressor flush whatever is still buffered before closing the
+      // local socket; destroying it or ending the socket too early truncates the tail.
+      if (!decompressorEnded && !decompressor.destroyed) {
+        if (!decompressor.writableEnded) {
+          try { decompressor.end() } catch { /* Ignore. */ }
+        }
+      } else if (!socket.destroyed && !socket.writableEnded) {
+        socket.end()
+      }
+
+      lingerTimer = setTimeout(() => {
+        lingerTimer = null
+        if (!socket.destroyed) socket.destroy()
+      }, 5_000)
+      if (typeof lingerTimer.unref === 'function') lingerTimer.unref()
+    })
+
+    channel.on('error', () => {
+      finished = true
+      cleanup()
+      try { decompressor.destroy() } catch { /* Ignore. */ }
+      if (!socket.destroyed) socket.destroy()
+    })
+
+    socket.on('error', (err) => {
+      if (!socket.destroyed) socket.destroy()
+      if (!channel.closed) channel.destroy()
+    })
+
     socket.on('close', () => {
       if (!channel.closed) channel.destroy()
     })
@@ -1146,9 +1328,16 @@ async function startClient(config, options = {}) {
 
       if (carrier) {
         try {
-          const channel = await carrier.openChannel(
-            requestedTarget ? { target: requestedTarget } : {}
-          )
+          const request = requestedTarget ? { target: requestedTarget } : {}
+
+          if (compressConfig.enabled) {
+            request.compress = {
+              version: COMPRESS_VERSION,
+              algorithms: compressAlgorithms
+            }
+          }
+
+          const channel = await carrier.openChannel(request)
 
           pipeMuxChannel(channel, socket, entry)
           return
@@ -1717,7 +1906,37 @@ function resolveMuxEnabled(options, config, socksMode) {
   return socksMode === true
 }
 
+function resolveCompressEnabled(options, config) {
+  const configured = config && config.compress ? config.compress : null
+  const baseAlgorithms = normalizeAlgorithmList(
+    configured && configured.algorithms,
+    availableAlgorithms()
+  )
+
+  if (options.compress === false) {
+    return { enabled: false, algorithms: baseAlgorithms }
+  }
+
+  if (typeof options.compress === 'string') {
+    const list = normalizeAlgorithmList([options.compress], baseAlgorithms)
+    return {
+      enabled: list.length > 0,
+      algorithms: list.length > 0 ? list : baseAlgorithms
+    }
+  }
+
+  if (options.compress === true) {
+    return { enabled: true, algorithms: baseAlgorithms }
+  }
+
+  return {
+    enabled: Boolean(configured && configured.enabled === true),
+    algorithms: baseAlgorithms
+  }
+}
+
 module.exports = {
   startClient,
-  resolveMuxEnabled
+  resolveMuxEnabled,
+  resolveCompressEnabled
 }

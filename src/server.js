@@ -58,6 +58,13 @@ const {
   muxError
 } = require('./mux')
 const {
+  normalizeCompressConfig,
+  pickAlgorithm,
+  createCompressor,
+  createDecompressor,
+  writeAndFlush
+} = require('./compress')
+const {
   defaultControlSocketPath,
   defaultControlTokenPath,
   createControlToken,
@@ -543,6 +550,11 @@ async function startServer(config, options = {}) {
   const muxAllowed = options.mux === undefined
     ? config.mux !== false
     : options.mux !== false
+  const compressConfig = normalizeCompressConfig(config.compress)
+  const compressEnabled = options.compress === undefined
+    ? compressConfig.enabled === true
+    : options.compress === true
+  const compressAlgorithms = compressConfig.algorithms
   const nowMs = typeof options.now === 'function' ? options.now : Date.now
 
   const dhtOptions = {}
@@ -1444,6 +1456,10 @@ async function startServer(config, options = {}) {
       }
       channels.delete(channelId)
       record.channels = channels.size
+
+      try { if (channel.compressor) channel.compressor.destroy() } catch { /* Ignore. */ }
+      try { if (channel.decompressor) channel.decompressor.destroy() } catch { /* Ignore. */ }
+
       try {
         channel.socket.destroy()
       } catch {
@@ -1485,11 +1501,18 @@ async function startServer(config, options = {}) {
         return
       }
 
+      const algorithm = compressEnabled && request && request.compress
+        ? pickAlgorithm(request.compress.algorithms, compressAlgorithms)
+        : null
+
       const socket = net.createConnection({ host: target.host, port: target.port })
       const channel = {
         id: channelId,
         socket,
         target,
+        algorithm,
+        compressor: null,
+        decompressor: null,
         creditOut: CHANNEL_WINDOW,
         queue: [],
         queuedBytes: 0,
@@ -1497,7 +1520,57 @@ async function startServer(config, options = {}) {
         sentFin: false,
         targetEnded: false,
         remoteEnded: false,
+        receivedBytes: 0,
         abortTimer: null
+      }
+
+      if (algorithm) {
+        channel.compressor = createCompressor(algorithm)
+        channel.decompressor = createDecompressor(algorithm)
+
+        channel.compressor.on('data', (chunk) => {
+          if (channel.finished) return
+          addOutbound(record, chunk.length)
+          queueOut(channel, chunk)
+        })
+
+        channel.compressor.on('drain', () => {
+          if (channel.finished || socket.destroyed) return
+          socket.resume()
+        })
+
+        channel.compressor.on('error', () => {
+          send(MUX_TYPE.RESET, MUX_FLAG.RESET, channelId)
+          cleanup(channelId)
+        })
+
+        channel.compressor.on('end', () => {
+          if (channel.finished) return
+          channel.targetEnded = true
+          maybeFinishChannel(channel)
+        })
+
+        channel.decompressor.on('data', (chunk) => {
+          if (channel.finished || channel.socket.destroyed) return
+          channel.socket.write(chunk)
+        })
+
+        channel.decompressor.on('error', () => {
+          if (channel.finished) return
+
+          if (channel.remoteEnded) {
+            try { channel.socket.end() } catch { /* Ignore. */ }
+            return
+          }
+
+          send(MUX_TYPE.RESET, MUX_FLAG.RESET, channelId)
+          cleanup(channelId)
+        })
+
+        channel.decompressor.on('end', () => {
+          if (channel.finished) return
+          try { channel.socket.end() } catch { /* Ignore. */ }
+        })
       }
 
       channels.set(channelId, channel)
@@ -1506,14 +1579,21 @@ async function startServer(config, options = {}) {
       socket.setNoDelay(true)
 
       socket.once('connect', () => {
-        send(MUX_TYPE.OPEN_OK, 0, channelId, encodeJson({
+        const meta = {
           target: target.name,
           host: target.host,
           port: target.port
-        }))
+        }
+        if (algorithm) meta.compress = { algorithm }
+        send(MUX_TYPE.OPEN_OK, 0, channelId, encodeJson(meta))
       })
 
       socket.on('data', (chunk) => {
+        if (channel.compressor) {
+          if (!writeAndFlush(channel.compressor, chunk)) socket.pause()
+          return
+        }
+
         addOutbound(record, chunk.length)
         queueOut(channel, chunk)
       })
@@ -1524,6 +1604,11 @@ async function startServer(config, options = {}) {
       })
 
       socket.on('close', () => {
+        if (channel.compressor) {
+          if (!channel.compressor.writableEnded) channel.compressor.end()
+          return
+        }
+
         channel.targetEnded = true
         maybeFinishChannel(channel)
       })
@@ -1561,7 +1646,12 @@ async function startServer(config, options = {}) {
           send(MUX_TYPE.WINDOW, 0, channel.id, encodeUInt32(frame.payload.length))
 
           try {
-            channel.socket.write(frame.payload)
+            if (channel.decompressor) {
+              channel.receivedBytes += frame.payload.length
+              channel.decompressor.write(frame.payload)
+            } else {
+              channel.socket.write(frame.payload)
+            }
           } catch {
             send(MUX_TYPE.RESET, MUX_FLAG.RESET, channel.id)
             cleanup(channel.id)
@@ -1585,11 +1675,17 @@ async function startServer(config, options = {}) {
           const channel = channels.get(frame.channelId)
           if (!channel) return
 
+
           // Half-close: the peer finished sending, but the target may still be
           // writing its reply, so keep the channel alive until it drains.
           channel.remoteEnded = true
           try {
-            channel.socket.end()
+            if (channel.decompressor) {
+              if (channel.receivedBytes > 0) channel.decompressor.end()
+              else channel.socket.end()
+            } else {
+              channel.socket.end()
+            }
           } catch {
             cleanup(frame.channelId)
             return
