@@ -76,9 +76,9 @@ right default; there is no "turn it up" win.
 
 1. **Compress** (already 2.9–3.9× at 64 MiB, more at larger sizes).
 2. **Keep the client running** so only the first transfer pays the 2.2 s setup.
-3. **Raise the ratio, not the speed**: a trained zstd dictionary for small repetitive
-   payloads (JSON-RPC/MCP, HTTP headers) can beat a fresh window by several times. This is
-   the one untested idea with real upside, and it is cheap to prototype.
+3. **Raise the ratio, not the speed**: a trained zstd dictionary was tested and is a
+   **NO-GO** (`spike/dict/results.md`): 2.7× better than fresh zstd per message, but the
+   saved 191 B is 0.05 ms against an 80 ms round trip, and bulk JSON is neutral-to-worse.
 4. **Use `ssh -C` / `rsync -z`** when the payload is SSH — p2pgate-level compression sees
    ciphertext and cannot help.
 
