@@ -3,6 +3,12 @@
 **Date:** 2026-11-20
 **Question:** the "Stargate" pipeline compresses before sending; would that make
 p2pgate transfers faster?
+
+> **Update:** the loopback numbers below understate the real-world win. A real
+> Windows↔4G/Termux test (`spike/real-link/results.md`) measured **2.9–3.9× at 64 MiB**
+> on compressible data, because the slower link makes the compression ratio count. Read
+> that file first; this one explains the mechanics and the codec choice.
+
 **Verdict:** yes for compressible payloads, but it scales with size — 0.9× at 4 MiB,
 1.6× at 16 MiB, 2.7× at 256 MiB — and neutral for random/encrypted data. The win is
 compression, not the extra crypto layers. An early modeled estimate overshot (6.46×)
