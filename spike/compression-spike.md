@@ -3,10 +3,10 @@
 **Date:** 2026-11-20
 **Question:** the "Stargate" pipeline compresses before sending; would that make
 p2pgate transfers faster?
-**Verdict:** yes for compressible payloads (measured 1.6× at 16 MiB, 2.7× at 256 MiB),
-neutral for random/encrypted ones — the win is compression, not the extra crypto layers.
-It is **not** a 6× win in practice; an early modeled estimate overshot because it ignored
-the ~1.2 s fixed connection cost per stream.
+**Verdict:** yes for compressible payloads, but it scales with size — 0.9× at 4 MiB,
+1.6× at 16 MiB, 2.7× at 256 MiB — and neutral for random/encrypted data. The win is
+compression, not the extra crypto layers. An early modeled estimate overshot (6.46×)
+because it ignored the ~1.5 s fixed connection cost per stream.
 
 ## Measurement (real end-to-end)
 
@@ -26,16 +26,19 @@ connection setup is included exactly as a user would feel it.
 
 | Size | Ratio | Raw tunnel | With compression | Effective | Speedup |
 |---|---|---|---|---|---|
-| 16 MiB | 7.84× | 6.6 MB/s | 1.43 s | 10.6 MB/s | **1.60×** |
-| 64 MiB | 8.16× | 13.1 MB/s | 1.81 s | 29.1 MB/s | **2.23×** |
-| 256 MiB | 7.59× | 18.4 MB/s | 3.55 s | 50.2 MB/s | **2.72×** |
+| 4 MiB | 7.24× | 1.72 s | 1.86 s | 2.2 MB/s | **0.91×** |
+| 8 MiB | 7.70× | 2.46 s | 1.84 s | 4.3 MB/s | **1.30×** |
+| 16 MiB | 7.84× | 2.42 s | 1.43 s | 10.6 MB/s | **1.60×** |
+| 64 MiB | 8.16× | 4.90 s | 1.81 s | 29.1 MB/s | **2.23×** |
+| 256 MiB | 7.59× | 13.88 s | 3.55 s | 50.2 MB/s | **2.72×** |
 | 256 MiB random | 1.00× | 21.3 MB/s | 10.82 s | 21.4 MB/s | **1.00×** |
 
 Integrity verified by SHA-256 in every case.
 
-Why the speedup grows with size: each tunnel stream pays ~1.2 s of connection setup, which
-compression cannot remove. A 16 MiB file that shrinks to 2 MiB still spends that 1.2 s,
-so the ceiling is low; at 256 MiB the setup is amortised and the ratio shows through.
+Why the speedup grows with size: each tunnel stream pays ~1.5 s of connection setup, which
+compression cannot remove. A 4 MiB payload shrinks to 0.55 MiB but still spends the same
+1.5 s, so it actually comes out slightly slower; by 256 MiB the setup is amortised and the
+compression ratio shows through.
 
 Also note the compressed stream does **not** move at the raw per-byte rate (33.7 MiB went
 through at ~9.5 MiB/s vs 18–21 MiB/s for raw). Compressing before send means the data is
