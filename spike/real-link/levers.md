@@ -14,6 +14,7 @@ Follow-up to `results.md` (compression) — this file tests the other "make it f
 | 4 channels over one mux carrier | 0% (2.19–2.93 vs 3.19–3.43 MB/s single) | no |
 | 4 separate connections (no mux) | 3 of 4 never delivered; run hung, killed after 30 min | not usable as-is |
 | Faster codec (Rust) | < 3% (compressor is 38× faster than the link) | no |
+| LZ4 instead of zstd | ratio 30–55% worse; break-even at 41–63 MB/s link | no (`spike/lz4/results.md`) |
 | Bigger frames (16 → 64 KiB) | not tested; ~256 frames/s means framing is < 1% | low priority |
 
 ## 1. Setup is 2.2 s — and a warm client removes it

@@ -1,0 +1,1 @@
+{"name":"lz4-spike","private":true,"version":"0.0.0","dependencies":{"lz4-napi":"^2.10.0"}}
