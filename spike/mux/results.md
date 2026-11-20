@@ -66,7 +66,39 @@ everything else. At normal speed the change is inside the noise of a single GC p
 p2pgate is network-bound: its cost centre is the ~2 s DHT connect and the link itself,
 not the 16 KiB memcpy per frame.
 
-## 5. Other gates
+## 5. Steady-state: is the tunnel CPU-bound after it is up?
+
+The question that matters for "will Rust make transfers faster once the tunnel exists".
+Measured on loopback (no network bottleneck), server + client in one process, 64 MiB
+one-way:
+
+| Mode | Throughput | CPU (one core) |
+|---|---|---|
+| `--mux` | 11.9 MB/s | 77% |
+| dedicated stream | 13.5 MB/s | 65% |
+
+So on a fast link the data path **is** CPU-bound at ~12 MB/s per process — but a CPU
+profile shows where that time goes:
+
+```
+105  sodium-native  crypto_secretstream_xchacha20poly1305_pull
+ 62  udx-native     writeBuffer
+ 56  sodium-native  crypto_secretstream_xchacha20poly1305_push
+ 42  udx-native     trySend
+ 34  secret-stream  _write
+...
+(no src/mux.js function in the top 15)
+```
+
+The cost is Noise encryption (`sodium-native`) plus the UDX transport, not the mux
+codec. At 12 MB/s the codec is ~750 frames/s × 32.7 µs ≈ 2.4% of a core. Porting it to
+Rust would remove ~2% of the CPU, and the throughput ceiling stays where it is.
+
+What would actually raise steady-state throughput: larger frames (mux uses 16 KiB),
+fewer copies in the secret-stream path, or a different transport (the p2path direction)
+— not a Rust rewrite of the framing.
+
+## 6. Other gates
 
 | Gate | Result |
 |---|---|
@@ -75,7 +107,7 @@ not the 16 KiB memcpy per frame.
 | G4 memory | no plausible win: RSS is dominated by V8 + HyperDHT, not the codec (server ~55–70 MB in soak) |
 | G5 maintenance | would add a second implementation of the same format (Rust + JS must stay in sync forever) |
 
-## 6. Decision
+## 7. Decision
 
 **Do not port.** Keep the JS codec.
 
@@ -87,7 +119,7 @@ Revisit only if one of these becomes true:
 3. the goal changes from speed to **single binary / memory footprint**, in which case a
    full port is a different project with its own gates.
 
-## 7. Reproduce
+## 8. Reproduce
 
 ```powershell
 cd D:\tunnel\p2pgate\spike\mux
