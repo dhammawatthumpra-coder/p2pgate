@@ -68,6 +68,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 - โค้ด: `src/compress.js` + mux negotiation ใน `src/client.js` / `src/server.js` (opt-in ทั้งสองฝั่ง)
 - เปิด: `p2pgate server --compress` และ `p2pgate connect --compress` (ต้อง mux; socks5 ได้ mux อยู่แล้ว)
 - วัดจริงบน 4G: 64 MiB text 11.98s → 4.64s (**2.4×**), log 11.54s → 4.40s (**2.6×**); ผู้ใช้รู้สึก ~1.9× (รวม setup 2.2s)
+- Soak 4 ชม. บน 4G: 240/240 รอบ, 0 failure, RSS ทั้งสองฝั่งราบ (`spike/soak/results.md`)
 - ข้อจำกัด: mux เท่านั้น, Node 20 ได้ gzip, pipeline ฝั่งมือถือจำกัด ~14 MB/s, SSH ได้ ~1.0× (ใช้ `ssh -C`)
 - รายละเอียด + gate ก่อนปล่อย: `docs/spikes/compress-mux.md`
 

@@ -102,4 +102,5 @@ when the tunnel itself is the bottleneck, which is expected.
 2. Add a decompression output cap per channel.
 3. Cover `--compress` in the CLI docs / `--help` (done) and the README config table.
 4. Decide whether to support non-mux tunnels (needs an in-band flag and a protocol bump).
-5. Soak: 4-hour mixed traffic with compression on, watch RSS and CPU on Termux.
+5. ~~Soak~~ done: 4 hours, 240/240 cycles, 0 failures, flat RSS on both ends
+   (`spike/soak/results.md`).
