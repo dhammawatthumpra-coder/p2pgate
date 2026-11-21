@@ -1,3 +1,5 @@
 payloads/
 received.jsonl
 *.log
+fastpath-key.json
+soak*.jsonl
