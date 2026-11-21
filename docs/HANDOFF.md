@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-21
-สถานะ: **v1.13.6 เตรียมไว้ — รอ publish**
+สถานะ: **v1.13.6 released** (fast-path peek fix + compression opt-in)
 เจ้าของโปรเจกต์: incognitums
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -53,13 +53,13 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.13.6` (เตรียมไว้ — รอ publish) |
-| npm `latest` | `1.13.5` |
+| Version | `1.13.6` |
+| npm `latest` | `1.13.6` (อาจยัง propagate 5–30 นาที) |
 | Git branch | `main` |
-| Commit | `e0c705d fix(auth): fast-path peek dropped payload after the first newline` + `eda4cce` |
-| Tag | `v1.13.6` (จะสร้างหลัง publish) |
-| GitHub Release | `v1.13.5` = Latest (1.13.6 รอ) |
-| Working tree | มีการเตรียม release 1.13.6 |
+| Commit | `380dad7 release: v1.13.6` |
+| Tag | `v1.13.6` |
+| GitHub Release | `v1.13.6` = Latest |
+| Working tree | clean หลัง release |
 | Tests | `npm test` → PASSED (รวม compression + fastpath peek checks) |
 | src | 25 ไฟล์ (`src/mux.js`, `src/compress.js`), `src/self-test.js` ~2,620 บรรทัด |
 
