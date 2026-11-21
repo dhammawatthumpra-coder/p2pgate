@@ -8,6 +8,7 @@
 // continuous zlib stream in each direction.
 
 const zlib = require('node:zlib')
+const { Duplex } = require('node:stream')
 
 const COMPRESS_VERSION = 1
 const DEFAULT_LEVEL = 1
@@ -252,6 +253,88 @@ function writeAndFlush(compressor, chunk) {
   return ready
 }
 
+/**
+ * Wraps a duplex byte stream (the authenticated tunnel) with a compressor on write and
+ * a decompressor on read. Used for non-mux tunnels, where the whole stream is one
+ * session. The wrapper is a Duplex so `pump()` can treat it like the raw stream.
+ */
+function createCompressedStream(stream, algorithm, limits = {}, initial = null) {
+  const compressor = createCompressor(algorithm)
+  const decompressor = createDecompressor(algorithm)
+  let closed = false
+
+  const wrapper = new Duplex({
+    write(chunk, encoding, callback) {
+      compressor.write(chunk, () => {
+        if (typeof compressor.flush === 'function') compressor.flush(() => callback())
+        else callback()
+      })
+    },
+    final(callback) {
+      compressor.end()
+      compressor.once('end', () => {
+        // End the encrypted stream as well: pump() used to end it directly, and
+        // without FIN the peer would wait for its abort timer.
+        if (!stream.destroyed) stream.end()
+        callback()
+      })
+    },
+    read() {
+      decompressor.resume()
+    },
+    destroy(error, callback) {
+      closed = true
+      try { compressor.destroy() } catch { /* Ignore. */ }
+      try { decompressor.destroy() } catch { /* Ignore. */ }
+      if (!stream.destroyed) stream.destroy()
+      callback(error)
+    }
+  })
+
+  const guard = guardDecompressor(decompressor, limits, (code) => {
+    const err = new Error(`compressed stream aborted: ${code}`)
+    err.code = code
+    wrapper.destroy(err)
+  })
+
+  compressor.on('data', (chunk) => {
+    if (closed || stream.destroyed) return
+    if (!stream.write(chunk)) compressor.pause()
+  })
+  stream.on('drain', () => {
+    if (!closed) compressor.resume()
+  })
+  compressor.on('error', (err) => wrapper.destroy(err))
+
+  if (initial && initial.length > 0) {
+    guard.countInput(initial.length)
+    decompressor.write(initial)
+  }
+
+  stream.on('data', (chunk) => {
+    if (closed) return
+    guard.countInput(chunk.length)
+    decompressor.write(chunk)
+  })
+  decompressor.on('data', (chunk) => {
+    if (!wrapper.push(chunk)) decompressor.pause()
+  })
+  decompressor.on('end', () => wrapper.push(null))
+  decompressor.on('error', (err) => wrapper.destroy(err))
+  stream.on('end', () => {
+    if (!decompressor.writableEnded) decompressor.end()
+  })
+  stream.on('error', (err) => wrapper.destroy(err))
+  stream.on('close', () => {
+    if (!closed) wrapper.destroy()
+  })
+  wrapper.on('close', () => {
+    if (!stream.destroyed) stream.destroy()
+  })
+
+  return wrapper
+}
+
 module.exports = {
   COMPRESS_VERSION,
   DEFAULT_LEVEL,
@@ -267,5 +350,6 @@ module.exports = {
   createDecompressor,
   writeAndFlush,
   guardDecompressor,
-  sampleCompressible
+  sampleCompressible,
+  createCompressedStream
 }

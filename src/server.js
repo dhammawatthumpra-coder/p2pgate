@@ -58,10 +58,12 @@ const {
   muxError
 } = require('./mux')
 const {
+  COMPRESS_VERSION,
   normalizeCompressConfig,
   pickAlgorithm,
   createCompressor,
   createDecompressor,
+  createCompressedStream,
   writeAndFlush,
   guardDecompressor
 } = require('./compress')
@@ -107,11 +109,21 @@ function parseFastpathRequest(line) {
     return null
   }
 
+  let compress = null
+  if (parsed.compress && typeof parsed.compress === 'object' && !Array.isArray(parsed.compress)) {
+    if (Number(parsed.compress.version) === COMPRESS_VERSION &&
+      Array.isArray(parsed.compress.algorithms)) {
+      compress = { algorithms: parsed.compress.algorithms }
+    }
+  }
+
   if (typeof parsed.target === 'string' && parsed.target.trim() !== '') {
     const name = parsed.target.trim()
     if (!/^[A-Za-z0-9_-]{1,32}$/.test(name)) return null
-    return { kind: 'target', target: name }
+    return { kind: 'target', target: name, compress }
   }
+
+  if (compress) return { kind: 'compress', compress }
 
   return null
 }
@@ -879,7 +891,17 @@ async function startServer(config, options = {}) {
           return
         }
 
-        forwardToTarget(stream, entry, remoteHex, slot, result.leftover, result.target)
+        let tunnel = stream
+        let leftover = result.leftover
+
+        if (result.compress) {
+          tunnel = createCompressedStream(stream, result.compress, compressConfig, leftover)
+          leftover = Buffer.alloc(0)
+          entry.stream = tunnel
+          writeLog(`COMPRESS ${result.compress} client=${remoteHex}`)
+        }
+
+        forwardToTarget(tunnel, entry, remoteHex, slot, leftover, result.target)
       })
       .catch((err) => {
         writeLog(`AUTH ERROR client=${remoteHex}: ${err.message}`)
@@ -965,6 +987,10 @@ async function startServer(config, options = {}) {
       const peekEnabled = muxPeekMs > 0
       const advertiseMux = muxAllowed && peekEnabled
       const advertiseTarget = peekEnabled
+      const compressCapability = compressEnabled
+        ? { version: COMPRESS_VERSION, algorithms: compressAlgorithms }
+        : null
+      const advertiseCompress = peekEnabled && compressCapability !== null
       const capability = {
         version: MUX_VERSION,
         maxChannels: DEFAULT_MAX_CHANNELS
@@ -974,11 +1000,12 @@ async function startServer(config, options = {}) {
         v: AUTH_VERSION,
         status: AUTH_STATUS.FASTPATH_READY,
         ...(advertiseMux ? { mux: capability } : {}),
-        ...(advertiseTarget ? { target: true } : {})
+        ...(advertiseTarget ? { target: true } : {}),
+        ...(advertiseCompress ? { compress: compressCapability } : {})
       })
       writeLog(`FASTPATH client=${remoteHex}`)
 
-      if (!advertiseMux && !advertiseTarget) {
+      if (!advertiseMux && !advertiseTarget && !advertiseCompress) {
         void audit.record('auth.fastpath', {
           source: 'server',
           key: remoteHex
@@ -995,6 +1022,12 @@ async function startServer(config, options = {}) {
       })
       const request = parseFastpathRequest(peek.line)
       const upgraded = Boolean(request && request.kind === 'mux' && advertiseMux)
+      const requestedCompress = advertiseCompress &&
+        request &&
+        request.compress &&
+        !upgraded
+        ? pickAlgorithm(request.compress.algorithms, compressAlgorithms)
+        : null
 
       void audit.record('auth.fastpath', {
         source: 'server',
@@ -1026,13 +1059,28 @@ async function startServer(config, options = {}) {
 
         writeAuthMessage(stream, {
           v: AUTH_VERSION,
-          target: { name: target.name, host: target.host, port: target.port }
+          target: { name: target.name, host: target.host, port: target.port },
+          ...(requestedCompress
+            ? { compress: { version: COMPRESS_VERSION, algorithm: requestedCompress } }
+            : {})
         })
         writeLog(
-          `FASTPATH target=${target.name} client=${remoteHex} -> ${target.host}:${target.port}`
+          `FASTPATH target=${target.name} client=${remoteHex} -> ${target.host}:${target.port}` +
+            `${requestedCompress ? ` compress=${requestedCompress}` : ''}`
         )
 
-        return { ok: true, target, leftover: peek.leftover }
+        return { ok: true, target, leftover: peek.leftover, compress: requestedCompress }
+      }
+
+      if (request && request.kind === 'compress') {
+        writeAuthMessage(stream, {
+          v: AUTH_VERSION,
+          ...(requestedCompress
+            ? { compress: { version: COMPRESS_VERSION, algorithm: requestedCompress } }
+            : {})
+        })
+        writeLog(`FASTPATH compress=${requestedCompress || 'none'} client=${remoteHex}`)
+        return { ok: true, leftover: peek.leftover, compress: requestedCompress }
       }
 
       if (!upgraded) {
@@ -1264,6 +1312,14 @@ async function startServer(config, options = {}) {
         return { ok: false }
       }
 
+      const compressAlgorithm = !muxRequested &&
+        compressEnabled &&
+        response &&
+        response.compress &&
+        Number(response.compress.version) === COMPRESS_VERSION
+        ? pickAlgorithm(response.compress.algorithms, compressAlgorithms)
+        : null
+
       try {
         await authGuard.recordSuccess(remoteHex)
       } catch (err) {
@@ -1291,6 +1347,13 @@ async function startServer(config, options = {}) {
         }
       }
 
+      if (compressAlgorithm) {
+        successMessage.compress = {
+          version: COMPRESS_VERSION,
+          algorithm: compressAlgorithm
+        }
+      }
+
       writeAuthMessage(stream, successMessage)
       writeLog(
         `AUTH OK client=${remoteHex} method=${mode} target=${muxRequested ? 'mux' : selectedTarget.name}`
@@ -1306,7 +1369,8 @@ async function startServer(config, options = {}) {
         ok: true,
         leftover: Buffer.concat([readyRead.leftover, read.leftover]),
         target: selectedTarget,
-        mux: muxRequested
+        mux: muxRequested,
+        compress: compressAlgorithm
       }
     } finally {
       gate.release()

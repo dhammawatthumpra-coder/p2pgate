@@ -1,7 +1,8 @@
-# Compression for mux channels (prototype)
+# Compression for p2pgate tunnels (prototype)
 
 **Status:** prototype, opt-in on both ends, **not released**.
-**Scope:** mux channels only (`--mux`, or `--socks5` which defaults to mux).
+**Scope:** mux channels (`--mux`, `--socks5`) and non-mux tunnels (challenge and
+fast-path sessions).
 **Default:** off. Turning it on changes nothing until both sides agree.
 
 ## Why
@@ -42,6 +43,20 @@ Every decompressor counts input and output bytes. The channel is reset when outp
 exceeds `maxOutputBytes` (default 4 GiB), or after 256 KiB of input when the expansion
 ratio exceeds `maxRatio` (default 1000). Both are configurable under `compress`.
 
+### Non-mux tunnels
+
+A dedicated tunnel has one byte stream, so compression is negotiated before the first
+payload byte and wraps the whole stream:
+
+- **Challenge sessions**: the client adds `compress` to the auth proof; the server answers
+  with `compress.algorithm` in the OK message. Both sides then wrap the stream.
+- **Fast-path sessions**: the server advertises `compress` in `FASTPATH_READY`; the client
+  sends one control line inside the peek window (target and compress combined) and the
+  server acks with the algorithm.
+- **Old peers**: a server that does not advertise (or ignores the proof field) returns no
+  algorithm, and the client stays plain — mixed versions keep working.
+- `auto` sampling is mux-only. Non-mux uses `always` when enabled.
+
 ### Half-close and tail flush
 
 Two bugs surfaced while testing and are fixed:
@@ -81,6 +96,13 @@ Server-side delivery time (first byte → close), same link, same payloads:
 
 Client-perceived (includes the ~2.2 s DHT setup on both runs): **1.9×** for both.
 
+Non-mux tunnel (dedicated stream, same 4G link):
+
+| Payload | Plain | Compressed | Speedup |
+|---|---|---|---|
+| text 64 MiB, client wall time | 12.76 s | 7.30 s | **1.75×** |
+| text 64 MiB, server delivery | 11.98 s | 4.79 s | **2.50×** |
+
 Loopback (tunnel CPU-bound, no network): 8.3 → 13.0 MB/s (1.6×) — compression helps less
 when the tunnel itself is the bottleneck, which is expected.
 
@@ -115,10 +137,8 @@ when the tunnel itself is the bottleneck, which is expected.
 
 1. ~~`auto` sampling~~ done: first 32 KiB/60 ms probe, sticky per process.
 2. ~~Decompression output cap~~ done: 4 GiB / 1000× guards, configurable.
-3. Non-mux tunnels: **not done**. The fast-path peek reads the first bytes as payload, so
-   compression has to be negotiated before it and skipped for fast-path sessions. That
-   touches the auth/peek path (the area behind the 1.13.2/1.13.3 regressions) and needs
-   its own change with the fast-path matrix.
+3. ~~Non-mux tunnels~~ done: challenge (proof field) and fast-path (peek line) sessions;
+   old peers stay plain.
 4. Parallel-channel soak: 1 hour with 4 channels (`spike/soak/results.md`).
 5. ~~Soak~~ done: 4 hours, 240/240 cycles, 0 failures, flat RSS on both ends
    (`spike/soak/results.md`).

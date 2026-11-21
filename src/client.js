@@ -40,7 +40,8 @@ const {
   createDecompressor,
   writeAndFlush,
   guardDecompressor,
-  sampleCompressible
+  sampleCompressible,
+  createCompressedStream
 } = require('./compress')
 const {
   AUTH_VERSION,
@@ -739,11 +740,17 @@ async function startClient(config, options = {}) {
 
     if (status.status === AUTH_STATUS.FASTPATH_READY) {
       const cap = status.mux
+      const compressCap = status.compress
 
       return {
         fastpath: true,
         leftover: statusRead.leftover,
         targetCapability: status.target === true,
+        compressCapability: compressCap &&
+          Number(compressCap.version) === COMPRESS_VERSION &&
+          Array.isArray(compressCap.algorithms)
+          ? { version: COMPRESS_VERSION, algorithms: compressCap.algorithms }
+          : null,
         muxCapability: cap && Number(cap.version) === MUX_VERSION
           ? {
               version: MUX_VERSION,
@@ -871,6 +878,13 @@ async function startClient(config, options = {}) {
         proofMessage.udp = { target: authOptions.udp.target }
       }
 
+      if (authOptions.compress) {
+        proofMessage.compress = {
+          version: COMPRESS_VERSION,
+          algorithms: authOptions.compress.algorithms
+        }
+      }
+
       encrypted.write(encodeControl(proofMessage))
     } catch {
       throw new AuthError('ไม่สามารถส่งข้อมูลยืนยันตัวตนได้', 'AUTH_PROTOCOL')
@@ -940,6 +954,9 @@ async function startClient(config, options = {}) {
         resultRead.leftover
       ]),
       target: serverTarget,
+      compress: result.compress && typeof result.compress.algorithm === 'string'
+        ? result.compress.algorithm
+        : null,
       mux: result.mux && Number(result.mux.version) === MUX_VERSION
         ? {
             version: MUX_VERSION,
@@ -994,8 +1011,18 @@ async function startClient(config, options = {}) {
     }
   }
 
-  async function requestFastpathTarget(stream, name) {
-    stream.write(encodeControl({ v: AUTH_VERSION, target: name }))
+  async function requestFastpathOptions(stream, options) {
+    const request = { v: AUTH_VERSION }
+
+    if (options.target) request.target = options.target
+    if (options.compress) {
+      request.compress = {
+        version: COMPRESS_VERSION,
+        algorithms: options.compress.algorithms
+      }
+    }
+
+    stream.write(encodeControl(request))
 
     const ack = await readControlLine(stream, {
       timeoutMs: 5_000,
@@ -1024,7 +1051,10 @@ async function startClient(config, options = {}) {
       leftover: ack.leftover,
       target: parsed.target && typeof parsed.target.name === 'string'
         ? parsed.target
-        : { name }
+        : (options.target ? { name: options.target } : null),
+      compress: parsed.compress && typeof parsed.compress.algorithm === 'string'
+        ? parsed.compress.algorithm
+        : null
     }
   }
 
@@ -1497,26 +1527,52 @@ async function startClient(config, options = {}) {
 
         const authResult = await authenticateEncrypted(
           encrypted,
-          socksRequest ? { socks: socksRequest } : {}
+          {
+            ...(socksRequest ? { socks: socksRequest } : {}),
+            ...(compressConfig.enabled
+              ? { compress: { algorithms: compressAlgorithms } }
+              : {})
+          }
         )
 
         let authLeftover = authResult.leftover
         let resolvedTarget = authResult.target || null
+        let resolvedCompress = authResult.compress || null
 
-        // Fast path has no proof message, so a requested target travels as one
-        // control line inside the server's peek window. Fall back to an explicit
-        // error rather than silently using defaultTarget on an older server.
-        if (requestedTarget !== null && authResult.fastpath) {
-          if (!authResult.targetCapability) {
+        if (authResult.fastpath) {
+          const needTarget = requestedTarget !== null
+          const needCompress = compressConfig.enabled &&
+            Boolean(authResult.compressCapability)
+
+          if (needTarget && !authResult.targetCapability) {
             throw new AuthError(
               'เซิร์ฟเวอร์ไม่รองรับ --target บน fast path; อัปเกรดเซิร์ฟเวอร์หรือใช้ key แบบ scram',
               'TARGET_UNSUPPORTED'
             )
           }
 
-          const ack = await requestFastpathTarget(encrypted, requestedTarget)
-          authLeftover = ack.leftover
-          resolvedTarget = ack.target
+          if (needTarget || needCompress) {
+            const ack = await requestFastpathOptions(encrypted, {
+              target: needTarget ? requestedTarget : null,
+              compress: needCompress ? { algorithms: compressAlgorithms } : null
+            })
+            authLeftover = ack.leftover
+            if (ack.target) resolvedTarget = ack.target
+            if (ack.compress) resolvedCompress = ack.compress
+          }
+        }
+
+        let tunnel = encrypted
+        if (resolvedCompress) {
+          tunnel = createCompressedStream(
+            encrypted,
+            resolvedCompress,
+            compressConfig,
+            authLeftover
+          )
+          authLeftover = Buffer.alloc(0)
+          entry.stream = tunnel
+          writeLog(`COMPRESS ${resolvedCompress} established slot=${slot}`)
         }
 
         writeLog(
@@ -1528,7 +1584,7 @@ async function startClient(config, options = {}) {
           writeSocksReply(socket, SOCKS_REPLY.SUCCEEDED)
         }
 
-        pump(encrypted, socket, entry, (finishedEntry) => {
+        pump(tunnel, socket, entry, (finishedEntry) => {
           activeConnections.delete(finishedEntry)
         }, writeLog, authLeftover)
 

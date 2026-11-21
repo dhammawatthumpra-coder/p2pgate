@@ -2509,6 +2509,20 @@ async function main() {
     checks.push('compress auto enables itself for compressible data')
     await autoOn.close()
 
+    // non-mux: compression is negotiated in the auth proof / fast-path control line
+    const nonMuxLogs = []
+    const nonMuxClient = await startTestClient(unauthorizedKeyPath, unattendedPassword, {
+      base: { ...clientBase, masterSecret: compressSecret },
+      mux: false,
+      compress: true,
+      log: (line) => nonMuxLogs.push(String(line))
+    })
+    const nonMuxBody = Buffer.from('non-mux compressed line\n'.repeat(8192))
+    assert.deepEqual(await echoThrough(nonMuxClient, nonMuxBody), nonMuxBody)
+    assert.ok(nonMuxLogs.some((line) => line.includes('COMPRESS ')))
+    checks.push('non-mux tunnel negotiates compression in the auth proof')
+    await nonMuxClient.close()
+
     await compressClient.close()
     await compressServer.close()
 
