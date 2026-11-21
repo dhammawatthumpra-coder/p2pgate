@@ -26,7 +26,7 @@ Works on Termux/Android, Linux, macOS, and Windows with Node.js 20 or newer.
 >
 > Manual testing guide (Thai): [`TESTING.md`](TESTING.md)
 >
-> Running as a service (Termux / systemd / Windows): [`docs/SERVICE.md`](docs/SERVICE.md)
+> Running as a service (Termux / systemd / Windows): [`docs/SERVICE.md`](https://github.com/incognitums/p2pgate/blob/main/docs/SERVICE.md)
 
 ## Quick start (no setup)
 
@@ -861,6 +861,7 @@ p2pgate connect -s <secret> -p <password> --compress --mux
 ```
 
 - **off by default**; both ends must enable it
+- `--no-compress` (or `"compress": false` in config) turns it off and wins over config
 - zstd when the Node build has it (>= 22.15), gzip otherwise
 - works on mux channels and non-mux tunnels, including trusted-device (fast path) sessions
 - `"compress": "auto"` samples the first 32 KiB / 60 ms and stays off for incompressible

@@ -85,6 +85,17 @@ npm test
 npm view p2pgate version
 ```
 
+### 2.0 Release process (กันพลาดซ้ำ)
+
+- อ่าน [`RELEASING.md`](../RELEASING.md) — ลำดับตายตัว:
+  **bump/docs → commit → `npm publish` (เจ้าของ) → `node scripts/release.js --after-publish`**
+- `npm run release:check` ตรวจ badge เวอร์ชัน, release notes, CHANGELOG, และ CLI flag
+  ที่ยังไม่ถูกเขียนใน README
+- `node scripts/release.js` (preflight) ต้องมี working tree clean + checks ผ่าน
+- `node scripts/release.js --after-publish` จะ **รอจน npm เสิร์ฟเวอร์ชันและ README ใหม่**
+  ก่อนสร้าง tag/GitHub Release (แก้ปัญหาออก release ก่อน npm พร้อม)
+- `prepublishOnly` รัน `npm test` + release check อัตโนมัติ
+
 ---
 
 ## 3. ประวัติรุ่น (สรุป)

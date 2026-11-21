@@ -48,8 +48,11 @@
     "server": "node src/cli.js server",
     "client": "node src/cli.js client",
     "test": "npm run check && npm run self-test",
-    "prepublishOnly": "npm test",
+    "prepublishOnly": "npm test && node scripts/check-release.js",
     "docs:check": "node scripts/check-docs.js",
+    "release:check": "node scripts/check-release.js",
+    "release:preflight": "node scripts/release.js",
+    "release:after": "node scripts/release.js --after-publish",
     "self-test": "node src/self-test.js",
     "check": "node --check src/cli.js && node --check src/config-loader.js && node --check src/crypto-utils.js && node --check src/auth.js && node --check src/auth-guard.js && node --check src/device-registry.js && node --check src/audit-log.js && node --check src/control.js && node --check src/doctor.js && node --check src/i18n.js && node --check src/quickstart.js && node --check src/keygen.js && node --check src/setup-wizard.js && node --check src/socks.js && node --check src/allowlist.js && node --check src/master.js && node --check src/config-tools.js && node --check src/udp.js && node --check src/hosts.js && node --check src/audit-view.js && node --check src/compress.js && node --check src/mux.js && node --check src/server.js && node --check src/client.js && node --check src/self-test.js && node scripts/check-docs.js"
   },

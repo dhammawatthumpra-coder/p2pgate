@@ -25,7 +25,7 @@ CGNAT/ไฟร์วอลล์ โดยไม่ต้องเปิดพ�
 >
 > คู่มือทดสอบก่อนใช้งานจริง: [`TESTING.md`](TESTING.md)
 >
-> การรันเป็น service (Termux / systemd / Windows): [`docs/SERVICE.md`](docs/SERVICE.md)
+> การรันเป็น service (Termux / systemd / Windows): [`docs/SERVICE.md`](https://github.com/incognitums/p2pgate/blob/main/docs/SERVICE.md)
 
 ## เริ่มใช้งานเร็ว (ไม่ต้อง setup)
 
@@ -840,6 +840,7 @@ p2pgate connect -s <secret> -p <password> --compress --mux
 ```
 
 - **ปิดเป็นค่าเริ่มต้น**; ต้องเปิดทั้ง server และ client
+- `--no-compress` (หรือ `"compress": false` ใน config) ปิด และมีผลเหนือค่าใน config
 - ใช้ zstd ถ้า Node รองรับ (>= 22.15) ไม่งั้นใช้ gzip
 - รองรับทั้ง mux channel และ non-mux tunnel รวมถึง trusted device (fast path)
 - `"compress": "auto"` สุ่มตัวอย่าง 32 KiB / 60 ms แล้วปิดเองถ้าข้อมูลบีบอัดไม่ได้ (mux เท่านั้น)
