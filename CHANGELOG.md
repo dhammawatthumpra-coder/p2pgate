@@ -7,6 +7,24 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.13.6] - 2026-11-21
+
+### Fixed
+
+- **fast-path (trusted device) ทำข้อมูลหายหลัง newline แรก** — `peekControlLine()`
+  คืน `raw` เป็นแค่บรรทัดแรก แต่ branch ที่ไม่ upgrade ส่ง `peek.raw` ต่อเป็น payload
+  ทำให้ไบต์หลัง newline แรกในหน้าต่าง peek หายไป (วัดได้ 65,518 ไบต์จาก 64 MiB)
+  แก้ให้ `raw` = ทุกไบต์ที่อ่าน + เพิ่ม regression check ใน self-test
+
+### Added
+
+- **compression แบบ opt-in** (`--compress`, `compress: true | "auto"` ใน config)
+  - mux channel และ non-mux (challenge proof + fast-path peek line)
+  - zstd (Node ≥ 22.15) หรือ gzip, bomb guard (4 GiB / 1000×)
+  - ปิดเป็นค่าเริ่มต้น; ต้องเปิดทั้ง server และ client
+  - ข้อจำกัด: SSH ได้ ~1.0× (ใช้ `ssh -C`), `auto` ใช้ได้เฉพาะ mux
+  - รายละเอียด: `docs/spikes/compress-mux.md`
+
 ## [1.13.5] - 2026-11-19
 
 ### Changed

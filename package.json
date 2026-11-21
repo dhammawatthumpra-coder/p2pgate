@@ -1,6 +1,6 @@
 {
   "name": "p2pgate",
-  "version": "1.13.5",
+  "version": "1.13.6",
   "description": "Lightweight P2P TCP gateway for SSH over HyperDHT (single dependency)",
   "license": "Apache-2.0",
   "author": "incognitums",

@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
-อัปเดตล่าสุด: 2026-11-19
-สถานะ: **v1.13.5 released** (metadata: repo/npm ใหม่ `incognitums`)
+อัปเดตล่าสุด: 2026-11-21
+สถานะ: **v1.13.6 เตรียมไว้ — รอ publish**
 เจ้าของโปรเจกต์: incognitums
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -16,7 +16,7 @@
 วางข้อความนี้ใน session ใหม่:
 
 ```text
-โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.13.5)
+โปรเจกต์: D:\tunnel\p2pgate (p2pgate v1.13.6)
 อ่าน docs/HANDOFF.md ก่อน แล้วสรุปสถานะปัจจุบันและรอคำสั่ง
 ```
 
@@ -41,7 +41,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 |---|---|
 | Repo | https://github.com/incognitums/p2pgate |
 | npm | https://www.npmjs.com/package/p2pgate |
-| Release | https://github.com/incognitums/p2pgate/releases/tag/v1.13.5 |
+| Release | https://github.com/incognitums/p2pgate/releases/tag/v1.13.6 |
 
 **บัญชี npm:** `incognitums` = บัญชีหลัก (publish ทุกครั้ง), `dhammawatthumpra`
 = สำรอง (ยังเป็น owner เพื่อกู้คืน/สลับได้ แต่ไม่ใช้ publish ตามปกติ)
@@ -53,17 +53,17 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.13.5` (metadata: repo/npm ใหม่ `incognitums`) |
+| Version | `1.13.6` (เตรียมไว้ — รอ publish) |
 | npm `latest` | `1.13.5` |
 | Git branch | `main` |
-| Commit | `10e75e8 docs: record npm primary/backup accounts` |
-| Tag | `v1.13.5` |
-| GitHub Release | `v1.13.5` = Latest |
-| Working tree | clean หลัง commit docs |
-| Tests | `npm test` → PASSED (รวม compression checks ใหม่) |
+| Commit | `e0c705d fix(auth): fast-path peek dropped payload after the first newline` + `eda4cce` |
+| Tag | `v1.13.6` (จะสร้างหลัง publish) |
+| GitHub Release | `v1.13.5` = Latest (1.13.6 รอ) |
+| Working tree | มีการเตรียม release 1.13.6 |
+| Tests | `npm test` → PASSED (รวม compression + fastpath peek checks) |
 | src | 25 ไฟล์ (`src/mux.js`, `src/compress.js`), `src/self-test.js` ~2,620 บรรทัด |
 
-### 2.1 Prototype: compression บน mux channel (ยังไม่ปล่อย)
+### 2.1 Compression (opt-in, ต้องเปิดทั้งสองฝั่ง)
 
 - โค้ด: `src/compress.js` + mux negotiation ใน `src/client.js` / `src/server.js` (opt-in ทั้งสองฝั่ง)
 - เปิด: `p2pgate server --compress` และ `p2pgate connect --compress` (ต้อง mux; socks5 ได้ mux อยู่แล้ว)

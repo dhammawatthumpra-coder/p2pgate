@@ -32,6 +32,7 @@ Markdown for easier review and diffing.
 - [Soak test record](SOAK.md) — overnight run results and next-round template
 - [Running as a service](SERVICE.md) — Termux, systemd, Windows
 - [Release notes v1.13.5](releases/v1.13.5.md)
+- [Release notes v1.13.6](releases/v1.13.6.md)
 - [Release notes v1.13.4](releases/v1.13.4.md)
 - [Release notes v1.13.3](releases/v1.13.3.md)
 - [Release notes v1.13.2](releases/v1.13.2.md)
