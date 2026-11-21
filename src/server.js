@@ -62,7 +62,8 @@ const {
   pickAlgorithm,
   createCompressor,
   createDecompressor,
-  writeAndFlush
+  writeAndFlush,
+  guardDecompressor
 } = require('./compress')
 const {
   defaultControlSocketPath,
@@ -1527,6 +1528,15 @@ async function startServer(config, options = {}) {
       if (algorithm) {
         channel.compressor = createCompressor(algorithm)
         channel.decompressor = createDecompressor(algorithm)
+        channel.decompressorGuard = guardDecompressor(
+          channel.decompressor,
+          compressConfig,
+          (code) => {
+            writeLog(`MUX compression guard client=${remoteHex} channel=${channelId} ${code}`)
+            send(MUX_TYPE.RESET, MUX_FLAG.RESET, channelId)
+            cleanup(channelId)
+          }
+        )
 
         channel.compressor.on('data', (chunk) => {
           if (channel.finished) return
@@ -1648,6 +1658,7 @@ async function startServer(config, options = {}) {
           try {
             if (channel.decompressor) {
               channel.receivedBytes += frame.payload.length
+              if (channel.decompressorGuard) channel.decompressorGuard.countInput(frame.payload.length)
               channel.decompressor.write(frame.payload)
             } else {
               channel.socket.write(frame.payload)

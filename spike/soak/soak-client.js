@@ -30,6 +30,7 @@ const hours = Number(process.env.SOAK_HOURS || 4)
 const minutes = process.env.SOAK_MINUTES ? Number(process.env.SOAK_MINUTES) : null
 const durationMs = (minutes !== null ? minutes : hours * 60) * 60 * 1000
 const payloadBytes = Number(process.env.SOAK_KB || 256) * 1024
+const parallel = Math.max(1, Number(process.env.SOAK_PARALLEL || 1))
 const intervalMs = Number(process.env.SOAK_INTERVAL_SEC || 60) * 1000
 const restartMs = Number(process.env.SOAK_RESTART_MIN || 60) * 60 * 1000
 const outPath = process.env.SOAK_OUT || path.join(__dirname, 'soak.jsonl')
@@ -257,17 +258,19 @@ async function main () {
 
     try {
       if (kind === 'text') {
-        const payload = makeText(cycle, payloadBytes)
-        bytesIn += payload.length
-        await bulk(env.port, payload, kind)
+        const payloads = Array.from({ length: parallel }, (_, i) =>
+          makeText(cycle * 100 + i, payloadBytes))
+        bytesIn += payloads.reduce((sum, p) => sum + p.length, 0)
+        await Promise.all(payloads.map((payload) => bulk(env.port, payload, kind)))
       } else if (kind === 'log') {
-        const payload = makeLog(cycle, payloadBytes)
-        bytesIn += payload.length
-        await bulk(env.port, payload, kind)
+        const payloads = Array.from({ length: parallel }, (_, i) =>
+          makeLog(cycle * 100 + i, payloadBytes))
+        bytesIn += payloads.reduce((sum, p) => sum + p.length, 0)
+        await Promise.all(payloads.map((payload) => bulk(env.port, payload, kind)))
       } else if (kind === 'binary') {
-        const payload = makeBinary(payloadBytes)
-        bytesIn += payload.length
-        await bulk(env.port, payload, kind)
+        const payloads = Array.from({ length: parallel }, () => makeBinary(payloadBytes))
+        bytesIn += payloads.reduce((sum, p) => sum + p.length, 0)
+        await Promise.all(payloads.map((payload) => bulk(env.port, payload, kind)))
       } else if (kind === 'interactive') {
         detail = { maxLatencyMs: +(await interactive(env.port, 50)).toFixed(1) }
       } else {
@@ -298,6 +301,7 @@ async function main () {
       ok,
       ms: +cycleMs.toFixed(0),
       bytes: bytesIn,
+      parallel,
       rss: process.memoryUsage().rss,
       ...(detail || {}),
       ...(error ? { error } : {})

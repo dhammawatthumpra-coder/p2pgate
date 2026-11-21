@@ -32,11 +32,15 @@ const {
 } = require('./socks')
 const {
   COMPRESS_VERSION,
+  SAMPLE_BYTES,
+  SAMPLE_MS,
   availableAlgorithms,
   normalizeAlgorithmList,
   createCompressor,
   createDecompressor,
-  writeAndFlush
+  writeAndFlush,
+  guardDecompressor,
+  sampleCompressible
 } = require('./compress')
 const {
   AUTH_VERSION,
@@ -53,6 +57,42 @@ const {
 const CONNECT_TIMEOUT_MS = 12_000
 
 function noop() {}
+
+// Collects local socket data from the moment the channel is opened until the pipe is
+// ready, so the auto-mode probe can look at the first bytes without losing the rest.
+function createSocketBuffer(socket) {
+  const chunks = []
+  let bytes = 0
+  let closed = false
+
+  const onData = (chunk) => {
+    chunks.push(chunk)
+    bytes += chunk.length
+  }
+  const onEnd = () => { closed = true }
+
+  socket.on('data', onData)
+  socket.on('end', onEnd)
+
+  return {
+    async sample(maxBytes, maxMs) {
+      const started = Date.now()
+
+      while (bytes < maxBytes && !closed && !socket.readableEnded) {
+        if (Date.now() - started >= maxMs) break
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+
+      return Buffer.concat(chunks)
+    },
+    take() {
+      socket.removeListener('data', onData)
+      socket.removeListener('end', onEnd)
+      socket.pause()
+      return Buffer.concat(chunks)
+    }
+  }
+}
 
 function nowIso() {
   return new Date().toISOString()
@@ -917,6 +957,7 @@ async function startClient(config, options = {}) {
   const muxEnabled = resolveMuxEnabled(options, config, socksMode)
   const compressConfig = resolveCompressEnabled(options, config)
   const compressAlgorithms = compressConfig.algorithms
+  let autoCompressDecision = null
 
   async function requestMuxUpgrade(stream, capability) {
     try {
@@ -1063,11 +1104,11 @@ async function startClient(config, options = {}) {
     }
   }
 
-  function pipeMuxChannel(channel, socket, entry) {
+  function pipeMuxChannel(channel, socket, entry, initial) {
     const negotiated = channel.meta && channel.meta.compress && channel.meta.compress.algorithm
 
     if (negotiated) {
-      pipeCompressedMuxChannel(channel, socket, entry, negotiated)
+      pipeCompressedMuxChannel(channel, socket, entry, negotiated, initial)
       return
     }
 
@@ -1128,6 +1169,15 @@ async function startClient(config, options = {}) {
       socket.resume()
     })
 
+    // Data buffered during the auto-mode probe must go out before anything the socket
+    // emits after we resume it.
+    if (initial && initial.length > 0) {
+      if (!channel.write(initial)) {
+        paused = true
+        socket.pause()
+      }
+    }
+
     socket.on('data', (chunk) => {
       if (finished) return
 
@@ -1149,7 +1199,7 @@ async function startClient(config, options = {}) {
     })
   }
 
-  function pipeCompressedMuxChannel(channel, socket, entry, algorithm) {
+  function pipeCompressedMuxChannel(channel, socket, entry, algorithm, initial) {
     const record = entry || { socket, stream: null }
     if (!entry) activeConnections.add(record)
     record.stream = channel
@@ -1173,6 +1223,12 @@ async function startClient(config, options = {}) {
       if (!channel.closed) channel.destroy()
       return
     }
+
+    const guard = guardDecompressor(decompressor, compressConfig, (code) => {
+      writeLog(`compression guard tripped (${code}); closing channel`)
+      if (!socket.destroyed) socket.destroy()
+      if (!channel.closed) channel.destroy()
+    })
 
     const cleanup = () => {
       if (lingerTimer) {
@@ -1211,6 +1267,15 @@ async function startClient(config, options = {}) {
     compressor.on('end', () => {
       if (!channel.closed) channel.end()
     })
+
+    // Data buffered during the auto-mode probe must be compressed before the socket
+    // resumes, otherwise those bytes would be reordered or lost.
+    if (initial && initial.length > 0) {
+      if (!writeAndFlush(compressor, initial)) {
+        socketPaused = true
+        socket.pause()
+      }
+    }
 
     socket.on('data', (chunk) => {
       if (finished || compressor.destroyed) return
@@ -1258,6 +1323,7 @@ async function startClient(config, options = {}) {
 
     channel.on('data', (chunk) => {
       if (finished || decompressor.writableEnded || decompressor.destroyed) return
+      guard.countInput(chunk.length)
       decompressor.write(chunk)
     })
 
@@ -1311,6 +1377,45 @@ async function startClient(config, options = {}) {
     })
   }
 
+  function buildChannelRequest() {
+    const request = requestedTarget ? { target: requestedTarget } : {}
+
+    if (!compressConfig.enabled) return request
+    if (compressConfig.mode === 'auto' && autoCompressDecision === 'off') return request
+
+    request.compress = {
+      version: COMPRESS_VERSION,
+      algorithms: compressAlgorithms
+    }
+    return request
+  }
+
+  async function openCompressedChannel(carrier, socket) {
+    const probing = compressConfig.enabled &&
+      compressConfig.mode === 'auto' &&
+      autoCompressDecision === null
+
+    let channel = await carrier.openChannel(buildChannelRequest())
+    if (!probing) return { channel, sample: null }
+
+    const buffered = createSocketBuffer(socket)
+    const sample = socket.readableEnded
+      ? Buffer.alloc(0)
+      : await buffered.sample(SAMPLE_BYTES, SAMPLE_MS)
+
+    const usable = sampleCompressible(sample)
+    autoCompressDecision = usable ? 'on' : 'off'
+    writeLog(`compress auto=${usable ? 'on' : 'off'} sample=${sample.length}B`)
+
+    if (!usable) {
+      if (!channel.closed) channel.destroy()
+      channel = await carrier.openChannel(buildChannelRequest())
+    }
+
+    const initial = buffered.take()
+    return { channel, sample: initial.length > 0 ? initial : null }
+  }
+
   async function handleLocalSocket(socket, socksRequest = null) {
     if (closed) {
       socket.destroy()
@@ -1328,18 +1433,9 @@ async function startClient(config, options = {}) {
 
       if (carrier) {
         try {
-          const request = requestedTarget ? { target: requestedTarget } : {}
+          const opened = await openCompressedChannel(carrier, socket)
 
-          if (compressConfig.enabled) {
-            request.compress = {
-              version: COMPRESS_VERSION,
-              algorithms: compressAlgorithms
-            }
-          }
-
-          const channel = await carrier.openChannel(request)
-
-          pipeMuxChannel(channel, socket, entry)
+          pipeMuxChannel(opened.channel, socket, entry, opened.sample)
           return
         } catch (err) {
           writeLog(
@@ -1907,31 +2003,44 @@ function resolveMuxEnabled(options, config, socksMode) {
 }
 
 function resolveCompressEnabled(options, config) {
-  const configured = config && config.compress ? config.compress : null
+  const configured = config && config.compress ? config.compress : {}
   const baseAlgorithms = normalizeAlgorithmList(
-    configured && configured.algorithms,
+    configured.algorithms,
     availableAlgorithms()
   )
+  const limits = {
+    maxOutputBytes: configured.maxOutputBytes,
+    maxRatio: configured.maxRatio,
+    minRatioBytes: configured.minRatioBytes
+  }
 
-  if (options.compress === false) {
-    return { enabled: false, algorithms: baseAlgorithms }
+  if (options.compress === false || options.compress === 'off') {
+    return { enabled: false, mode: 'off', algorithms: baseAlgorithms, ...limits }
+  }
+
+  if (options.compress === 'auto') {
+    return { enabled: true, mode: 'auto', algorithms: baseAlgorithms, ...limits }
   }
 
   if (typeof options.compress === 'string') {
     const list = normalizeAlgorithmList([options.compress], baseAlgorithms)
     return {
       enabled: list.length > 0,
-      algorithms: list.length > 0 ? list : baseAlgorithms
+      mode: 'always',
+      algorithms: list.length > 0 ? list : baseAlgorithms,
+      ...limits
     }
   }
 
   if (options.compress === true) {
-    return { enabled: true, algorithms: baseAlgorithms }
+    return { enabled: true, mode: 'always', algorithms: baseAlgorithms, ...limits }
   }
 
   return {
-    enabled: Boolean(configured && configured.enabled === true),
-    algorithms: baseAlgorithms
+    enabled: configured.enabled === true,
+    mode: configured.mode === 'auto' ? 'auto' : 'always',
+    algorithms: baseAlgorithms,
+    ...limits
   }
 }
 

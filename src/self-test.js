@@ -63,7 +63,9 @@ const {
 } = require('./mux')
 const {
   normalizeCompressConfig,
-  pickAlgorithm
+  pickAlgorithm,
+  sampleCompressible,
+  guardDecompressor
 } = require('./compress')
 
 const noop = () => {}
@@ -2378,6 +2380,33 @@ async function main() {
     assert.equal(pickAlgorithm(['zstd'], ['gzip']), null)
     assert.equal(normalizeCompressConfig(false).enabled, false)
     assert.equal(normalizeCompressConfig(true).enabled, true)
+    assert.equal(normalizeCompressConfig('auto').mode, 'auto')
+    assert.equal(sampleCompressible(Buffer.from('compress me\n'.repeat(4000))), true)
+    assert.equal(sampleCompressible(crypto.randomBytes(8192)), false)
+
+    {
+      const fake = new PassThrough()
+      const trips = []
+      const guard = guardDecompressor(
+        fake,
+        { maxOutputBytes: 100, maxRatio: 1e9, minRatioBytes: 0 },
+        (code) => trips.push(code)
+      )
+      guard.countInput(1000)
+      fake.write(Buffer.alloc(200))
+      assert.deepEqual(trips, ['COMPRESS_OUTPUT_LIMIT'])
+
+      const fake2 = new PassThrough()
+      const trips2 = []
+      const guard2 = guardDecompressor(
+        fake2,
+        { maxOutputBytes: 1e9, maxRatio: 10, minRatioBytes: 100 },
+        (code) => trips2.push(code)
+      )
+      guard2.countInput(100)
+      fake2.write(Buffer.alloc(2000))
+      assert.deepEqual(trips2, ['COMPRESS_RATIO_LIMIT'])
+    }
     checks.push('compress negotiation picks a shared algorithm')
 
     const compressSecret = crypto.randomBytes(32).toString('hex')
@@ -2443,6 +2472,42 @@ async function main() {
     const randomBody = crypto.randomBytes(256 * 1024)
     assert.deepEqual(await echoThrough(compressClient, randomBody), randomBody)
     checks.push('compressed mux channel keeps incompressible data intact')
+
+    const echoWriteFirst = async (client, payload) => {
+      const socket = await connectLocal(client.address().port)
+      socket.write(payload)
+      const banner = await readExactly(socket, echoBanner.length, 15_000)
+      assert.deepEqual(banner, echoBanner)
+      const echoed = await readExactly(socket, payload.length, 15_000)
+      socket.destroy()
+      return echoed
+    }
+
+    const autoOffLogs = []
+    const autoOff = await startTestClient(unauthorizedKeyPath, unattendedPassword, {
+      base: { ...clientBase, masterSecret: compressSecret },
+      mux: true,
+      compress: 'auto',
+      log: (line) => autoOffLogs.push(String(line))
+    })
+    const autoBinary = crypto.randomBytes(256 * 1024)
+    assert.deepEqual(await echoWriteFirst(autoOff, autoBinary), autoBinary)
+    assert.ok(autoOffLogs.some((line) => line.includes('compress auto=off')))
+    checks.push('compress auto disables itself for incompressible data')
+    await autoOff.close()
+
+    const autoOnLogs = []
+    const autoOn = await startTestClient(unauthorizedKeyPath, unattendedPassword, {
+      base: { ...clientBase, masterSecret: compressSecret },
+      mux: true,
+      compress: 'auto',
+      log: (line) => autoOnLogs.push(String(line))
+    })
+    const autoText = Buffer.from('compressible mux channel line\n'.repeat(8192))
+    assert.deepEqual(await echoWriteFirst(autoOn, autoText), autoText)
+    assert.ok(autoOnLogs.some((line) => line.includes('compress auto=on')))
+    checks.push('compress auto enables itself for compressible data')
+    await autoOn.close()
 
     await compressClient.close()
     await compressServer.close()

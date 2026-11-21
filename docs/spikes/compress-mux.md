@@ -27,6 +27,21 @@ No new framing: the mux channel is already a byte stream, and the compressor out
 just bytes to it. Flow control keeps using the existing 256 KiB channel window, counted
 in *wire* bytes.
 
+### Auto mode
+
+`compress: "auto"` (or `{ enabled: true, mode: "auto" }`) samples the first 32 KiB or
+60 ms of a new client's first channel, compresses that sample in-process and keeps
+compression only when it shrinks by at least 10%. The decision is sticky for the process,
+so later channels pay no probe. When the sample is not compressible the probe channel is
+closed and reopened without compression before any payload leaves. The buffered bytes are
+written to the new channel before the socket resumes, so nothing is reordered.
+
+### Bomb guard
+
+Every decompressor counts input and output bytes. The channel is reset when output
+exceeds `maxOutputBytes` (default 4 GiB), or after 256 KiB of input when the expansion
+ratio exceeds `maxRatio` (default 1000). Both are configurable under `compress`.
+
 ### Half-close and tail flush
 
 Two bugs surfaced while testing and are fixed:
@@ -98,9 +113,12 @@ when the tunnel itself is the bottleneck, which is expected.
 
 ## Before this could ship
 
-1. Decide the default (off is the safe choice; `auto` needs the sampling policy).
-2. Add a decompression output cap per channel.
-3. Cover `--compress` in the CLI docs / `--help` (done) and the README config table.
-4. Decide whether to support non-mux tunnels (needs an in-band flag and a protocol bump).
+1. ~~`auto` sampling~~ done: first 32 KiB/60 ms probe, sticky per process.
+2. ~~Decompression output cap~~ done: 4 GiB / 1000× guards, configurable.
+3. Non-mux tunnels: **not done**. The fast-path peek reads the first bytes as payload, so
+   compression has to be negotiated before it and skipped for fast-path sessions. That
+   touches the auth/peek path (the area behind the 1.13.2/1.13.3 regressions) and needs
+   its own change with the fast-path matrix.
+4. Parallel-channel soak: 1 hour with 4 channels (`spike/soak/results.md`).
 5. ~~Soak~~ done: 4 hours, 240/240 cycles, 0 failures, flat RSS on both ends
    (`spike/soak/results.md`).

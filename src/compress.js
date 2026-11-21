@@ -11,6 +11,12 @@ const zlib = require('node:zlib')
 
 const COMPRESS_VERSION = 1
 const DEFAULT_LEVEL = 1
+const DEFAULT_MAX_OUTPUT_BYTES = 4 * 1024 * 1024 * 1024
+const DEFAULT_MAX_RATIO = 1000
+const DEFAULT_MIN_RATIO_BYTES = 256 * 1024
+const SAMPLE_BYTES = 32 * 1024
+const SAMPLE_MS = 60
+const SAMPLE_MIN_RATIO = 0.9
 
 function supportsZstd() {
   return typeof zlib.zstdCompressSync === 'function' &&
@@ -46,12 +52,37 @@ function normalizeAlgorithmList(list, fallback) {
 function normalizeCompressConfig(value, algorithms = availableAlgorithms()) {
   const allowed = normalizeAlgorithmList(algorithms, availableAlgorithms())
 
-  if (value === undefined || value === null || value === false) {
-    return { enabled: false, algorithms: allowed }
+  if (value === 'auto') {
+    return {
+      enabled: true,
+      mode: 'auto',
+      algorithms: allowed,
+      maxOutputBytes: DEFAULT_MAX_OUTPUT_BYTES,
+      maxRatio: DEFAULT_MAX_RATIO,
+      minRatioBytes: DEFAULT_MIN_RATIO_BYTES
+    }
+  }
+
+  if (value === undefined || value === null || value === false || value === 'off') {
+    return {
+      enabled: false,
+      mode: 'off',
+      algorithms: allowed,
+      maxOutputBytes: DEFAULT_MAX_OUTPUT_BYTES,
+      maxRatio: DEFAULT_MAX_RATIO,
+      minRatioBytes: DEFAULT_MIN_RATIO_BYTES
+    }
   }
 
   if (value === true) {
-    return { enabled: true, algorithms: allowed }
+    return {
+      enabled: true,
+      mode: 'always',
+      algorithms: allowed,
+      maxOutputBytes: DEFAULT_MAX_OUTPUT_BYTES,
+      maxRatio: DEFAULT_MAX_RATIO,
+      minRatioBytes: DEFAULT_MIN_RATIO_BYTES
+    }
   }
 
   if (typeof value === 'object' && !Array.isArray(value)) {
@@ -62,12 +93,92 @@ function normalizeCompressConfig(value, algorithms = availableAlgorithms()) {
       throw err
     }
 
-    return { enabled: value.enabled !== false, algorithms: list }
+    const mode = value.mode === 'auto' ? 'auto' : 'always'
+    const maxOutputBytes = Number.isInteger(value.maxOutputBytes) && value.maxOutputBytes > 0
+      ? value.maxOutputBytes
+      : DEFAULT_MAX_OUTPUT_BYTES
+    const maxRatio = Number.isFinite(value.maxRatio) && value.maxRatio >= 1
+      ? value.maxRatio
+      : DEFAULT_MAX_RATIO
+    const minRatioBytes = Number.isInteger(value.minRatioBytes) && value.minRatioBytes >= 0
+      ? value.minRatioBytes
+      : DEFAULT_MIN_RATIO_BYTES
+
+    return {
+      enabled: value.enabled !== false,
+      mode,
+      algorithms: list,
+      maxOutputBytes,
+      maxRatio,
+      minRatioBytes
+    }
   }
 
-  const err = new Error('compress must be a boolean or an object')
+  const err = new Error('compress must be a boolean, "auto", or an object')
   err.code = 'CONFIG_INVALID'
   throw err
+}
+
+/**
+ * Counts bytes through a decompressor and aborts when the stream expands past the
+ * configured limits (zip-bomb guard). The caller must report each compressed chunk
+ * with countInput().
+ */
+function guardDecompressor(stream, limits, onLimit) {
+  const maxOutputBytes = Number.isInteger(limits && limits.maxOutputBytes)
+    ? limits.maxOutputBytes
+    : DEFAULT_MAX_OUTPUT_BYTES
+  const maxRatio = Number.isFinite(limits && limits.maxRatio)
+    ? limits.maxRatio
+    : DEFAULT_MAX_RATIO
+  const minRatioBytes = Number.isInteger(limits && limits.minRatioBytes)
+    ? limits.minRatioBytes
+    : DEFAULT_MIN_RATIO_BYTES
+
+  let input = 0
+  let output = 0
+  let tripped = false
+
+  stream.on('data', (chunk) => {
+    if (tripped) return
+    output += chunk.length
+
+    const overBytes = output > maxOutputBytes
+    const overRatio = input >= minRatioBytes && output > input * maxRatio
+
+    if (overBytes || overRatio) {
+      tripped = true
+      onLimit(overBytes ? 'COMPRESS_OUTPUT_LIMIT' : 'COMPRESS_RATIO_LIMIT')
+    }
+  })
+
+  return {
+    countInput(bytes) {
+      input += bytes
+    },
+    stats() {
+      return { input, output, tripped }
+    }
+  }
+}
+
+/**
+ * Decides whether a byte sample is worth compressing. Returns true when the sample
+ * shrinks by at least 10%; empty/short samples are treated as compressible because
+ * interactive payloads are small and repetitive.
+ */
+function sampleCompressible(sample) {
+  if (!Buffer.isBuffer(sample) || sample.length < 1024) return true
+
+  try {
+    const packed = supportsZstd()
+      ? zlib.zstdCompressSync(sample, { params: { [zlib.constants.ZSTD_c_compressionLevel]: 1 } })
+      : zlib.gzipSync(sample, { level: 1 })
+
+    return packed.length <= sample.length * SAMPLE_MIN_RATIO
+  } catch {
+    return true
+  }
 }
 
 function pickAlgorithm(requested, allowed) {
@@ -144,6 +255,8 @@ function writeAndFlush(compressor, chunk) {
 module.exports = {
   COMPRESS_VERSION,
   DEFAULT_LEVEL,
+  SAMPLE_BYTES,
+  SAMPLE_MS,
   supportsZstd,
   availableAlgorithms,
   normalizeAlgorithm,
@@ -152,5 +265,7 @@ module.exports = {
   pickAlgorithm,
   createCompressor,
   createDecompressor,
-  writeAndFlush
+  writeAndFlush,
+  guardDecompressor,
+  sampleCompressible
 }
