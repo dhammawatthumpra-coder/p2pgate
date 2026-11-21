@@ -133,6 +133,19 @@ when the tunnel itself is the bottleneck, which is expected.
   zero-byte connection.
 - `spike/real-link/*`: the 4G measurements above.
 
+## Bug found while testing (pre-existing, fixed)
+
+The real-link fast-path test lost **65,518 bytes from a 64 MiB plain transfer** (same
+count every run). Cause: `peekControlLine()` returned `raw` = only the first line, while
+`leftover` held the bytes after the newline. The no-upgrade fast-path branch forwards
+`peek.raw` as payload, so everything after the first newline inside the peek window was
+dropped. `src/auth.js` now makes `raw` mean "everything read", and the self-test covers a
+payload with data after the first newline.
+
+This affected 1.13.5 fast-path sessions (trusted devices) whenever the first payload chunk
+arrived within the 200 ms peek and contained a newline plus more data — for example an
+HTTP request head followed by a body.
+
 ## Before this could ship
 
 1. ~~`auto` sampling~~ done: first 32 KiB/60 ms probe, sticky per process.

@@ -177,10 +177,13 @@ function peekControlLine(stream, options = {}) {
           return
         }
 
-        const raw = buffer.subarray(0, newline + 1)
-        const line = buffer.subarray(0, newline).toString('utf8').replace(/\r$/, '')
-        buffer = buffer.subarray(newline + 1)
-        finish(line, raw)
+        const full = buffer
+        const line = full.subarray(0, newline).toString('utf8').replace(/\r$/, '')
+        buffer = full.subarray(newline + 1)
+        // raw must be everything read, not just the line: callers forward it as
+        // payload when the bytes were not a control line (a payload line with
+        // more data after the newline would otherwise lose that tail).
+        finish(line, full)
         return
       }
 

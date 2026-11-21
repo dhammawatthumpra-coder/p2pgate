@@ -2616,6 +2616,22 @@ async function main() {
     assert.equal(immediateEcho.toString(), 'SSH-2.0-TEST\r\n')
     immediateSocket.destroy()
     checks.push('fast-path peek forwards an immediate line payload (SSH banner)')
+
+    // A payload line with more bytes after the newline inside the peek window used to
+    // lose everything after the first newline (65 KB of a 64 MiB transfer).
+    const multiLine = Buffer.from('line-one\nline-two\n'.repeat(2048))
+    const multiSocket = await connectLocal(fastPlainClient.address().port)
+    multiSocket.write(multiLine)
+    assert.deepEqual(
+      await readExactly(multiSocket, echoBanner.length, 15_000),
+      echoBanner
+    )
+    assert.deepEqual(
+      await readExactly(multiSocket, multiLine.length, 15_000),
+      multiLine
+    )
+    multiSocket.destroy()
+    checks.push('fast-path peek keeps payload bytes after the first newline')
     await fastPlainClient.close()
 
     // --target must be honored on the fast path. It used to fall back to

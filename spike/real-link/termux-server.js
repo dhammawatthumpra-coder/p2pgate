@@ -70,7 +70,7 @@ async function main () {
     clientKeyPath: path.join(dir, 'server-key.json'),
     allowedClientKeys: [],
     verificationMode: 'hybrid',
-    trustedDevicesFile: path.join(dir, 'trusted_devices'),
+    trustedDevicesFile: process.env.TRUSTED_FILE || path.join(dir, 'trusted_devices'),
     auditLog: { enabled: false },
     customBootstrap: [],
     authPin: { enabled: true, unattended: verifier },
@@ -82,7 +82,10 @@ async function main () {
   await generateClientKey(config.clientKeyPath)
 
   const server = await startServer(config, {
-    log: () => {}, showSessionPin: false, sendStartupAlert: false, interactive: false
+    log: process.env.SERVER_LOG === '1' ? (m) => console.log(m) : () => {},
+    showSessionPin: false,
+    sendStartupAlert: false,
+    interactive: false
   })
 
   const monitor = setInterval(() => {

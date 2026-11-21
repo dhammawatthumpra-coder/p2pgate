@@ -29,8 +29,9 @@ async function main () {
   const sha256 = crypto.createHash('sha256').update(buf).digest('hex')
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'p2p-link-'))
-  const clientKeyPath = path.join(dir, 'client-key.json')
-  await generateClientKey(clientKeyPath)
+  const clientKeyPath = process.env.CLIENT_KEY || path.join(dir, 'client-key.json')
+  fs.mkdirSync(path.dirname(clientKeyPath), { recursive: true })
+  if (!fs.existsSync(clientKeyPath)) await generateClientKey(clientKeyPath)
 
   const config = {
     mode: 'client',
@@ -50,7 +51,8 @@ async function main () {
   }
 
   const client = await startClient(config, {
-    log: () => {}, credential: password, mux: useMux, compress: useCompress
+    log: () => {}, credential: password, mux: useMux, compress: useCompress,
+    target: process.env.TARGET || undefined
   })
 
   const socket = net.createConnection({ host: '127.0.0.1', port: client.address().port })

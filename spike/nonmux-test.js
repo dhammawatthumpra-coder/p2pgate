@@ -116,7 +116,9 @@ async function runCase ({ label, serverCompress, clientCompress, fastpath, targe
     }
   )
 
-  const payload = Buffer.from('compressible non-mux line\n'.repeat(16384))
+  const payload = Buffer.from(
+    'compressible non-mux line\n'.repeat(Number(process.env.REPEAT || 16384))
+  )
   const socket = net.createConnection({ host: '127.0.0.1', port: client.address().port })
   await new Promise((r) => socket.once('connect', r))
   let received = 0
@@ -156,6 +158,7 @@ async function main () {
   rows.push(await runCase({ label: 'challenge, server off', serverCompress: false, clientCompress: true }))
   rows.push(await runCase({ label: 'fastpath + compress', serverCompress: true, clientCompress: true, fastpath: true }))
   rows.push(await runCase({ label: 'fastpath + target + compress', serverCompress: true, clientCompress: true, fastpath: true, target: 'default' }))
+  rows.push(await runCase({ label: 'fastpath plain', serverCompress: false, clientCompress: false, fastpath: true }))
 
   const pass = rows.every((r) => r.ok) &&
     rows[0].compress === true &&
