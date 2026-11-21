@@ -1,7 +1,7 @@
 # p2pgate — Handoff
 
 อัปเดตล่าสุด: 2026-11-21
-สถานะ: **v1.13.7 เตรียมไว้ — docs release (compression ใน README) รอ publish**
+สถานะ: **v1.13.7 released** (docs: compression ใน README)
 เจ้าของโปรเจกต์: incognitums
 
 เอกสารนี้เขียนไว้ให้เปิด session ใหม่แล้วทำงานต่อได้ทันทีโดยไม่ต้องไล่ประวัติแชท
@@ -53,13 +53,13 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 
 | รายการ | ค่า |
 |---|---|
-| Version | `1.13.7` (เตรียมไว้ — รอ publish) |
-| npm `latest` | `1.13.6` (published 2026-11-21) |
+| Version | `1.13.7` |
+| npm `latest` | `1.13.7` (published 2026-11-21) |
 | Git branch | `main` |
-| Commit | `0b69def docs: v1.13.6 published` + release prep 1.13.7 |
-| Tag | `v1.13.6` (1.13.7 จะสร้างหลัง publish) |
-| GitHub Release | `v1.13.6` = Latest (1.13.7 รอ) |
-| Working tree | มีการเตรียม release 1.13.7 (docs) |
+| Commit | `08cea90 release tooling + README compression docs` |
+| Tag | `v1.13.7` |
+| GitHub Release | `v1.13.7` = Latest |
+| Working tree | clean หลัง release |
 | Tests | `npm test` → PASSED (รวม compression + fastpath peek checks) |
 | src | 25 ไฟล์ (`src/mux.js`, `src/compress.js`), `src/self-test.js` ~2,620 บรรทัด |
 
