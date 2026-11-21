@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/p2pgate.svg)](https://www.npmjs.com/package/p2pgate)
 [![license](https://img.shields.io/npm/l/p2pgate.svg)](LICENSE)
 [![Node.js](https://img.shields.io/node/v/p2pgate.svg)](package.json)
-[![Socket](https://badge.socket.dev/npm/package/p2pgate?v=1.13.6)](https://socket.dev/npm/package/p2pgate)
+[![Socket](https://badge.socket.dev/npm/package/p2pgate?v=1.13.7)](https://socket.dev/npm/package/p2pgate)
 
 A small peer-to-peer TCP tunnel for reaching SSH and other loopback services on
 a device behind CGNAT or a firewall without exposing an inbound port. It
@@ -849,6 +849,33 @@ advertises mux in `FASTPATH_READY`, the client asks for the upgrade immediately,
 the server waits at most 200 ms for that line before forwarding bytes to the target.
 Older servers simply do not advertise it and the client falls back quietly.
 
+## 9.12) Compression (`--compress`, optional)
+
+```sh
+# server
+p2pgate server --compress
+
+# client (mux or a dedicated tunnel)
+p2pgate connect -s <secret> -p <password> --compress
+p2pgate connect -s <secret> -p <password> --compress --mux
+```
+
+- **off by default**; both ends must enable it
+- zstd when the Node build has it (>= 22.15), gzip otherwise
+- works on mux channels and non-mux tunnels, including trusted-device (fast path) sessions
+- `"compress": "auto"` samples the first 32 KiB / 60 ms and stays off for incompressible
+  data (mux only)
+- decompression guard: 4 GiB output or 1000x expansion per channel
+- measured on a 4G link: 64 MiB of text/logs **2.4-2.6x** faster; already-compressed
+  files (jpg/mp4/zip) ~1.0x
+- SSH payloads are encrypted by sshd, so this cannot help them — use `ssh -C`
+
+Config form:
+
+```json
+"compress": { "enabled": true, "algorithms": ["zstd", "gzip"] }
+```
+
 ---
 
 ## 10) Requirements
@@ -1384,7 +1411,7 @@ p2pgate/
 │   │   ├── v1.13.2.md
 │   │   ├── v1.13.3.md
 │   │   ├── v1.13.4.md
-│   │   └── v1.13.6.md
+│   │   └── v1.13.7.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md

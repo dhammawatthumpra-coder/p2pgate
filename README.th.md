@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/p2pgate.svg)](https://www.npmjs.com/package/p2pgate)
 [![license](https://img.shields.io/npm/l/p2pgate.svg)](LICENSE)
 [![Node.js](https://img.shields.io/node/v/p2pgate.svg)](package.json)
-[![Socket](https://badge.socket.dev/npm/package/p2pgate?v=1.13.6)](https://socket.dev/npm/package/p2pgate)
+[![Socket](https://badge.socket.dev/npm/package/p2pgate?v=1.13.7)](https://socket.dev/npm/package/p2pgate)
 
 อุโมงค์ TCP แบบ P2P ขนาดเล็ก สำหรับเข้าถึง SSH และ service อื่น ๆ บนเครื่องที่อยู่หลัง
 CGNAT/ไฟร์วอลล์ โดยไม่ต้องเปิดพอร์ตออกสู่อินเทอร์เน็ต พร้อม **Mutual SCRAM**,
@@ -828,6 +828,32 @@ p2pgate client --config client.json --mux
 capability ใน `FASTPATH_READY`, client ขอ upgrade ทันที, server รอไม่เกิน 200 ms
 ก่อน forward ไบต์ไป target ถ้า server เก่ากว่า (ไม่ประกาศ) client จะ fallback เงียบ ๆ
 
+## 9.12) Compression (`--compress`, ไม่บังคับ)
+
+```sh
+# server
+p2pgate server --compress
+
+# client (mux หรือ tunnel ปกติ)
+p2pgate connect -s <secret> -p <password> --compress
+p2pgate connect -s <secret> -p <password> --compress --mux
+```
+
+- **ปิดเป็นค่าเริ่มต้น**; ต้องเปิดทั้ง server และ client
+- ใช้ zstd ถ้า Node รองรับ (>= 22.15) ไม่งั้นใช้ gzip
+- รองรับทั้ง mux channel และ non-mux tunnel รวมถึง trusted device (fast path)
+- `"compress": "auto"` สุ่มตัวอย่าง 32 KiB / 60 ms แล้วปิดเองถ้าข้อมูลบีบอัดไม่ได้ (mux เท่านั้น)
+- มี decompression guard: output 4 GiB หรือขยายเกิน 1000x ต่อ channel
+- วัดบนลิงก์ 4G: text/log 64 MiB เร็วขึ้น **2.4-2.6 เท่า**; ไฟล์ที่บีบอัดแล้ว
+  (jpg/mp4/zip) ~1.0 เท่า
+- ข้อมูล SSH ถูกเข้ารหัสโดย sshd อยู่แล้ว จึงไม่ช่วย — ใช้ `ssh -C` แทน
+
+รูปแบบใน config:
+
+```json
+"compress": { "enabled": true, "algorithms": ["zstd", "gzip"] }
+```
+
 ---
 
 ## 10) สิ่งที่ต้องมี
@@ -1357,7 +1383,7 @@ p2pgate/
 │   │   ├── v1.13.2.md
 │   │   ├── v1.13.3.md
 │   │   ├── v1.13.4.md
-│   │   └── v1.13.6.md
+│   │   └── v1.13.7.md
 │   └── specs/
 │       ├── phase2-v1.1.md
 │       ├── phase3-v1.2.md

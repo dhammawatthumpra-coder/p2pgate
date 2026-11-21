@@ -7,6 +7,14 @@
 
 - รอผลทดสอบ long-running และการสลับเครือข่าย
 
+## [1.13.7] - 2026-11-21
+
+### Changed
+
+- README (EN/TH): เพิ่มหัวข้อ **9.12 Compression (`--compress`)** — วิธีเปิด,
+  config, ข้อจำกัด (SSH ใช้ `ssh -C`, `auto` mux-only), ผลวัดบน 4G
+- `config.example.json`: เพิ่มตัวอย่าง `compress` (ปิดเป็นค่าเริ่มต้น)
+
 ## [1.13.6] - 2026-11-21
 
 ### Fixed
