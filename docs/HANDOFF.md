@@ -54,7 +54,7 @@ inbound port ทำงานบน HyperDHT (Noise) พร้อม SCRAM mutual
 | รายการ | ค่า |
 |---|---|
 | Version | `1.13.6` |
-| npm `latest` | `1.13.6` (อาจยัง propagate 5–30 นาที) |
+| npm `latest` | `1.13.6` (published 2026-11-21) |
 | Git branch | `main` |
 | Commit | `380dad7 release: v1.13.6` |
 | Tag | `v1.13.6` |
