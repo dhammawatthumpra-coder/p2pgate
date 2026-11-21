@@ -75,6 +75,38 @@ interactive case (50 round trips on one connection), not a stalled bulk transfer
 3. Non-mux tunnels are not covered.
 4. A longer soak with parallel channels (this run used one channel at a time).
 
+## Parallel channels (1 hour, 4 at a time)
+
+Same harness with `SOAK_PARALLEL=4`: every bulk case opens four channels concurrently,
+each 256 KiB and echoed.
+
+| Metric | Value |
+|---|---|
+| Cycles | 60 |
+| Failures | **0** |
+| Restarts | 0 |
+| Connections | 168 |
+| Data | 37.9 MB each direction |
+
+| Case (4 × 256 KiB) | p50 | p95 | max |
+|---|---|---|---|
+| text | 440 ms | 840 ms | 1101 ms |
+| log | 459 ms | 1623 ms | 2879 ms |
+| binary | 977 ms | 1329 ms | 1338 ms |
+| interactive (50 RT) | 2651 ms | 3584 ms | 4059 ms |
+| abrupt reset | 46 ms | 49 ms | 52 ms |
+
+Per-round-trip latency under parallel load: p50 257 ms, max 609 ms (single-channel run:
+178 / 699 ms).
+
+Aggregate throughput for text improved from **1.0 MB/s** (one 256 KiB transfer at a time,
+p50 254 ms) to **2.3 MB/s** (four at once, 1 MiB in 440 ms). The single channel was limited
+by per-transfer latency, not by the link; four channels overlap those round trips. A single
+large transfer still reaches ~4.5 MB/s.
+
+Memory stayed flat: client RSS 76.9 → 78.2 MB (max 82.1), server 57.2 → 64.3 MB, server
+heap 10.3 → 9.3 MB (max 10.3).
+
 ## Reproduce
 
 ```powershell
